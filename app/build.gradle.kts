@@ -100,6 +100,9 @@ dependencies {
     // Lottie for animations
     implementation("com.airbnb.android:lottie-compose:6.6.2")
 
+    // OkHttp for model downloads
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

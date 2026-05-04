@@ -19,3 +19,7 @@
 app/.cxx/
 build_log*.txt
 *.apk
+
+app/src/main/cpp/llama.cpp/
+app/src/main/cpp/whisper.cpp/
+models/

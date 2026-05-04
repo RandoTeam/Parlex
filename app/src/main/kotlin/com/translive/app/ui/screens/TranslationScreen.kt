@@ -32,7 +32,7 @@ import com.translive.app.ui.viewmodel.TranslationViewModel
 @Composable
 fun TranslationScreen(
     onNavigateToDialogue: () -> Unit,
-    onNavigateToHistory: () -> Unit,
+    onNavigateToModels: () -> Unit,
     viewModel: TranslationViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -64,9 +64,9 @@ fun TranslationScreen(
                 )
                 NavigationBarItem(
                     selected = false,
-                    onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    onClick = onNavigateToModels,
+                    icon = { Icon(Icons.Filled.Storage, "Models") },
+                    label = { Text("Модели") }
                 )
             }
         }
@@ -92,7 +92,7 @@ fun TranslationScreen(
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
                 Text(
-                    text = "TransLive",
+                    text = "Parlex",
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.primary
                 )

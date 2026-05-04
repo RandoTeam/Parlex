@@ -3,6 +3,7 @@ package com.translive.app.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.translive.app.data.ModelRepository
 import com.translive.app.data.db.TranslationDao
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.TranslationEntry
@@ -11,7 +12,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.io.File
 import javax.inject.Inject
 
 data class TranslationUiState(
@@ -22,6 +22,7 @@ data class TranslationUiState(
     val isTranslating: Boolean = false,
     val isModelLoaded: Boolean = false,
     val isModelLoading: Boolean = false,
+    val activeModelName: String? = null,
     val error: String? = null
 )
 
@@ -29,7 +30,8 @@ data class TranslationUiState(
 class TranslationViewModel @Inject constructor(
     private val app: Application,
     private val engine: TranslationEngine,
-    private val translationDao: TranslationDao
+    private val translationDao: TranslationDao,
+    private val modelRepository: ModelRepository
 ) : AndroidViewModel(app) {
 
     private val _uiState = MutableStateFlow(TranslationUiState())
@@ -49,33 +51,33 @@ class TranslationViewModel @Inject constructor(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val modelDir = File(app.filesDir, "models")
-                val modelFile = File(modelDir, "hy-mt1.5-1.8b-2bit.gguf")
+                val modelPath = modelRepository.getActiveModelPath()
+                val activeVariant = modelRepository.getActiveVariant()
 
-                if (!modelFile.exists()) {
+                if (modelPath == null) {
                     _uiState.update {
                         it.copy(
                             isModelLoading = false,
-                            error = "Model file not found at ${modelFile.absolutePath}. " +
-                                    "Please download and place the GGUF file there."
+                            error = "Модель не выбрана. Откройте вкладку 'Модели' для скачивания."
                         )
                     }
                     return@launch
                 }
 
                 val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
-                val loaded = engine.loadModel(modelFile.absolutePath, threads)
+                val loaded = engine.loadModel(modelPath, threads)
 
                 _uiState.update {
                     it.copy(
                         isModelLoaded = loaded,
                         isModelLoading = false,
-                        error = if (!loaded) "Failed to load model" else null
+                        activeModelName = if (loaded) activeVariant?.quantName else null,
+                        error = if (!loaded) "Не удалось загрузить модель" else null
                     )
                 }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(isModelLoading = false, error = "Load error: ${e.message}")
+                    it.copy(isModelLoading = false, error = "Ошибка загрузки: ${e.message}")
                 }
             }
         }
