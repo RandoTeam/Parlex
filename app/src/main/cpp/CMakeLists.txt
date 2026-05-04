@@ -29,7 +29,6 @@ if(EXISTS "${LLAMA_CPP_DIR}/CMakeLists.txt")
     target_link_libraries(translive
         llama
         ggml
-        common
         android
         log
     )

@@ -15,3 +15,7 @@
 /models/
 
 .vscode/
+
+app/.cxx/
+build_log*.txt
+*.apk

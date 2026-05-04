@@ -9,9 +9,9 @@
 
 #include <jni.h>
 #include <string>
+#include <vector>
 #include <android/log.h>
 #include "llama.h"
-#include "common.h"
 
 #define TAG "TransLive-JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
@@ -119,8 +119,8 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     }
     tokens.resize(n_tokens);
 
-    // Clear KV cache
-    llama_kv_cache_clear(tlctx->ctx);
+    // Clear memory (KV cache)
+    llama_memory_clear(llama_get_memory(tlctx->ctx), true);
 
     // Create batch and process prompt
     llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);

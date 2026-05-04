@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fallback for pre-API 26: simple colored square -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path android:fillColor="#0A2463" android:pathData="M0,0h48v48H0z"/>
+    <path android:fillColor="#1DE9B6" android:pathData="M24,8A16,16,0,1,1,24,40A16,16,0,1,1,24,8z"/>
+</vector>
