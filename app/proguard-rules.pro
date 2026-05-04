@@ -1,0 +1,2 @@
+-dontwarn javax.annotation.**
+-keep class com.translive.app.native.** { *; }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base app theme (Compose handles actual theming) -->
+    <style name="Theme.TransLive" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@color/dark_surface</item>
+        <item name="android:navigationBarColor">@color/dark_surface</item>
+    </style>
+
+    <!-- Splash screen theme -->
+    <style name="Theme.TransLive.Splash" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="postSplashScreenTheme">@style/Theme.TransLive</item>
+    </style>
+</resources>

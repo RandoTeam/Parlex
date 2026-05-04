@@ -1,0 +1,17 @@
+# TransLive — built files, models, secrets
+*.apk
+*.aab
+*.gguf
+*.bin
+*.so
+*.o
+/build/
+/app/build/
+/.gradle/
+/local.properties
+/.idea/
+*.iml
+/app/src/main/cpp/llama.cpp/
+/models/
+
+.vscode/

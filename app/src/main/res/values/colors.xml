@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="deep_blue">#0A2463</color>
+    <color name="teal">#1DE9B6</color>
+    <color name="dark_surface">#0D1117</color>
+    <color name="dark_surface_variant">#161B22</color>
+    <color name="soft_white">#F0F6FC</color>
+
+    <!-- Splash screen -->
+    <color name="splash_background">#0D1117</color>
+</resources>
