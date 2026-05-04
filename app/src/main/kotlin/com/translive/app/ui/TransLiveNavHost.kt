@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.translive.app.ui.screens.DialogueScreen
 import com.translive.app.ui.screens.ModelManagerScreen
 import com.translive.app.ui.screens.TranslationScreen
 
@@ -19,7 +20,14 @@ fun TransLiveNavHost() {
             )
         }
         composable("dialogue") {
-            // Phase 2: DialogueScreen
+            DialogueScreen(
+                onNavigateToTranslate = {
+                    navController.navigate("translate") {
+                        popUpTo("translate") { inclusive = true }
+                    }
+                },
+                onNavigateToModels = { navController.navigate("models") }
+            )
         }
         composable("models") {
             ModelManagerScreen(
