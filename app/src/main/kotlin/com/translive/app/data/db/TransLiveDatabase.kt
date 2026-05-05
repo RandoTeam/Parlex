@@ -23,8 +23,29 @@ interface TranslationDao {
     @Query("SELECT * FROM translation_history WHERE isFavorite = 1 ORDER BY timestamp DESC")
     fun getFavorites(): Flow<List<TranslationEntry>>
 
+    @Query("SELECT * FROM translation_history ORDER BY timestamp DESC")
+    fun getAllTranslations(): Flow<List<TranslationEntry>>
+
+    @Query("""
+        SELECT * FROM translation_history 
+        WHERE sourceText LIKE '%' || :query || '%' 
+           OR translatedText LIKE '%' || :query || '%'
+        ORDER BY timestamp DESC
+    """)
+    fun searchTranslations(query: String): Flow<List<TranslationEntry>>
+
+    @Query("""
+        SELECT * FROM translation_history 
+        WHERE sourceLanguage = :source AND targetLanguage = :target
+        ORDER BY timestamp DESC
+    """)
+    fun getByLanguagePair(source: String, target: String): Flow<List<TranslationEntry>>
+
     @Query("DELETE FROM translation_history WHERE isFavorite = 0")
     suspend fun clearNonFavoriteHistory()
+
+    @Query("DELETE FROM translation_history WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }
 
 @Dao
@@ -35,11 +56,25 @@ interface DialogueDao {
     @Insert
     suspend fun insertMessage(message: DialogueMessage): Long
 
+    @Update
+    suspend fun updateMessage(message: DialogueMessage)
+
     @Query("SELECT * FROM dialogue_sessions ORDER BY updatedAt DESC")
     fun getAllSessions(): Flow<List<DialogueSession>>
 
     @Query("SELECT * FROM dialogue_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     fun getMessagesForSession(sessionId: Long): Flow<List<DialogueMessage>>
+
+    @Query("SELECT * FROM dialogue_messages WHERE isFavorite = 1 ORDER BY timestamp DESC")
+    fun getFavoriteMessages(): Flow<List<DialogueMessage>>
+
+    @Query("""
+        SELECT * FROM dialogue_messages 
+        WHERE originalText LIKE '%' || :query || '%' 
+           OR translatedText LIKE '%' || :query || '%'
+        ORDER BY timestamp DESC
+    """)
+    fun searchMessages(query: String): Flow<List<DialogueMessage>>
 
     @Query("UPDATE dialogue_sessions SET updatedAt = :time WHERE id = :sessionId")
     suspend fun updateSessionTime(sessionId: Long, time: Long = System.currentTimeMillis())
@@ -49,11 +84,17 @@ interface DialogueDao {
 
     @Query("DELETE FROM dialogue_messages WHERE sessionId = :sessionId")
     suspend fun deleteMessagesForSession(sessionId: Long)
+
+    @Query("DELETE FROM dialogue_messages WHERE id = :id")
+    suspend fun deleteMessageById(id: Long)
+
+    @Query("SELECT COUNT(*) FROM dialogue_messages WHERE sessionId = :sessionId")
+    suspend fun getMessageCount(sessionId: Long): Int
 }
 
 @Database(
     entities = [TranslationEntry::class, DialogueSession::class, DialogueMessage::class],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class TransLiveDatabase : RoomDatabase() {

@@ -33,5 +33,6 @@ data class DialogueMessage(
     val translatedText: String,
     val originalLanguage: String,
     val translatedLanguage: String,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val isFavorite: Boolean = false
 )

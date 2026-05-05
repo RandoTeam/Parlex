@@ -34,6 +34,7 @@ import com.translive.app.ui.viewmodel.TranslationViewModel
 @Composable
 fun TranslationScreen(
     onNavigateToDialogue: () -> Unit,
+    onNavigateToHistory: () -> Unit,
     onNavigateToModels: () -> Unit,
     onNavigateToSettings: () -> Unit,
     viewModel: TranslationViewModel = hiltViewModel()
@@ -66,6 +67,12 @@ fun TranslationScreen(
                     onClick = onNavigateToDialogue,
                     icon = { Icon(Icons.Filled.Mic, "Dialogue") },
                     label = { Text("Диалог") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToHistory,
+                    icon = { Icon(Icons.Filled.History, "History") },
+                    label = { Text("История") }
                 )
                 NavigationBarItem(
                     selected = false,

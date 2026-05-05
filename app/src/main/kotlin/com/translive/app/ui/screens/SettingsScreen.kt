@@ -25,6 +25,7 @@ import com.translive.app.ui.viewmodel.SettingsViewModel
 fun SettingsScreen(
     onNavigateToTranslate: () -> Unit,
     onNavigateToDialogue: () -> Unit,
+    onNavigateToHistory: () -> Unit,
     onNavigateToModels: () -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -49,6 +50,12 @@ fun SettingsScreen(
                     onClick = onNavigateToDialogue,
                     icon = { Icon(Icons.Filled.Mic, "Dialogue") },
                     label = { Text("Диалог") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToHistory,
+                    icon = { Icon(Icons.Filled.History, "History") },
+                    label = { Text("История") }
                 )
                 NavigationBarItem(
                     selected = false,

@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
+import com.translive.app.data.db.DialogueDao
+import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.Language
 import com.translive.app.engine.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,8 +13,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import com.translive.app.data.model.DialogueMessage as DbDialogueMessage
 
-data class DialogueMessage(
+/** UI-layer message (not Room entity) */
+data class DialogueUiMessage(
     val sourceText: String,
     val translatedText: String,
     val sourceLang: String,  // "ru" or "en"
@@ -20,16 +24,16 @@ data class DialogueMessage(
 )
 
 enum class DialoguePhase {
-    IDLE,        // Not started
-    LISTENING,   // Microphone active, waiting for speech
-    RECOGNIZING, // VAD detected speech end, running Whisper
-    TRANSLATING, // Translating recognized text
-    SPEAKING,    // Playing TTS
+    IDLE,
+    LISTENING,
+    RECOGNIZING,
+    TRANSLATING,
+    SPEAKING,
     ERROR
 }
 
 data class DialogueUiState(
-    val messages: List<DialogueMessage> = emptyList(),
+    val messages: List<DialogueUiMessage> = emptyList(),
     val phase: DialoguePhase = DialoguePhase.IDLE,
     val isConversationActive: Boolean = false,
     val isTranslationModelReady: Boolean = false,
@@ -46,13 +50,17 @@ class DialogueViewModel @Inject constructor(
     private val engine: TranslationEngine,
     private val modelRepository: ModelRepository,
     private val ttsEngine: TtsEngine,
-    private val speechEngine: SpeechEngine
+    private val speechEngine: SpeechEngine,
+    private val dialogueDao: DialogueDao
 ) : AndroidViewModel(app) {
 
     private val _uiState = MutableStateFlow(DialogueUiState())
     val uiState: StateFlow<DialogueUiState> = _uiState.asStateFlow()
 
     val ttsState: StateFlow<TtsState> = ttsEngine.state
+
+    /** Current session ID in Room */
+    private var currentSessionId: Long? = null
 
     init {
         viewModelScope.launch {
@@ -78,6 +86,15 @@ class DialogueViewModel @Inject constructor(
             if (!ttsEngine.isModelReady.value) {
                 ttsEngine.loadModel()
             }
+
+            // Create a Room session
+            val state = _uiState.value
+            val session = DialogueSession(
+                languageA = state.sourceLanguage.code,
+                languageB = state.targetLanguage.code,
+                title = "${state.sourceLanguage.flag} ↔ ${state.targetLanguage.flag}"
+            )
+            currentSessionId = dialogueDao.insertSession(session)
         }
 
         _uiState.update {
@@ -96,6 +113,16 @@ class DialogueViewModel @Inject constructor(
     fun stopConversation() {
         speechEngine.stopListening()
         ttsEngine.stop()
+
+        // Update session timestamp
+        val sessionId = currentSessionId
+        if (sessionId != null) {
+            viewModelScope.launch(Dispatchers.IO) {
+                dialogueDao.updateSessionTime(sessionId)
+            }
+        }
+        currentSessionId = null
+
         _uiState.update {
             it.copy(
                 isConversationActive = false,
@@ -111,7 +138,6 @@ class DialogueViewModel @Inject constructor(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Determine translation direction
                 val state = _uiState.value
                 val fromLang: Language
                 val toLang: Language
@@ -124,14 +150,13 @@ class DialogueViewModel @Inject constructor(
                     toLang = state.sourceLanguage
                 }
 
-                // Translate
                 val translated = engine.translate(
                     sourceText = result.text,
                     source = fromLang,
                     target = toLang
                 ).trim()
 
-                val message = DialogueMessage(
+                val uiMessage = DialogueUiMessage(
                     sourceText = result.text,
                     translatedText = translated,
                     sourceLang = result.language,
@@ -140,19 +165,33 @@ class DialogueViewModel @Inject constructor(
 
                 _uiState.update {
                     it.copy(
-                        messages = it.messages + message,
+                        messages = it.messages + uiMessage,
                         phase = DialoguePhase.SPEAKING
                     )
+                }
+
+                // Save to Room
+                val sessionId = currentSessionId
+                if (sessionId != null) {
+                    val dbMsg = DbDialogueMessage(
+                        sessionId = sessionId,
+                        speaker = result.language.uppercase(),
+                        originalText = result.text,
+                        translatedText = translated,
+                        originalLanguage = result.language,
+                        translatedLanguage = if (result.language == "ru") "en" else "ru"
+                    )
+                    dialogueDao.insertMessage(dbMsg)
+                    dialogueDao.updateSessionTime(sessionId)
                 }
 
                 // Speak the translation
                 if (ttsEngine.isModelReady.value) {
                     ttsEngine.speak(translated)
-                    // Wait for TTS to finish before resuming listening
                     ttsEngine.state.first { it != TtsState.SPEAKING }
                 }
 
-                // Resume listening state
+                // Resume listening
                 if (_uiState.value.isConversationActive) {
                     _uiState.update { it.copy(phase = DialoguePhase.LISTENING) }
                 }

@@ -24,13 +24,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.translive.app.ui.viewmodel.DialogueMessage
+import com.translive.app.ui.viewmodel.DialogueUiMessage
 import com.translive.app.ui.viewmodel.DialoguePhase
 import com.translive.app.ui.viewmodel.DialogueViewModel
 
 @Composable
 fun DialogueScreen(
     onNavigateToTranslate: () -> Unit,
+    onNavigateToHistory: () -> Unit,
     onNavigateToModels: () -> Unit,
     onNavigateToSettings: () -> Unit,
     viewModel: DialogueViewModel = hiltViewModel()
@@ -62,6 +63,12 @@ fun DialogueScreen(
                     onClick = { },
                     icon = { Icon(Icons.Filled.Mic, "Dialogue") },
                     label = { Text("Диалог") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToHistory,
+                    icon = { Icon(Icons.Filled.History, "History") },
+                    label = { Text("История") }
                 )
                 NavigationBarItem(
                     selected = false,
@@ -384,7 +391,7 @@ private fun ConversationButton(
 
 @Composable
 private fun DialogueBubble(
-    message: DialogueMessage,
+    message: DialogueUiMessage,
     onSpeak: () -> Unit,
     ttsReady: Boolean
 ) {

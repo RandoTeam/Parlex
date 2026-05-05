@@ -24,7 +24,7 @@ object AppModule {
             context,
             TransLiveDatabase::class.java,
             "translive.db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 
     @Provides

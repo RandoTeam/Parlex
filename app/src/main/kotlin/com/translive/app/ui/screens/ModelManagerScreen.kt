@@ -33,6 +33,7 @@ import com.translive.app.ui.viewmodel.ModelStatus
 fun ModelManagerScreen(
     onNavigateToTranslate: () -> Unit,
     onNavigateToDialogue: () -> Unit,
+    onNavigateToHistory: () -> Unit,
     onNavigateToSettings: () -> Unit,
     viewModel: ModelManagerViewModel = hiltViewModel()
 ) {
@@ -70,6 +71,12 @@ fun ModelManagerScreen(
                     label = { Text("Диалог") }
                 )
                 NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToHistory,
+                    icon = { Icon(Icons.Filled.History, "History") },
+                    label = { Text("История") }
+                )
+                NavigationBarItem(
                     selected = true,
                     onClick = { },
                     icon = { Icon(Icons.Filled.Storage, "Models") },
@@ -93,7 +100,7 @@ fun ModelManagerScreen(
             contentPadding = PaddingValues(bottom = 16.dp)
         ) {
             // Header
-            item {
+            item(key = "header", contentType = "header") {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -124,7 +131,7 @@ fun ModelManagerScreen(
             }
 
             // Storage info
-            item {
+            item(key = "storage", contentType = "storage") {
                 StorageInfoCard(
                     totalDownloaded = uiState.totalDownloadedSize,
                     availableSpace = uiState.availableSpace,
@@ -134,7 +141,7 @@ fun ModelManagerScreen(
 
             // Loading indicator
             if (uiState.isLoadingModel) {
-                item {
+                item(key = "loading", contentType = "loading") {
                     LinearProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -150,19 +157,30 @@ fun ModelManagerScreen(
             }
 
             // Model cards
-            items(uiState.models, key = { it.variant.id }) { modelState ->
+            items(
+                uiState.models,
+                key = { it.variant.id },
+                contentType = { "model_card" }
+            ) { modelState ->
+                val variant = modelState.variant
+                val onDownload = remember(variant) { { viewModel.downloadModel(variant) } }
+                val onCancel = remember(variant) { { viewModel.cancelDownload(variant) } }
+                val onSelect = remember(variant) { { viewModel.selectModel(variant) } }
+                val onDelete = remember(variant) { { viewModel.deleteModel(variant) } }
                 ModelCard(
                     state = modelState,
-                    onDownload = { viewModel.downloadModel(modelState.variant) },
-                    onCancel = { viewModel.cancelDownload(modelState.variant) },
-                    onSelect = { viewModel.selectModel(modelState.variant) },
-                    onDelete = { viewModel.deleteModel(modelState.variant) },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    onDownload = onDownload,
+                    onCancel = onCancel,
+                    onSelect = onSelect,
+                    onDelete = onDelete,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .animateItem()
                 )
             }
 
             // TTS section
-            item {
+            item(key = "tts_header", contentType = "section_header") {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = "Голос (TTS)",
@@ -172,7 +190,7 @@ fun ModelManagerScreen(
                 )
             }
 
-            item {
+            item(key = "tts_card", contentType = "tts_card") {
                 TtsModelCard(
                     isDownloaded = uiState.ttsDownloaded,
                     isDownloading = uiState.ttsDownloading,
@@ -183,7 +201,7 @@ fun ModelManagerScreen(
             }
 
             // STT section
-            item {
+            item(key = "stt_header", contentType = "section_header") {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = "Распознавание (STT)",
@@ -193,7 +211,7 @@ fun ModelManagerScreen(
                 )
             }
 
-            item {
+            item(key = "stt_card", contentType = "stt_card") {
                 SttModelCard(
                     isDownloaded = uiState.sttDownloaded,
                     isDownloading = uiState.sttDownloading,
