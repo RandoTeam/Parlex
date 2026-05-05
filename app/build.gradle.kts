@@ -106,6 +106,9 @@ dependencies {
     // Sherpa-ONNX for Kokoro TTS
     implementation(files("libs/sherpa-onnx-1.13.0.aar"))
 
+    // Apache Commons Compress for tar.bz2 extraction
+    implementation("org.apache.commons:commons-compress:1.26.1")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 }

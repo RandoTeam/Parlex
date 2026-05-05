@@ -5,9 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.model.Language
-import com.translive.app.engine.TranslationEngine
-import com.translive.app.engine.TtsEngine
-import com.translive.app.engine.TtsState
+import com.translive.app.engine.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -17,18 +15,28 @@ import javax.inject.Inject
 data class DialogueMessage(
     val sourceText: String,
     val translatedText: String,
-    val sourceLang: Language,
-    val targetLang: Language
+    val sourceLang: String,  // "ru" or "en"
+    val targetLang: String
 )
+
+enum class DialoguePhase {
+    IDLE,        // Not started
+    LISTENING,   // Microphone active, waiting for speech
+    RECOGNIZING, // VAD detected speech end, running Whisper
+    TRANSLATING, // Translating recognized text
+    SPEAKING,    // Playing TTS
+    ERROR
+}
 
 data class DialogueUiState(
     val messages: List<DialogueMessage> = emptyList(),
-    val inputText: String = "",
+    val phase: DialoguePhase = DialoguePhase.IDLE,
+    val isConversationActive: Boolean = false,
+    val isTranslationModelReady: Boolean = false,
+    val isSttReady: Boolean = false,
+    val isTtsReady: Boolean = false,
     val sourceLanguage: Language = Language.RUSSIAN,
     val targetLanguage: Language = Language.ENGLISH,
-    val isTranslating: Boolean = false,
-    val isModelReady: Boolean = false,
-    val isTtsReady: Boolean = false,
     val error: String? = null
 )
 
@@ -37,7 +45,8 @@ class DialogueViewModel @Inject constructor(
     private val app: Application,
     private val engine: TranslationEngine,
     private val modelRepository: ModelRepository,
-    private val ttsEngine: TtsEngine
+    private val ttsEngine: TtsEngine,
+    private val speechEngine: SpeechEngine
 ) : AndroidViewModel(app) {
 
     private val _uiState = MutableStateFlow(DialogueUiState())
@@ -46,74 +55,130 @@ class DialogueViewModel @Inject constructor(
     val ttsState: StateFlow<TtsState> = ttsEngine.state
 
     init {
-        // Check if model is loaded
         viewModelScope.launch {
             val activeId = modelRepository.getActiveModelId()
-            val loaded = activeId != null
             _uiState.update {
                 it.copy(
-                    isModelReady = loaded,
+                    isTranslationModelReady = activeId != null,
+                    isSttReady = speechEngine.areModelsDownloaded(),
                     isTtsReady = ttsEngine.isModelDownloaded()
                 )
-            }
-            if (loaded && ttsEngine.isModelDownloaded()) {
-                ttsEngine.loadModel()
             }
         }
     }
 
-    fun setInputText(text: String) {
-        _uiState.update { it.copy(inputText = text) }
+    fun startConversation() {
+        if (_uiState.value.isConversationActive) return
+
+        // Initialize engines
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!speechEngine.isReady.value) {
+                speechEngine.initialize()
+            }
+            if (!ttsEngine.isModelReady.value) {
+                ttsEngine.loadModel()
+            }
+        }
+
+        _uiState.update {
+            it.copy(
+                isConversationActive = true,
+                phase = DialoguePhase.LISTENING,
+                error = null
+            )
+        }
+
+        speechEngine.startListening { result ->
+            onSpeechRecognized(result)
+        }
     }
 
-    fun sendMessage() {
-        val text = _uiState.value.inputText.trim()
-        if (text.isBlank()) return
+    fun stopConversation() {
+        speechEngine.stopListening()
+        ttsEngine.stop()
+        _uiState.update {
+            it.copy(
+                isConversationActive = false,
+                phase = DialoguePhase.IDLE
+            )
+        }
+    }
 
-        _uiState.update { it.copy(inputText = "", isTranslating = true) }
+    private fun onSpeechRecognized(result: SpeechResult) {
+        if (!_uiState.value.isConversationActive) return
+
+        _uiState.update { it.copy(phase = DialoguePhase.TRANSLATING) }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                // Determine translation direction
                 val state = _uiState.value
+                val fromLang: Language
+                val toLang: Language
 
+                if (result.language == "ru") {
+                    fromLang = state.sourceLanguage
+                    toLang = state.targetLanguage
+                } else {
+                    fromLang = state.targetLanguage
+                    toLang = state.sourceLanguage
+                }
+
+                // Translate
                 val translated = engine.translate(
-                    sourceText = text,
-                    source = state.sourceLanguage,
-                    target = state.targetLanguage
-                )
-                val cleanTranslation = translated.trim()
+                    sourceText = result.text,
+                    source = fromLang,
+                    target = toLang
+                ).trim()
 
                 val message = DialogueMessage(
-                    sourceText = text,
-                    translatedText = cleanTranslation,
-                    sourceLang = state.sourceLanguage,
-                    targetLang = state.targetLanguage
+                    sourceText = result.text,
+                    translatedText = translated,
+                    sourceLang = result.language,
+                    targetLang = if (result.language == "ru") "en" else "ru"
                 )
 
                 _uiState.update {
                     it.copy(
                         messages = it.messages + message,
-                        isTranslating = false
+                        phase = DialoguePhase.SPEAKING
                     )
                 }
 
-                // Auto-speak translation if TTS is ready
+                // Speak the translation
                 if (ttsEngine.isModelReady.value) {
-                    ttsEngine.speak(cleanTranslation)
+                    ttsEngine.speak(translated)
+                    // Wait for TTS to finish before resuming listening
+                    ttsEngine.state.first { it != TtsState.SPEAKING }
+                }
+
+                // Resume listening state
+                if (_uiState.value.isConversationActive) {
+                    _uiState.update { it.copy(phase = DialoguePhase.LISTENING) }
                 }
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(isTranslating = false, error = e.message)
+                    it.copy(phase = DialoguePhase.LISTENING, error = e.message)
                 }
             }
         }
     }
 
-    fun speak(text: String) {
+    fun speakMessage(text: String) {
         if (ttsEngine.state.value == TtsState.SPEAKING) {
             ttsEngine.stop()
         } else {
             ttsEngine.speak(text)
         }
+    }
+
+    fun clearError() {
+        _uiState.update { it.copy(error = null) }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        speechEngine.stopListening()
+        ttsEngine.stop()
     }
 }

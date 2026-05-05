@@ -48,7 +48,7 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
 
     // Create context
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 4096;
+    ctx_params.n_ctx = 1024;  // Reduced from 4096 — translation rarely exceeds 500 tokens
     ctx_params.n_threads = nThreads;
     ctx_params.n_threads_batch = nThreads;
 

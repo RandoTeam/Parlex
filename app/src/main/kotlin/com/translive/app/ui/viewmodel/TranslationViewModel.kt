@@ -66,7 +66,7 @@ class TranslationViewModel @Inject constructor(
                     return@launch
                 }
 
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 8)
+                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
                 val loaded = engine.loadModel(modelPath, threads)
 
                 _uiState.update {

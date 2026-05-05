@@ -1,6 +1,7 @@
 package com.translive.app.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,15 +16,17 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.translive.app.engine.TtsState
-import com.translive.app.ui.viewmodel.DialogueViewModel
 import com.translive.app.ui.viewmodel.DialogueMessage
+import com.translive.app.ui.viewmodel.DialoguePhase
+import com.translive.app.ui.viewmodel.DialogueViewModel
 
 @Composable
 fun DialogueScreen(
@@ -32,10 +35,9 @@ fun DialogueScreen(
     viewModel: DialogueViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val ttsState by viewModel.ttsState.collectAsState()
     val listState = rememberLazyListState()
 
-    // Auto-scroll to bottom on new message
+    // Auto-scroll on new messages
     LaunchedEffect(uiState.messages.size) {
         if (uiState.messages.isNotEmpty()) {
             listState.animateScrollToItem(uiState.messages.size - 1)
@@ -74,189 +76,330 @@ fun DialogueScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Header
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                                MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    )
-                    .padding(horizontal = 20.dp, vertical = 12.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Диалог",
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.weight(1f))
-                    // TTS status indicator
-                    if (ttsState == TtsState.SPEAKING) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Filled.VolumeUp, null,
-                                    modifier = Modifier.size(14.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    "Говорю...",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            // Header with phase indicator
+            DialogueHeader(phase = uiState.phase)
 
-            if (!uiState.isModelReady) {
-                // No model loaded — show setup prompt
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(32.dp)
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(24.dp),
-                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
-                            modifier = Modifier.size(80.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Filled.RecordVoiceOver, null,
-                                    modifier = Modifier.size(40.dp),
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Загрузите модель перевода",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Перейдите на вкладку «Модели» для загрузки",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                    }
-                }
+            // Check readiness
+            val allReady = uiState.isTranslationModelReady && uiState.isSttReady
+
+            if (!allReady) {
+                // Setup required
+                SetupPrompt(
+                    hasTranslation = uiState.isTranslationModelReady,
+                    hasStt = uiState.isSttReady,
+                    hasTts = uiState.isTtsReady,
+                    onNavigateToModels = onNavigateToModels,
+                    modifier = Modifier.weight(1f)
+                )
             } else {
-                // Chat messages
+                // Message list
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                         .padding(horizontal = 16.dp),
                     state = listState,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(vertical = 12.dp)
                 ) {
-                    if (uiState.messages.isEmpty()) {
+                    if (uiState.messages.isEmpty() && !uiState.isConversationActive) {
                         item {
-                            Box(
-                                modifier = Modifier
-                                    .fillParentMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.ChatBubbleOutline, null,
-                                        modifier = Modifier.size(48.dp),
-                                        tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(
-                                        text = "Напишите сообщение для перевода",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
+                            EmptyStateHint(modifier = Modifier.fillParentMaxSize())
                         }
                     }
 
                     items(uiState.messages) { message ->
-                        ChatBubble(
+                        DialogueBubble(
                             message = message,
-                            onSpeak = { viewModel.speak(message.translatedText) },
-                            isSpeaking = ttsState == TtsState.SPEAKING,
+                            onSpeak = { viewModel.speakMessage(message.translatedText) },
                             ttsReady = uiState.isTtsReady
                         )
                     }
                 }
 
-                // Translation progress
-                AnimatedVisibility(visible = uiState.isTranslating) {
-                    LinearProgressIndicator(
+                // Error
+                uiState.error?.let { error ->
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(3.dp),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = error,
+                            modifier = Modifier.padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
 
-                // Input area
-                DialogueInputBar(
-                    inputText = uiState.inputText,
-                    onTextChange = { viewModel.setInputText(it) },
-                    onSend = { viewModel.sendMessage() },
-                    isTranslating = uiState.isTranslating,
+                // Main action button
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.surface)
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                )
+                        .padding(24.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    ConversationButton(
+                        isActive = uiState.isConversationActive,
+                        phase = uiState.phase,
+                        onStart = { viewModel.startConversation() },
+                        onStop = { viewModel.stopConversation() }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ChatBubble(
+private fun DialogueHeader(phase: DialoguePhase) {
+    val phaseText = when (phase) {
+        DialoguePhase.IDLE -> ""
+        DialoguePhase.LISTENING -> "Слушаю..."
+        DialoguePhase.RECOGNIZING -> "Распознаю..."
+        DialoguePhase.TRANSLATING -> "Перевожу..."
+        DialoguePhase.SPEAKING -> "Говорю..."
+        DialoguePhase.ERROR -> "Ошибка"
+    }
+
+    val phaseColor = when (phase) {
+        DialoguePhase.LISTENING -> MaterialTheme.colorScheme.primary
+        DialoguePhase.SPEAKING -> MaterialTheme.colorScheme.tertiary
+        DialoguePhase.ERROR -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                        MaterialTheme.colorScheme.surface
+                    )
+                )
+            )
+            .padding(horizontal = 20.dp, vertical = 12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "Диалог",
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            if (phaseText.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = phaseColor.copy(alpha = 0.15f)
+                ) {
+                    Text(
+                        text = phaseText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = phaseColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupPrompt(
+    hasTranslation: Boolean,
+    hasStt: Boolean,
+    hasTts: Boolean,
+    onNavigateToModels: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                modifier = Modifier.size(80.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Filled.SettingsVoice, null,
+                        modifier = Modifier.size(40.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Настройка голоса",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Checklist
+            SetupCheckRow("Модель перевода", hasTranslation)
+            SetupCheckRow("Распознавание речи (STT)", hasStt)
+            SetupCheckRow("Озвучивание (TTS)", hasTts)
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Button(onClick = onNavigateToModels) {
+                Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Скачать модели")
+            }
+        }
+    }
+}
+
+@Composable
+private fun SetupCheckRow(label: String, isReady: Boolean) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth(0.8f)
+            .padding(vertical = 3.dp)
+    ) {
+        Icon(
+            if (isReady) Icons.Filled.CheckCircle else Icons.Outlined.RadioButtonUnchecked,
+            null,
+            modifier = Modifier.size(18.dp),
+            tint = if (isReady) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outline
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isReady) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun EmptyStateHint(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                Icons.Outlined.RecordVoiceOver, null,
+                modifier = Modifier.size(48.dp),
+                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Нажмите «Начать» и говорите",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Русский → English • English → Русский",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConversationButton(
+    isActive: Boolean,
+    phase: DialoguePhase,
+    onStart: () -> Unit,
+    onStop: () -> Unit
+) {
+    // Pulsing animation when listening
+    val scale by animateFloatAsState(
+        targetValue = if (phase == DialoguePhase.LISTENING) 1.1f else 1.0f,
+        animationSpec = if (phase == DialoguePhase.LISTENING) {
+            infiniteRepeatable(
+                animation = tween(800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            )
+        } else {
+            tween(300)
+        },
+        label = "pulse"
+    )
+
+    val buttonColor = if (isActive) MaterialTheme.colorScheme.error
+    else MaterialTheme.colorScheme.primary
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        FloatingActionButton(
+            onClick = { if (isActive) onStop() else onStart() },
+            modifier = Modifier
+                .size(80.dp)
+                .scale(scale),
+            containerColor = buttonColor,
+            contentColor = Color.White,
+            shape = CircleShape
+        ) {
+            Icon(
+                if (isActive) Icons.Filled.Stop else Icons.Filled.Mic,
+                contentDescription = if (isActive) "Остановить" else "Начать",
+                modifier = Modifier.size(36.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = if (isActive) "Остановить" else "Начать разговор",
+            style = MaterialTheme.typography.labelLarge,
+            color = buttonColor,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+@Composable
+private fun DialogueBubble(
     message: DialogueMessage,
     onSpeak: () -> Unit,
-    isSpeaking: Boolean,
     ttsReady: Boolean
 ) {
+    val langLabel = if (message.sourceLang == "ru") "🇷🇺" else "🇬🇧"
+    val targetLabel = if (message.targetLang == "ru") "🇷🇺" else "🇬🇧"
+
     Column(modifier = Modifier.fillMaxWidth()) {
-        // Source message (user)
+        // Source (original speech)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.Bottom
         ) {
+            Text(
+                text = langLabel,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(end = 4.dp, bottom = 8.dp)
+            )
             Surface(
                 shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.widthIn(max = 300.dp)
+                modifier = Modifier.widthIn(max = 280.dp)
             ) {
                 Text(
                     text = message.sourceText,
@@ -269,7 +412,7 @@ private fun ChatBubble(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Translated message
+        // Translation
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Start,
@@ -278,7 +421,7 @@ private fun ChatBubble(
             Surface(
                 shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
                 color = MaterialTheme.colorScheme.secondaryContainer,
-                modifier = Modifier.widthIn(max = 300.dp)
+                modifier = Modifier.widthIn(max = 280.dp)
             ) {
                 Text(
                     text = message.translatedText,
@@ -287,65 +430,22 @@ private fun ChatBubble(
                     modifier = Modifier.padding(12.dp)
                 )
             }
-
+            Text(
+                text = targetLabel,
+                fontSize = 14.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            )
             if (ttsReady) {
                 IconButton(
                     onClick = onSpeak,
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        Icons.Filled.VolumeUp, "Speak",
+                        Icons.Filled.VolumeUp, "Озвучить",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DialogueInputBar(
-    inputText: String,
-    onTextChange: (String) -> Unit,
-    onSend: () -> Unit,
-    isTranslating: Boolean,
-    modifier: Modifier = Modifier
-) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = inputText,
-            onValueChange = onTextChange,
-            placeholder = { Text("Введите текст...") },
-            modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(24.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-            ),
-            textStyle = MaterialTheme.typography.bodyMedium,
-            maxLines = 3
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        FilledIconButton(
-            onClick = onSend,
-            enabled = inputText.isNotBlank() && !isTranslating,
-            shape = CircleShape,
-            modifier = Modifier.size(48.dp)
-        ) {
-            if (isTranslating) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(20.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary
-                )
-            } else {
-                Icon(Icons.Filled.Send, "Send")
             }
         }
     }
