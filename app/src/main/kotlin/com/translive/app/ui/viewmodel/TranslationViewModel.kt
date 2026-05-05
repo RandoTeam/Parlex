@@ -4,15 +4,15 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
+import com.translive.app.data.SettingsRepository
 import com.translive.app.data.db.TranslationDao
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.TranslationEntry
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.engine.TtsEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class TranslationUiState(
@@ -33,6 +33,7 @@ class TranslationViewModel @Inject constructor(
     private val engine: TranslationEngine,
     private val translationDao: TranslationDao,
     private val modelRepository: ModelRepository,
+    private val settings: SettingsRepository,
     val ttsEngine: TtsEngine
 ) : AndroidViewModel(app) {
 
@@ -46,6 +47,9 @@ class TranslationViewModel @Inject constructor(
     val favorites = translationDao.getFavorites().stateIn(
         viewModelScope, SharingStarted.Lazily, emptyList()
     )
+
+    /** Job for idle auto-unload timer. Reset on each translation. */
+    private var idleTimerJob: Job? = null
 
     fun loadModel() {
         if (_uiState.value.isModelLoaded || _uiState.value.isModelLoading) return
@@ -66,7 +70,7 @@ class TranslationViewModel @Inject constructor(
                     return@launch
                 }
 
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                val threads = settings.threads
                 val loaded = engine.loadModel(modelPath, threads)
 
                 _uiState.update {
@@ -81,6 +85,7 @@ class TranslationViewModel @Inject constructor(
                 // Auto-load TTS if available
                 if (loaded) {
                     ttsEngine.loadModel()
+                    resetIdleTimer()
                 }
             } catch (e: Exception) {
                 _uiState.update {
@@ -140,9 +145,37 @@ class TranslationViewModel @Inject constructor(
                         translatedText = result
                     )
                 )
+
+                // Reset idle timer after successful translation
+                resetIdleTimer()
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(isTranslating = false, error = "Translation error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Reset the idle auto-unload timer.
+     * If [SettingsRepository.idleTimeoutMinutes] > 0, schedules model unload after that delay.
+     */
+    private fun resetIdleTimer() {
+        idleTimerJob?.cancel()
+        val timeoutMinutes = settings.idleTimeoutMinutes
+        if (timeoutMinutes <= 0) return  // Disabled
+
+        idleTimerJob = viewModelScope.launch {
+            delay(timeoutMinutes * 60_000L)
+            // Unload model after idle
+            if (engine.isLoaded) {
+                engine.unloadModel()
+                _uiState.update {
+                    it.copy(
+                        isModelLoaded = false,
+                        activeModelName = null,
+                        error = "Модель выгружена (простой ${timeoutMinutes} мин.)"
+                    )
                 }
             }
         }
@@ -162,6 +195,7 @@ class TranslationViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        idleTimerJob?.cancel()
         engine.unloadModel()
     }
 }

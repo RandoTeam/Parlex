@@ -33,6 +33,7 @@ import com.translive.app.ui.viewmodel.ModelStatus
 fun ModelManagerScreen(
     onNavigateToTranslate: () -> Unit,
     onNavigateToDialogue: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     viewModel: ModelManagerViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -73,6 +74,12 @@ fun ModelManagerScreen(
                     onClick = { },
                     icon = { Icon(Icons.Filled.Storage, "Models") },
                     label = { Text("Модели") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToSettings,
+                    icon = { Icon(Icons.Filled.Settings, "Settings") },
+                    label = { Text("Настройки") }
                 )
             }
         }

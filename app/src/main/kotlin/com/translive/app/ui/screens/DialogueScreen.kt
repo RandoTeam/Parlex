@@ -32,6 +32,7 @@ import com.translive.app.ui.viewmodel.DialogueViewModel
 fun DialogueScreen(
     onNavigateToTranslate: () -> Unit,
     onNavigateToModels: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     viewModel: DialogueViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -67,6 +68,12 @@ fun DialogueScreen(
                     onClick = onNavigateToModels,
                     icon = { Icon(Icons.Filled.Storage, "Models") },
                     label = { Text("Модели") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToSettings,
+                    icon = { Icon(Icons.Filled.Settings, "Settings") },
+                    label = { Text("Настройки") }
                 )
             }
         }

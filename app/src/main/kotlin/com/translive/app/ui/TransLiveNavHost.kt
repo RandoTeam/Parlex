@@ -6,6 +6,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.translive.app.ui.screens.DialogueScreen
 import com.translive.app.ui.screens.ModelManagerScreen
+import com.translive.app.ui.screens.SettingsScreen
 import com.translive.app.ui.screens.TranslationScreen
 
 @Composable
@@ -16,7 +17,8 @@ fun TransLiveNavHost() {
         composable("translate") {
             TranslationScreen(
                 onNavigateToDialogue = { navController.navigate("dialogue") },
-                onNavigateToModels = { navController.navigate("models") }
+                onNavigateToModels = { navController.navigate("models") },
+                onNavigateToSettings = { navController.navigate("settings") }
             )
         }
         composable("dialogue") {
@@ -26,7 +28,8 @@ fun TransLiveNavHost() {
                         popUpTo("translate") { inclusive = true }
                     }
                 },
-                onNavigateToModels = { navController.navigate("models") }
+                onNavigateToModels = { navController.navigate("models") },
+                onNavigateToSettings = { navController.navigate("settings") }
             )
         }
         composable("models") {
@@ -36,7 +39,19 @@ fun TransLiveNavHost() {
                         popUpTo("translate") { inclusive = true }
                     }
                 },
-                onNavigateToDialogue = { navController.navigate("dialogue") }
+                onNavigateToDialogue = { navController.navigate("dialogue") },
+                onNavigateToSettings = { navController.navigate("settings") }
+            )
+        }
+        composable("settings") {
+            SettingsScreen(
+                onNavigateToTranslate = {
+                    navController.navigate("translate") {
+                        popUpTo("translate") { inclusive = true }
+                    }
+                },
+                onNavigateToDialogue = { navController.navigate("dialogue") },
+                onNavigateToModels = { navController.navigate("models") }
             )
         }
     }

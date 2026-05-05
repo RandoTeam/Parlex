@@ -3,6 +3,7 @@ package com.translive.app.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
+import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
 import com.translive.app.data.model.TtsModelInfo
@@ -55,7 +56,8 @@ class ModelManagerViewModel @Inject constructor(
     private val downloadManager: ModelDownloadManager,
     private val engine: TranslationEngine,
     private val ttsEngine: TtsEngine,
-    private val speechEngine: SpeechEngine
+    private val speechEngine: SpeechEngine,
+    private val settings: SettingsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ModelManagerUiState())
@@ -162,7 +164,7 @@ class ModelManagerViewModel @Inject constructor(
                 val path = repo.getModelPath(variant) ?: return@launch
 
                 // Load new model
-                val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+                val threads = settings.threads
                 val loaded = engine.loadModel(path, threads)
 
                 if (!loaded) {

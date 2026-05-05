@@ -35,6 +35,7 @@ import com.translive.app.ui.viewmodel.TranslationViewModel
 fun TranslationScreen(
     onNavigateToDialogue: () -> Unit,
     onNavigateToModels: () -> Unit,
+    onNavigateToSettings: () -> Unit,
     viewModel: TranslationViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -71,6 +72,12 @@ fun TranslationScreen(
                     onClick = onNavigateToModels,
                     icon = { Icon(Icons.Filled.Storage, "Models") },
                     label = { Text("Модели") }
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onNavigateToSettings,
+                    icon = { Icon(Icons.Filled.Settings, "Settings") },
+                    label = { Text("Настройки") }
                 )
             }
         }
