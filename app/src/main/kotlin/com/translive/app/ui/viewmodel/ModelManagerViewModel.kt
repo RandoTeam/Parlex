@@ -13,8 +13,10 @@ import com.translive.app.engine.SpeechEngine
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.engine.TtsEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
@@ -218,11 +220,13 @@ class ModelManagerViewModel @Inject constructor(
                             _uiState.update { it.copy(ttsProgress = state.progress) }
                         }
                         is DownloadState.Completed -> {
-                            // Extract tar.bz2
+                            // Extract tar.bz2 on IO thread (CPU-heavy)
                             _uiState.update { it.copy(ttsProgress = 0.99f) }
-                            extractTarBz2(archiveFile, ttsDir)
-                            archiveFile.delete()
-                            ttsEngine.loadModel()
+                            withContext(Dispatchers.IO) {
+                                extractTarBz2(archiveFile, ttsDir)
+                                archiveFile.delete()
+                                ttsEngine.loadModel()
+                            }
                             _uiState.update {
                                 it.copy(ttsDownloading = false, ttsDownloaded = true, ttsProgress = 1f)
                             }
@@ -300,10 +304,12 @@ class ModelManagerViewModel @Inject constructor(
                             _uiState.update { it.copy(sttProgress = 0.05f + state.progress * 0.9f) }
                         }
                         is DownloadState.Completed -> {
-                            // Extract tar.bz2
+                            // Extract tar.bz2 on IO thread (CPU-heavy — was crashing on Main!)
                             _uiState.update { it.copy(sttProgress = 0.95f) }
-                            extractTarBz2(whisperArchive, sttDir)
-                            whisperArchive.delete()
+                            withContext(Dispatchers.IO) {
+                                extractTarBz2(whisperArchive, sttDir)
+                                whisperArchive.delete()
+                            }
                             _uiState.update {
                                 it.copy(sttDownloading = false, sttDownloaded = true, sttProgress = 1f)
                             }
