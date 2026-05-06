@@ -142,4 +142,7 @@ dependencies {
     // ML Kit Text Recognition (bundled — fully offline)
     implementation("com.google.mlkit:text-recognition:16.0.1")
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+
+    // ML Kit Translation (on-device NMT — fast, for camera realtime)
+    implementation("com.google.mlkit:translate:17.0.3")
 }

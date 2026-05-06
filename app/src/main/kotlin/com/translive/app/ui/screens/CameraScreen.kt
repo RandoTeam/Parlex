@@ -29,7 +29,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -139,17 +141,39 @@ fun CameraScreen(
                             onPreviewView = { previewViewRef = it }
                         )
 
-                        // Thin borders around detected text lines
+                        // Live translation overlay
                         if (uiState.blocks.isNotEmpty() && uiState.imageWidth > 0) {
-                            OcrHighlightOverlay(
+                            TranslationOverlay(
                                 blocks = uiState.blocks,
                                 imageWidth = uiState.imageWidth,
                                 imageHeight = uiState.imageHeight
                             )
                         }
+
+                        // NMT status badge
+                        if (uiState.isNmtDownloading) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 8.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color.Black.copy(alpha = 0.6f))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = Color.White
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Загрузка модели перевода…", color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
                     }
                     CameraMode.CAPTURE -> {
-                        // Show the painted bitmap (translations baked in)
                         CaptureImageView(
                             bitmap = uiState.paintedBitmap
                         )
@@ -293,14 +317,18 @@ private fun LiveCameraView(
     )
 }
 
-/** Thin colored borders around detected text lines. */
+/**
+ * Live translation overlay — shows translated text inside semi-transparent boxes.
+ * If no translation available, shows thin border only.
+ */
 @Composable
-private fun OcrHighlightOverlay(
+private fun TranslationOverlay(
     blocks: List<TranslatedBlock>,
     imageWidth: Int,
     imageHeight: Int
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
+        // FILL_CENTER: scale to fill, center crop
         val scaleX = size.width / imageWidth.toFloat()
         val scaleY = size.height / imageHeight.toFloat()
         val scale = maxOf(scaleX, scaleY)
@@ -314,13 +342,44 @@ private fun OcrHighlightOverlay(
             val w = box.width() * scale
             val h = box.height() * scale
 
-            drawRoundRect(
-                color = Color(0xFF4FC3F7),
-                topLeft = Offset(left, top),
-                size = Size(w, h),
-                cornerRadius = CornerRadius(4f),
-                style = Stroke(width = 2f)
-            )
+            if (block.translatedText.isNotBlank()) {
+                // Semi-transparent dark background
+                drawRoundRect(
+                    color = Color(0xDD222222),
+                    topLeft = Offset(left, top),
+                    size = Size(w, h),
+                    cornerRadius = CornerRadius(4f)
+                )
+
+                // Draw translated text using native canvas
+                drawIntoCanvas { canvas ->
+                    val nativeCanvas = canvas.nativeCanvas
+                    val textPaint = android.text.TextPaint().apply {
+                        isAntiAlias = true
+                        color = android.graphics.Color.WHITE
+                        textSize = (h * 0.65f).coerceIn(10f, 36f)
+                        isFakeBoldText = true
+                    }
+                    // Shrink if too wide
+                    var measured = textPaint.measureText(block.translatedText)
+                    while (measured > w - 4f && textPaint.textSize > 8f) {
+                        textPaint.textSize -= 1f
+                        measured = textPaint.measureText(block.translatedText)
+                    }
+                    val textX = left + 3f
+                    val textY = top + (h - textPaint.descent() - textPaint.ascent()) / 2f
+                    nativeCanvas.drawText(block.translatedText, textX, textY, textPaint)
+                }
+            } else {
+                // No translation yet — thin border
+                drawRoundRect(
+                    color = Color(0xFF4FC3F7),
+                    topLeft = Offset(left, top),
+                    size = Size(w, h),
+                    cornerRadius = CornerRadius(4f),
+                    style = Stroke(width = 2f)
+                )
+            }
         }
     }
 }

@@ -11,13 +11,15 @@
 # Sherpa-ONNX (TTS + STT)
 -keep class com.k2fsa.sherpa.onnx.** { *; }
 
-# ML Kit text recognition
+# ML Kit text recognition + translation
 -keep class com.google.mlkit.** { *; }
 -keep class com.google.android.gms.internal.mlkit_vision_text_common.** { *; }
 -keep class com.google.android.gms.internal.mlkit_vision_text.** { *; }
+-keep class com.google.android.gms.internal.mlkit_translate.** { *; }
 
-# OcrEngine
+# OcrEngine + CameraTranslateEngine
 -keep class com.translive.app.engine.OcrEngine { *; }
+-keep class com.translive.app.engine.CameraTranslateEngine { *; }
 
 # SpeechEngine + TtsEngine (sherpa-onnx native interop)
 -keep class com.translive.app.engine.SpeechEngine { *; }
