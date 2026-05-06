@@ -1,6 +1,9 @@
 package com.translive.app.engine
 
 import com.translive.app.data.model.Language
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
 
 /**
  * JNI bridge to llama.cpp for Hy-MT1.5-1.8B GGUF inference.
@@ -14,6 +17,18 @@ class TranslationEngine {
         }
     }
 
+    /** Callback interface for streaming token output from JNI. */
+    interface TokenCallback {
+        /** Called for each generated token. Return true to continue, false to cancel. */
+        fun onToken(token: String): Boolean
+    }
+
+    /** Result of a streaming translation with accurate token counts from native layer. */
+    data class StreamResult(
+        val promptTokens: Int,
+        val generatedTokens: Int
+    )
+
     // --- Native methods (JNI) ---
 
     /** Load GGUF model from file path. Returns context pointer or 0 on failure. */
@@ -21,6 +36,11 @@ class TranslationEngine {
 
     /** Run translation inference. Returns translated text. */
     private external fun nativeTranslate(contextPtr: Long, prompt: String, maxTokens: Int): String
+
+    /** Run streaming translation. Calls callback.onToken() per token. Returns [promptTokens, genTokens]. */
+    private external fun nativeTranslateStreaming(
+        contextPtr: Long, prompt: String, maxTokens: Int, callback: TokenCallback
+    ): IntArray
 
     /** Release model from memory. */
     private external fun nativeUnloadModel(contextPtr: Long)
@@ -49,9 +69,6 @@ class TranslationEngine {
 
     /**
      * Translate text between two languages using appropriate prompt template.
-     *
-     * Uses ZH prompt template when either source or target is Chinese,
-     * and EN prompt template for all other XX↔XX pairs.
      */
     fun translate(
         sourceText: String,
@@ -62,6 +79,39 @@ class TranslationEngine {
         require(isLoaded) { "Model not loaded. Call loadModel() first." }
         val prompt = buildPrompt(sourceText, source, target)
         return nativeTranslate(contextPtr, prompt, maxTokens).trim()
+    }
+
+    /**
+     * Streaming translation: emits each token as it's generated.
+     * Collect the Flow to build up the translated text in real-time.
+     * Returns StreamResult with accurate token counts after completion.
+     */
+    fun translateStreaming(
+        sourceText: String,
+        source: Language,
+        target: Language,
+        maxTokens: Int = 2048,
+        onComplete: ((StreamResult) -> Unit)? = null
+    ): Flow<String> = callbackFlow {
+        require(isLoaded) { "Model not loaded. Call loadModel() first." }
+        val prompt = buildPrompt(sourceText, source, target)
+
+        val callback = object : TokenCallback {
+            override fun onToken(token: String): Boolean {
+                val result = trySend(token)
+                return result.isSuccess
+            }
+        }
+
+        val counts = nativeTranslateStreaming(contextPtr, prompt, maxTokens, callback)
+        val streamResult = StreamResult(
+            promptTokens = counts.getOrElse(0) { 0 },
+            generatedTokens = counts.getOrElse(1) { 0 }
+        )
+        onComplete?.invoke(streamResult)
+        close()
+
+        awaitClose { /* native call already finished */ }
     }
 
     private fun buildPrompt(text: String, source: Language, target: Language): String {

@@ -167,6 +167,130 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     return env->NewStringUTF(result.c_str());
 }
 
+/**
+ * Streaming translation: calls callback.onToken(String) for each generated token.
+ * Returns an int array: [promptTokenCount, generatedTokenCount].
+ */
+JNIEXPORT jintArray JNICALL
+Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
+    JNIEnv* env, jobject /*thiz*/, jlong contextPtr, jstring prompt,
+    jint maxTokens, jobject callback) {
+
+    auto* tlctx = reinterpret_cast<TransLiveContext*>(contextPtr);
+
+    // Get callback method
+    jclass cbClass = env->GetObjectClass(callback);
+    jmethodID onTokenMethod = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
+
+    jint counts[2] = {0, 0}; // [promptTokens, genTokens]
+
+    if (!tlctx || !tlctx->ctx || !onTokenMethod) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
+    const char* promptStr = env->GetStringUTFChars(prompt, nullptr);
+    std::string promptCpp(promptStr);
+    env->ReleaseStringUTFChars(prompt, promptStr);
+
+    // Chat template
+    std::vector<llama_chat_message> messages = {
+        {"user", promptCpp.c_str()}
+    };
+    std::vector<char> formatted(promptCpp.size() * 2 + 256);
+    int len = llama_chat_apply_template(
+        llama_model_chat_template(tlctx->model, nullptr),
+        messages.data(), messages.size(),
+        true, formatted.data(), formatted.size()
+    );
+    if (len < 0 || (size_t)len >= formatted.size()) {
+        formatted.resize(len + 1);
+        len = llama_chat_apply_template(
+            llama_model_chat_template(tlctx->model, nullptr),
+            messages.data(), messages.size(),
+            true, formatted.data(), formatted.size()
+        );
+    }
+    std::string formattedPrompt(formatted.data(), len);
+
+    // Tokenize
+    std::vector<llama_token> tokens(formattedPrompt.size() + 64);
+    int n_tokens = llama_tokenize(
+        tlctx->vocab, formattedPrompt.c_str(), formattedPrompt.size(),
+        tokens.data(), tokens.size(), true, true
+    );
+    if (n_tokens < 0) {
+        tokens.resize(-n_tokens);
+        n_tokens = llama_tokenize(
+            tlctx->vocab, formattedPrompt.c_str(), formattedPrompt.size(),
+            tokens.data(), tokens.size(), true, true
+        );
+    }
+    tokens.resize(n_tokens);
+    counts[0] = n_tokens;
+
+    // Clear KV cache
+    llama_memory_clear(llama_get_memory(tlctx->ctx), true);
+
+    // Process prompt
+    llama_batch batch = llama_batch_get_one(tokens.data(), n_tokens);
+    if (llama_decode(tlctx->ctx, batch) != 0) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
+    // Sampling
+    llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(20));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.6f, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.7f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.05f, 0.0f, 0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_dist(42));
+
+    // Generate with per-token callback
+    llama_token eos = llama_vocab_eos(tlctx->vocab);
+    int generated = 0;
+
+    for (int i = 0; i < maxTokens; i++) {
+        llama_token token = llama_sampler_sample(sampler, tlctx->ctx, -1);
+
+        if (llama_vocab_is_eog(tlctx->vocab, token) || token == eos) {
+            break;
+        }
+
+        // Decode token to string
+        char buf[256];
+        int n = llama_token_to_piece(tlctx->vocab, token, buf, sizeof(buf), 0, true);
+        if (n > 0) {
+            jstring tokenStr = env->NewStringUTF(std::string(buf, n).c_str());
+            // Call Kotlin callback — returns false to cancel
+            jboolean cont = env->CallBooleanMethod(callback, onTokenMethod, tokenStr);
+            env->DeleteLocalRef(tokenStr);
+            if (!cont) {
+                LOGI("Streaming cancelled by callback at token %d", i);
+                break;
+            }
+            generated++;
+        }
+
+        // Next batch
+        batch = llama_batch_get_one(&token, 1);
+        if (llama_decode(tlctx->ctx, batch) != 0) {
+            break;
+        }
+    }
+
+    llama_sampler_free(sampler);
+    counts[1] = generated;
+
+    LOGI("Streaming complete: %d prompt tokens, %d generated tokens", counts[0], counts[1]);
+    jintArray arr = env->NewIntArray(2);
+    env->SetIntArrayRegion(arr, 0, 2, counts);
+    return arr;
+}
+
 JNIEXPORT void JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeUnloadModel(
     JNIEnv* /*env*/, jobject /*thiz*/, jlong contextPtr) {

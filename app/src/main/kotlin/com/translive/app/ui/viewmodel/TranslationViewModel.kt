@@ -135,24 +135,29 @@ class TranslationViewModel @Inject constructor(
         val state = _uiState.value
         if (state.sourceText.isBlank() || !state.isModelLoaded || state.isTranslating) return
 
-        _uiState.update { it.copy(isTranslating = true, error = null, stats = null) }
+        _uiState.update { it.copy(isTranslating = true, error = null, stats = null, translatedText = "") }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val startTime = System.currentTimeMillis()
+                val textBuilder = StringBuilder()
+                var streamResult: TranslationEngine.StreamResult? = null
 
-                val result = engine.translate(
+                engine.translateStreaming(
                     sourceText = state.sourceText,
                     source = state.sourceLanguage,
-                    target = state.targetLanguage
-                )
+                    target = state.targetLanguage,
+                    onComplete = { streamResult = it }
+                ).collect { token ->
+                    textBuilder.append(token)
+                    val currentText = textBuilder.toString().trim()
+                    _uiState.update { it.copy(translatedText = currentText) }
+                }
 
                 val elapsed = System.currentTimeMillis() - startTime
-
-                // Estimate token counts from text lengths
-                // Average: ~1 token per 4 chars for Latin, ~1 per 1.5 for CJK
-                val promptTokens = estimateTokens(state.sourceText)
-                val genTokens = estimateTokens(result)
+                val result = textBuilder.toString().trim()
+                val promptTokens = streamResult?.promptTokens ?: 0
+                val genTokens = streamResult?.generatedTokens ?: 0
                 val tps = if (elapsed > 0) genTokens * 1000f / elapsed else 0f
 
                 val stats = TranslationStats(
@@ -184,14 +189,6 @@ class TranslationViewModel @Inject constructor(
                 }
             }
         }
-    }
-
-    /** Rough token estimate: CJK ~1.5 chars/token, Latin ~4 chars/token */
-    private fun estimateTokens(text: String): Int {
-        if (text.isBlank()) return 0
-        val cjk = text.count { it.code in 0x4E00..0x9FFF || it.code in 0x3040..0x30FF || it.code in 0xAC00..0xD7AF }
-        val other = text.length - cjk
-        return ((cjk / 1.5f) + (other / 4f)).toInt().coerceAtLeast(1)
     }
 
     /**

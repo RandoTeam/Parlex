@@ -38,4 +38,14 @@ Java_com_translive_app_engine_TranslationEngine_nativeIsLoaded(
     return JNI_FALSE;
 }
 
+JNIEXPORT jintArray JNICALL
+Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
+    JNIEnv* env, jobject, jlong, jstring, jint, jobject) {
+    LOGW("Stub: nativeTranslateStreaming called. llama.cpp not integrated yet.");
+    jint counts[2] = {0, 0};
+    jintArray arr = env->NewIntArray(2);
+    env->SetIntArrayRegion(arr, 0, 2, counts);
+    return arr;
+}
+
 } // extern "C"
