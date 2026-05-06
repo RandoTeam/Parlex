@@ -10,12 +10,23 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
-data class OcrBlock(
+/**
+ * A single recognized line of text with its bounding box.
+ */
+data class OcrLine(
     val text: String,
     val boundingBox: Rect
+)
+
+/**
+ * A block of text (paragraph) containing multiple lines.
+ */
+data class OcrBlock(
+    val text: String,
+    val boundingBox: Rect,
+    val lines: List<OcrLine>
 )
 
 data class OcrResult(
@@ -33,10 +44,6 @@ class OcrEngine @Inject constructor() {
     private val chineseRecognizer: TextRecognizer =
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
 
-    /**
-     * Select recognizer based on source language.
-     * Chinese recognizer also handles Latin, so it's a good default for CJK.
-     */
     private fun getRecognizer(sourceLanguageCode: String): TextRecognizer {
         return when {
             sourceLanguageCode.startsWith("zh") ||
@@ -76,10 +83,22 @@ class OcrEngine @Inject constructor() {
         recognizer.process(image)
             .addOnSuccessListener { result ->
                 val blocks = result.textBlocks.mapNotNull { textBlock ->
-                    val box = textBlock.boundingBox ?: return@mapNotNull null
+                    val blockBox = textBlock.boundingBox ?: return@mapNotNull null
+
+                    // Extract line-level data from ML Kit
+                    val lines = textBlock.lines.mapNotNull { line ->
+                        val lineBox = line.boundingBox ?: return@mapNotNull null
+                        OcrLine(
+                            text = line.text,
+                            boundingBox = lineBox
+                        )
+                    }
+                    if (lines.isEmpty()) return@mapNotNull null
+
                     OcrBlock(
                         text = textBlock.text,
-                        boundingBox = box
+                        boundingBox = blockBox,
+                        lines = lines
                     )
                 }
                 cont.resume(

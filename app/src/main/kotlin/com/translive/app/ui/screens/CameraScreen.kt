@@ -1,7 +1,6 @@
 package com.translive.app.ui.screens
 
 import android.Manifest
-import android.graphics.Bitmap
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,6 +10,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
@@ -26,14 +26,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.*
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -60,7 +61,6 @@ fun CameraScreen(
     var showSourcePicker by remember { mutableStateOf(false) }
     var showTargetPicker by remember { mutableStateOf(false) }
 
-    // Permission
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> viewModel.setPermissionGranted(granted) }
@@ -118,7 +118,6 @@ fun CameraScreen(
                 .padding(paddingValues)
         ) {
             if (!uiState.hasCameraPermission) {
-                // Permission denied
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -135,9 +134,12 @@ fun CameraScreen(
             } else {
                 when (uiState.mode) {
                     CameraMode.LIVE -> {
-                        LiveCameraView(viewModel = viewModel, onPreviewView = { previewViewRef = it })
+                        LiveCameraView(
+                            viewModel = viewModel,
+                            onPreviewView = { previewViewRef = it }
+                        )
 
-                        // Lightweight OCR highlight — just thin colored borders
+                        // Thin borders around detected text lines
                         if (uiState.blocks.isNotEmpty() && uiState.imageWidth > 0) {
                             OcrHighlightOverlay(
                                 blocks = uiState.blocks,
@@ -147,11 +149,9 @@ fun CameraScreen(
                         }
                     }
                     CameraMode.CAPTURE -> {
-                        CaptureView(
-                            bitmap = uiState.capturedBitmap,
-                            blocks = uiState.blocks,
-                            imageWidth = uiState.imageWidth,
-                            imageHeight = uiState.imageHeight
+                        // Show the painted bitmap (translations baked in)
+                        CaptureImageView(
+                            bitmap = uiState.paintedBitmap
                         )
                     }
                 }
@@ -241,9 +241,7 @@ fun CameraScreen(
     }
 }
 
-/**
- * Live camera — just the preview, no overlay processing here.
- */
+/** Live camera preview with OCR frame analysis. */
 @androidx.camera.core.ExperimentalGetImage
 @Composable
 private fun LiveCameraView(
@@ -295,10 +293,7 @@ private fun LiveCameraView(
     )
 }
 
-/**
- * Live OCR overlay — thin colored borders around detected text blocks.
- * No text rendering, just clean outlines showing where text was found.
- */
+/** Thin colored borders around detected text lines. */
 @Composable
 private fun OcrHighlightOverlay(
     blocks: List<TranslatedBlock>,
@@ -306,58 +301,45 @@ private fun OcrHighlightOverlay(
     imageHeight: Int
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // The camera image is typically rotated. ML Kit returns coords
-        // in the rotated image space. PreviewView FILL_CENTER scales
-        // the image to fill the view, so we scale proportionally.
         val scaleX = size.width / imageWidth.toFloat()
         val scaleY = size.height / imageHeight.toFloat()
-        val scale = maxOf(scaleX, scaleY) // FILL_CENTER uses max
+        val scale = maxOf(scaleX, scaleY)
         val offsetX = (size.width - imageWidth * scale) / 2f
         val offsetY = (size.height - imageHeight * scale) / 2f
 
         for (block in blocks) {
             val box = block.boundingBox
-            // Filter tiny blocks (noise)
-            if (box.width() < 20 || box.height() < 10) continue
-
             val left = box.left * scale + offsetX
             val top = box.top * scale + offsetY
             val w = box.width() * scale
             val h = box.height() * scale
 
-            // Draw rounded border
             drawRoundRect(
                 color = Color(0xFF4FC3F7),
                 topLeft = Offset(left, top),
                 size = Size(w, h),
                 cornerRadius = CornerRadius(4f),
-                style = Stroke(width = 2.5f)
+                style = Stroke(width = 2f)
             )
         }
     }
 }
 
-/**
- * Captured image with pinch-to-zoom + translation overlay.
- * Translation text is rendered over a semi-transparent background
- * on top of each detected text block.
- */
+/** Display the painted bitmap (with translations baked in) with pinch-to-zoom. */
 @Composable
-private fun CaptureView(
-    bitmap: Bitmap?,
-    blocks: List<TranslatedBlock>,
-    imageWidth: Int,
-    imageHeight: Int
-) {
+private fun CaptureImageView(bitmap: android.graphics.Bitmap?) {
     if (bitmap == null) return
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
-    val textMeasurer = rememberTextMeasurer()
+
     val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
 
-    Canvas(
+    Image(
+        bitmap = imageBitmap,
+        contentDescription = "Captured translation",
+        contentScale = ContentScale.Fit,
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
@@ -368,80 +350,11 @@ private fun CaptureView(
                     offsetY += pan.y
                 }
             }
-    ) {
-        val canvasW = size.width
-        val canvasH = size.height
-
-        // Fit image to canvas
-        val fitScale = minOf(canvasW / bitmap.width, canvasH / bitmap.height)
-        val baseOffsetX = (canvasW - bitmap.width * fitScale) / 2f
-        val baseOffsetY = (canvasH - bitmap.height * fitScale) / 2f
-
-        val totalScale = fitScale * scale
-        val totalOffsetX = baseOffsetX + offsetX
-        val totalOffsetY = baseOffsetY + offsetY
-
-        // Draw bitmap
-        drawImage(
-            image = imageBitmap,
-            dstOffset = androidx.compose.ui.unit.IntOffset(
-                totalOffsetX.toInt(), totalOffsetY.toInt()
-            ),
-            dstSize = androidx.compose.ui.unit.IntSize(
-                (bitmap.width * totalScale).toInt(),
-                (bitmap.height * totalScale).toInt()
-            )
-        )
-
-        // Draw translations on top
-        // OCR coords are in bitmap space, so scale by totalScale
-        val ocrScaleX = totalScale
-        val ocrScaleY = totalScale
-
-        for (block in blocks) {
-            val box = block.boundingBox
-            if (box.width() < 20 || box.height() < 10) continue
-
-            val left = box.left * ocrScaleX + totalOffsetX
-            val top = box.top * ocrScaleY + totalOffsetY
-            val w = box.width() * ocrScaleX
-            val h = box.height() * ocrScaleY
-
-            val hasTranslation = block.translatedText.isNotBlank()
-
-            if (hasTranslation) {
-                // Solid background to cover original text
-                drawRoundRect(
-                    color = Color(0xE6222222),
-                    topLeft = Offset(left, top),
-                    size = Size(w, h),
-                    cornerRadius = CornerRadius(4f)
-                )
-
-                // Translated text
-                val fontSize = (h * 0.35f).coerceIn(8f, 22f)
-                val layoutResult = textMeasurer.measure(
-                    text = AnnotatedString(block.translatedText),
-                    style = TextStyle(
-                        color = Color.White,
-                        fontSize = fontSize.sp,
-                        lineHeight = (fontSize * 1.15f).sp
-                    ),
-                    constraints = androidx.compose.ui.unit.Constraints(
-                        maxWidth = w.toInt().coerceAtLeast(1)
-                    )
-                )
-                drawText(layoutResult, topLeft = Offset(left + 4f, top + 2f))
-            } else {
-                // Not yet translated — just a border
-                drawRoundRect(
-                    color = Color(0xFF4FC3F7),
-                    topLeft = Offset(left, top),
-                    size = Size(w, h),
-                    cornerRadius = CornerRadius(4f),
-                    style = Stroke(width = 2f)
-                )
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationX = offsetX
+                translationY = offsetY
             }
-        }
-    }
+    )
 }

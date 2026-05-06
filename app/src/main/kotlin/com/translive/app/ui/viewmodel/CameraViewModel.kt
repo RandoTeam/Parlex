@@ -1,7 +1,11 @@
 package com.translive.app.ui.viewmodel
 
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
 import android.graphics.Rect
+import android.text.TextPaint
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.model.Language
@@ -16,11 +20,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.math.max
 
 data class TranslatedBlock(
     val originalText: String,
     val translatedText: String,
     val boundingBox: Rect
+)
+
+/** A single OCR line ready for painting. */
+private data class PaintLine(
+    val text: String,
+    val box: Rect
 )
 
 enum class CameraMode { LIVE, CAPTURE }
@@ -32,6 +43,8 @@ data class CameraUiState(
     val blocks: List<TranslatedBlock> = emptyList(),
     val isProcessing: Boolean = false,
     val capturedBitmap: Bitmap? = null,
+    /** Bitmap with translations painted on top */
+    val paintedBitmap: Bitmap? = null,
     val imageWidth: Int = 0,
     val imageHeight: Int = 0,
     val hasCameraPermission: Boolean = false
@@ -48,7 +61,6 @@ class CameraViewModel @Inject constructor(
 
     private var translateJob: Job? = null
 
-    /** Throttle: don't process if already processing */
     @Volatile
     private var isLiveProcessing = false
 
@@ -71,9 +83,7 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
-     * Live mode: OCR only — show detected text boxes, no translation.
-     * This is instant and doesn't touch the LLM at all.
-     * (Like Google Translate: live boxes, translate only on capture.)
+     * Live mode: OCR only — show line-level boxes, no translation.
      */
     @androidx.camera.core.ExperimentalGetImage
     fun processLiveFrame(imageProxy: androidx.camera.core.ImageProxy) {
@@ -88,20 +98,22 @@ class CameraViewModel @Inject constructor(
                 val state = _uiState.value
                 val ocrResult = ocrEngine.recognize(imageProxy, state.sourceLanguage.code)
 
-                // Show OCR boxes only (no translation in live mode)
-                val blocks = ocrResult.blocks.map {
-                    TranslatedBlock(it.text, "", it.boundingBox)
+                val lineBlocks = ocrResult.blocks.flatMap { block ->
+                    block.lines
+                        .filter { it.boundingBox.width() > 30 && it.boundingBox.height() > 10 }
+                        .map { line ->
+                            TranslatedBlock(line.text, "", line.boundingBox)
+                        }
                 }
 
                 _uiState.update {
                     it.copy(
-                        blocks = blocks,
+                        blocks = lineBlocks,
                         imageWidth = ocrResult.imageWidth,
                         imageHeight = ocrResult.imageHeight
                     )
                 }
             } catch (_: Exception) {
-                // Ignore frame errors
             } finally {
                 isLiveProcessing = false
             }
@@ -109,14 +121,22 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
-     * Capture: freeze bitmap, OCR all text, then translate each block
-     * sequentially using the mutex-protected translateSafe().
+     * Capture: freeze bitmap → OCR → batch translate → paint on bitmap.
      */
     fun capture(bitmap: Bitmap) {
+        // Downscale if too large
+        val maxSize = 1920
+        val longest = max(bitmap.width, bitmap.height)
+        val workBitmap = if (longest > maxSize) {
+            val s = maxSize.toFloat() / longest
+            Bitmap.createScaledBitmap(bitmap, (bitmap.width * s).toInt(), (bitmap.height * s).toInt(), true)
+        } else bitmap
+
         _uiState.update {
             it.copy(
                 mode = CameraMode.CAPTURE,
-                capturedBitmap = bitmap,
+                capturedBitmap = workBitmap,
+                paintedBitmap = workBitmap,
                 blocks = emptyList(),
                 isProcessing = true
             )
@@ -125,67 +145,117 @@ class CameraViewModel @Inject constructor(
         translateJob = viewModelScope.launch(Dispatchers.IO) {
             try {
                 val state = _uiState.value
-                val ocrResult = ocrEngine.recognize(bitmap, state.sourceLanguage.code)
+                val ocrResult = ocrEngine.recognize(workBitmap, state.sourceLanguage.code)
 
                 if (ocrResult.blocks.isEmpty()) {
-                    _uiState.update {
-                        it.copy(isProcessing = false)
-                    }
+                    _uiState.update { it.copy(isProcessing = false) }
                     return@launch
                 }
 
-                // Show OCR boxes immediately (before translation)
-                val ocrBlocks = ocrResult.blocks.map {
-                    TranslatedBlock(it.text, "", it.boundingBox)
-                }
-                _uiState.update {
-                    it.copy(
-                        blocks = ocrBlocks,
-                        imageWidth = ocrResult.imageWidth,
-                        imageHeight = ocrResult.imageHeight
-                    )
+                // Collect all lines
+                val allLines = ocrResult.blocks.flatMap { block ->
+                    block.lines
+                        .filter { it.boundingBox.width() > 20 && it.boundingBox.height() > 8 }
+                        .map { PaintLine(it.text, it.boundingBox) }
                 }
 
-                // Translate each block one by one (mutex ensures no crash)
-                if (translationEngine.isLoaded) {
-                    val translatedBlocks = mutableListOf<TranslatedBlock>()
+                if (allLines.isEmpty()) {
+                    _uiState.update { it.copy(isProcessing = false) }
+                    return@launch
+                }
 
-                    for (block in ocrResult.blocks) {
-                        val translated = try {
-                            translationEngine.translateSafe(
-                                block.text, state.sourceLanguage, state.targetLanguage
-                            )
-                        } catch (_: Exception) { "" }
+                // BATCH: one LLM call for all lines
+                val separator = "\n---\n"
+                val allText = allLines.joinToString(separator) { it.text }
 
-                        translatedBlocks.add(
-                            TranslatedBlock(block.text, translated, block.boundingBox)
+                val translated = if (translationEngine.isLoaded) {
+                    try {
+                        translationEngine.translateSafe(
+                            allText, state.sourceLanguage, state.targetLanguage
                         )
-
-                        // Update UI progressively as each block translates
-                        val current = translatedBlocks.toList() +
-                            ocrResult.blocks.drop(translatedBlocks.size).map {
-                                TranslatedBlock(it.text, "", it.boundingBox)
-                            }
-                        _uiState.update { it.copy(blocks = current) }
+                    } catch (e: Exception) {
+                        Log.e("CameraVM", "Batch translate failed: ${e.message}")
+                        ""
                     }
-                }
+                } else ""
 
-                _uiState.update { it.copy(isProcessing = false) }
+                val translatedParts = if (translated.isNotBlank()) {
+                    translated.split("---").map { it.trim() }
+                } else emptyList()
+
+                // Paint on bitmap
+                val painted = paintOnBitmap(workBitmap, allLines, translatedParts)
+
+                _uiState.update {
+                    it.copy(paintedBitmap = painted, isProcessing = false)
+                }
             } catch (e: Exception) {
+                Log.e("CameraVM", "Capture error: ${e.message}", e)
                 _uiState.update { it.copy(isProcessing = false) }
             }
         }
     }
 
     /**
-     * Return to live camera mode.
+     * Paint translated text directly on bitmap — like Google Translate.
+     * For each line: solid dark background + white translated text.
      */
+    private fun paintOnBitmap(
+        original: Bitmap,
+        lines: List<PaintLine>,
+        translations: List<String>
+    ): Bitmap {
+        val result = original.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(result)
+
+        val bgPaint = Paint().apply {
+            color = android.graphics.Color.argb(220, 30, 30, 30)
+            style = Paint.Style.FILL
+        }
+
+        val textPaint = TextPaint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.WHITE
+        }
+
+        for (i in lines.indices) {
+            val line = lines[i]
+            val translatedText = translations.getOrNull(i)
+                ?.takeIf { it.isNotBlank() }
+                ?: line.text
+
+            val box = line.box
+
+            // Draw background over original text
+            canvas.drawRect(box, bgPaint)
+
+            // Fit text size: start at ~75% of box height, shrink if too wide
+            val boxH = box.height().toFloat()
+            val boxW = box.width().toFloat()
+            textPaint.textSize = (boxH * 0.75f).coerceIn(10f, 40f)
+
+            var measured = textPaint.measureText(translatedText)
+            while (measured > boxW && textPaint.textSize > 8f) {
+                textPaint.textSize -= 1f
+                measured = textPaint.measureText(translatedText)
+            }
+
+            // Draw text — vertically centered in the box
+            val x = box.left.toFloat() + 2f
+            val y = box.top.toFloat() + (boxH - textPaint.descent() - textPaint.ascent()) / 2f
+            canvas.drawText(translatedText, x, y, textPaint)
+        }
+
+        return result
+    }
+
     fun backToLive() {
         translateJob?.cancel()
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
                 capturedBitmap = null,
+                paintedBitmap = null,
                 blocks = emptyList(),
                 isProcessing = false
             )
