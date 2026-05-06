@@ -15,6 +15,13 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 
+data class TranslationStats(
+    val promptTokens: Int = 0,
+    val generatedTokens: Int = 0,
+    val totalTimeMs: Long = 0,
+    val tokensPerSecond: Float = 0f
+)
+
 data class TranslationUiState(
     val sourceLanguage: Language = Language.RUSSIAN,
     val targetLanguage: Language = Language.ENGLISH,
@@ -24,7 +31,8 @@ data class TranslationUiState(
     val isModelLoaded: Boolean = false,
     val isModelLoading: Boolean = false,
     val activeModelName: String? = null,
-    val error: String? = null
+    val error: String? = null,
+    val stats: TranslationStats? = null
 )
 
 @HiltViewModel
@@ -82,9 +90,14 @@ class TranslationViewModel @Inject constructor(
                     )
                 }
 
-                // Auto-load TTS if available
+                // Auto-load TTS if available (non-fatal)
                 if (loaded) {
-                    ttsEngine.loadModel()
+                    try {
+                        ttsEngine.loadModel()
+                    } catch (e: Exception) {
+                        // TTS load failure should never crash the app
+                        android.util.Log.w("TranslationVM", "TTS auto-load failed: ${e.message}")
+                    }
                     resetIdleTimer()
                 }
             } catch (e: Exception) {
@@ -122,18 +135,35 @@ class TranslationViewModel @Inject constructor(
         val state = _uiState.value
         if (state.sourceText.isBlank() || !state.isModelLoaded || state.isTranslating) return
 
-        _uiState.update { it.copy(isTranslating = true, error = null) }
+        _uiState.update { it.copy(isTranslating = true, error = null, stats = null) }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                val startTime = System.currentTimeMillis()
+
                 val result = engine.translate(
                     sourceText = state.sourceText,
                     source = state.sourceLanguage,
                     target = state.targetLanguage
                 )
 
+                val elapsed = System.currentTimeMillis() - startTime
+
+                // Estimate token counts from text lengths
+                // Average: ~1 token per 4 chars for Latin, ~1 per 1.5 for CJK
+                val promptTokens = estimateTokens(state.sourceText)
+                val genTokens = estimateTokens(result)
+                val tps = if (elapsed > 0) genTokens * 1000f / elapsed else 0f
+
+                val stats = TranslationStats(
+                    promptTokens = promptTokens,
+                    generatedTokens = genTokens,
+                    totalTimeMs = elapsed,
+                    tokensPerSecond = tps
+                )
+
                 _uiState.update {
-                    it.copy(translatedText = result, isTranslating = false)
+                    it.copy(translatedText = result, isTranslating = false, stats = stats)
                 }
 
                 // Save to history
@@ -154,6 +184,14 @@ class TranslationViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /** Rough token estimate: CJK ~1.5 chars/token, Latin ~4 chars/token */
+    private fun estimateTokens(text: String): Int {
+        if (text.isBlank()) return 0
+        val cjk = text.count { it.code in 0x4E00..0x9FFF || it.code in 0x3040..0x30FF || it.code in 0xAC00..0xD7AF }
+        val other = text.length - cjk
+        return ((cjk / 1.5f) + (other / 4f)).toInt().coerceAtLeast(1)
     }
 
     /**

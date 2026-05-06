@@ -263,7 +263,37 @@ fun TranslationScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Stats bar
+                        uiState.stats?.let { stats ->
+                            HorizontalDivider(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                thickness = 0.5.dp,
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "⏱ ${formatTime(stats.totalTimeMs)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "📥 ${stats.promptTokens} → 📤 ${stats.generatedTokens} tok",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "⚡ ${"%.1f".format(stats.tokensPerSecond)} tok/s",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(4.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End
@@ -371,5 +401,13 @@ private fun LanguageSelectorRow(
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp)
         )
+    }
+}
+
+private fun formatTime(ms: Long): String {
+    return when {
+        ms < 1000 -> "${ms}ms"
+        ms < 60_000 -> "${"%.1f".format(ms / 1000f)}s"
+        else -> "${ms / 60_000}m ${(ms % 60_000) / 1000}s"
     }
 }

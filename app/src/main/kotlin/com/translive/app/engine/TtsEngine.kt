@@ -64,8 +64,15 @@ class TtsEngine @Inject constructor(
             tts = OfflineTts(config = config)
             _isModelReady.value = true
             _state.value = TtsState.IDLE
+            android.util.Log.i("TtsEngine", "Kokoro TTS loaded successfully")
             true
         } catch (e: Exception) {
+            android.util.Log.e("TtsEngine", "Failed to load TTS model: ${e.message}", e)
+            _state.value = TtsState.ERROR
+            _isModelReady.value = false
+            false
+        } catch (e: UnsatisfiedLinkError) {
+            android.util.Log.e("TtsEngine", "Native library error: ${e.message}", e)
             _state.value = TtsState.ERROR
             _isModelReady.value = false
             false
