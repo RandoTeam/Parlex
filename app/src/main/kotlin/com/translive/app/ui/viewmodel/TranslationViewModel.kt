@@ -143,15 +143,21 @@ class TranslationViewModel @Inject constructor(
                 val textBuilder = StringBuilder()
                 var streamResult: TranslationEngine.StreamResult? = null
 
-                engine.translateStreaming(
-                    sourceText = state.sourceText,
-                    source = state.sourceLanguage,
-                    target = state.targetLanguage,
-                    onComplete = { streamResult = it }
-                ).collect { token ->
-                    textBuilder.append(token)
-                    val currentText = textBuilder.toString().trim()
-                    _uiState.update { it.copy(translatedText = currentText) }
+                // Acquire mutex to prevent concurrent native access (e.g. camera)
+                engine.inferenceMutex.lock()
+                try {
+                    engine.translateStreaming(
+                        sourceText = state.sourceText,
+                        source = state.sourceLanguage,
+                        target = state.targetLanguage,
+                        onComplete = { streamResult = it }
+                    ).collect { token ->
+                        textBuilder.append(token)
+                        val currentText = textBuilder.toString().trim()
+                        _uiState.update { it.copy(translatedText = currentText) }
+                    }
+                } finally {
+                    engine.inferenceMutex.unlock()
                 }
 
                 val elapsed = System.currentTimeMillis() - startTime

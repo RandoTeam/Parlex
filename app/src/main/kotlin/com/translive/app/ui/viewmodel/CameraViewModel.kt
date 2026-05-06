@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.model.Language
 import com.translive.app.engine.OcrEngine
-import com.translive.app.engine.OcrResult
 import com.translive.app.engine.TranslationEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -72,8 +71,9 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
-     * Process a live camera frame. Throttled: skips if previous frame
-     * is still processing. Translates only the largest text block.
+     * Live mode: OCR only — show detected text boxes, no translation.
+     * This is instant and doesn't touch the LLM at all.
+     * (Like Google Translate: live boxes, translate only on capture.)
      */
     @androidx.camera.core.ExperimentalGetImage
     fun processLiveFrame(imageProxy: androidx.camera.core.ImageProxy) {
@@ -88,48 +88,20 @@ class CameraViewModel @Inject constructor(
                 val state = _uiState.value
                 val ocrResult = ocrEngine.recognize(imageProxy, state.sourceLanguage.code)
 
-                if (ocrResult.blocks.isEmpty()) {
-                    _uiState.update {
-                        it.copy(
-                            blocks = emptyList(),
-                            imageWidth = ocrResult.imageWidth,
-                            imageHeight = ocrResult.imageHeight
-                        )
-                    }
-                } else {
-                    // In live mode, translate only the largest block for speed
-                    val largest = ocrResult.blocks.maxByOrNull {
-                        it.boundingBox.width() * it.boundingBox.height()
-                    }
+                // Show OCR boxes only (no translation in live mode)
+                val blocks = ocrResult.blocks.map {
+                    TranslatedBlock(it.text, "", it.boundingBox)
+                }
 
-                    val translated = if (largest != null && translationEngine.isLoaded) {
-                        try {
-                            val result = translationEngine.translate(
-                                largest.text, state.sourceLanguage, state.targetLanguage
-                            )
-                            listOf(TranslatedBlock(largest.text, result, largest.boundingBox))
-                        } catch (_: Exception) {
-                            // Translation failed, show OCR only
-                            ocrResult.blocks.map {
-                                TranslatedBlock(it.text, "", it.boundingBox)
-                            }
-                        }
-                    } else {
-                        ocrResult.blocks.map {
-                            TranslatedBlock(it.text, "", it.boundingBox)
-                        }
-                    }
-
-                    _uiState.update {
-                        it.copy(
-                            blocks = translated,
-                            imageWidth = ocrResult.imageWidth,
-                            imageHeight = ocrResult.imageHeight
-                        )
-                    }
+                _uiState.update {
+                    it.copy(
+                        blocks = blocks,
+                        imageWidth = ocrResult.imageWidth,
+                        imageHeight = ocrResult.imageHeight
+                    )
                 }
             } catch (_: Exception) {
-                // Ignore frame processing errors
+                // Ignore frame errors
             } finally {
                 isLiveProcessing = false
             }
@@ -137,11 +109,17 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
-     * Capture: freeze the bitmap and run full OCR + translate all blocks.
+     * Capture: freeze bitmap, OCR all text, then translate each block
+     * sequentially using the mutex-protected translateSafe().
      */
     fun capture(bitmap: Bitmap) {
         _uiState.update {
-            it.copy(mode = CameraMode.CAPTURE, capturedBitmap = bitmap, blocks = emptyList(), isProcessing = true)
+            it.copy(
+                mode = CameraMode.CAPTURE,
+                capturedBitmap = bitmap,
+                blocks = emptyList(),
+                isProcessing = true
+            )
         }
 
         translateJob = viewModelScope.launch(Dispatchers.IO) {
@@ -149,26 +127,50 @@ class CameraViewModel @Inject constructor(
                 val state = _uiState.value
                 val ocrResult = ocrEngine.recognize(bitmap, state.sourceLanguage.code)
 
-                val translatedBlocks = ocrResult.blocks.map { block ->
-                    val translated = if (translationEngine.isLoaded) {
-                        try {
-                            translationEngine.translate(
+                if (ocrResult.blocks.isEmpty()) {
+                    _uiState.update {
+                        it.copy(isProcessing = false)
+                    }
+                    return@launch
+                }
+
+                // Show OCR boxes immediately (before translation)
+                val ocrBlocks = ocrResult.blocks.map {
+                    TranslatedBlock(it.text, "", it.boundingBox)
+                }
+                _uiState.update {
+                    it.copy(
+                        blocks = ocrBlocks,
+                        imageWidth = ocrResult.imageWidth,
+                        imageHeight = ocrResult.imageHeight
+                    )
+                }
+
+                // Translate each block one by one (mutex ensures no crash)
+                if (translationEngine.isLoaded) {
+                    val translatedBlocks = mutableListOf<TranslatedBlock>()
+
+                    for (block in ocrResult.blocks) {
+                        val translated = try {
+                            translationEngine.translateSafe(
                                 block.text, state.sourceLanguage, state.targetLanguage
                             )
                         } catch (_: Exception) { "" }
-                    } else ""
 
-                    TranslatedBlock(block.text, translated, block.boundingBox)
+                        translatedBlocks.add(
+                            TranslatedBlock(block.text, translated, block.boundingBox)
+                        )
+
+                        // Update UI progressively as each block translates
+                        val current = translatedBlocks.toList() +
+                            ocrResult.blocks.drop(translatedBlocks.size).map {
+                                TranslatedBlock(it.text, "", it.boundingBox)
+                            }
+                        _uiState.update { it.copy(blocks = current) }
+                    }
                 }
 
-                _uiState.update {
-                    it.copy(
-                        blocks = translatedBlocks,
-                        imageWidth = ocrResult.imageWidth,
-                        imageHeight = ocrResult.imageHeight,
-                        isProcessing = false
-                    )
-                }
+                _uiState.update { it.copy(isProcessing = false) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isProcessing = false) }
             }

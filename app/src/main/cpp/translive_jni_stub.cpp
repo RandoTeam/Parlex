@@ -1,6 +1,6 @@
 /**
  * Stub JNI bridge — used when llama.cpp is not yet cloned.
- * All methods return placeholder values so the app compiles.
+ * All methods return placeholder values so the app compiles and runs.
  */
 
 #include <jni.h>
@@ -16,7 +16,8 @@ JNIEXPORT jlong JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
     JNIEnv*, jobject, jstring, jint) {
     LOGW("Stub: nativeLoadModel called. llama.cpp not integrated yet.");
-    return 0;
+    // Return non-zero so the engine thinks a model is loaded
+    return 1;
 }
 
 JNIEXPORT jstring JNICALL
@@ -35,14 +36,25 @@ Java_com_translive_app_engine_TranslationEngine_nativeUnloadModel(
 JNIEXPORT jboolean JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeIsLoaded(
     JNIEnv*, jobject, jlong) {
-    return JNI_FALSE;
+    // Return true so streaming and translate() don't throw require() failures
+    return JNI_TRUE;
 }
 
 JNIEXPORT jintArray JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
-    JNIEnv* env, jobject, jlong, jstring, jint, jobject) {
+    JNIEnv* env, jobject, jlong, jstring, jint, jobject callback) {
     LOGW("Stub: nativeTranslateStreaming called. llama.cpp not integrated yet.");
-    jint counts[2] = {0, 0};
+
+    // Send one stub token through the callback so the UI shows something
+    jclass cbClass = env->GetObjectClass(callback);
+    jmethodID onToken = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
+    if (onToken != nullptr) {
+        jstring stubToken = env->NewStringUTF("[Stub: model not loaded]");
+        env->CallBooleanMethod(callback, onToken, stubToken);
+        env->DeleteLocalRef(stubToken);
+    }
+
+    jint counts[2] = {0, 1};
     jintArray arr = env->NewIntArray(2);
     env->SetIntArrayRegion(arr, 0, 2, counts);
     return arr;

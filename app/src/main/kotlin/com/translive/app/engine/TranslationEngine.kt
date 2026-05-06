@@ -1,15 +1,22 @@
 package com.translive.app.engine
 
 import com.translive.app.data.model.Language
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.channelFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * JNI bridge to llama.cpp for Hy-MT1.5-1.8B GGUF inference.
  * Native implementation in src/main/cpp/translive_jni.cpp
+ *
+ * IMPORTANT: llama.cpp is NOT thread-safe. All native calls are
+ * serialized through [inferenceMutex]. Never call native methods directly.
  */
 class TranslationEngine {
+
+    /** Mutex to serialize all native calls — llama.cpp is not thread-safe. */
+    val inferenceMutex = Mutex()
 
     companion object {
         init {
@@ -78,7 +85,18 @@ class TranslationEngine {
     ): String {
         require(isLoaded) { "Model not loaded. Call loadModel() first." }
         val prompt = buildPrompt(sourceText, source, target)
+        // Note: caller must hold inferenceMutex when calling from coroutines
         return nativeTranslate(contextPtr, prompt, maxTokens).trim()
+    }
+
+    /** Thread-safe translate for use from coroutines. */
+    suspend fun translateSafe(
+        sourceText: String,
+        source: Language,
+        target: Language,
+        maxTokens: Int = 2048
+    ): String = inferenceMutex.withLock {
+        translate(sourceText, source, target, maxTokens)
     }
 
     /**
@@ -92,14 +110,17 @@ class TranslationEngine {
         target: Language,
         maxTokens: Int = 2048,
         onComplete: ((StreamResult) -> Unit)? = null
-    ): Flow<String> = callbackFlow {
+    ): Flow<String> = channelFlow {
         require(isLoaded) { "Model not loaded. Call loadModel() first." }
         val prompt = buildPrompt(sourceText, source, target)
 
         val callback = object : TokenCallback {
             override fun onToken(token: String): Boolean {
-                val result = trySend(token)
-                return result.isSuccess
+                return try {
+                    trySend(token).isSuccess
+                } catch (_: Exception) {
+                    false
+                }
             }
         }
 
@@ -109,9 +130,6 @@ class TranslationEngine {
             generatedTokens = counts.getOrElse(1) { 0 }
         )
         onComplete?.invoke(streamResult)
-        close()
-
-        awaitClose { /* native call already finished */ }
     }
 
     private fun buildPrompt(text: String, source: Language, target: Language): String {
