@@ -118,6 +118,10 @@ class SpeechEngine @Inject constructor(
             Log.e(TAG, "Failed to initialize: ${e.message}", e)
             _isReady.value = false
             false
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "Native library error: ${e.message}", e)
+            _isReady.value = false
+            false
         }
     }
 
@@ -159,6 +163,7 @@ class SpeechEngine @Inject constructor(
         }
 
         audioRecord?.startRecording()
+        vad?.reset()  // Reset VAD state for new session
         _state.value = ListeningState.LISTENING
 
         listenJob = CoroutineScope(Dispatchers.IO).launch {
@@ -200,14 +205,18 @@ class SpeechEngine @Inject constructor(
     private fun recognizeSegment(samples: FloatArray): SpeechResult? {
         val rec = recognizer ?: return null
         val stream = rec.createStream()
-        stream.acceptWaveform(samples, SAMPLE_RATE)
-        rec.decode(stream)
-        val text = rec.getResult(stream).text.trim()
+        return try {
+            stream.acceptWaveform(samples, SAMPLE_RATE)
+            rec.decode(stream)
+            val text = rec.getResult(stream).text.trim()
 
-        if (text.isBlank()) return null
+            if (text.isBlank()) return null
 
-        val language = detectLanguage(text)
-        return SpeechResult(text = text, language = language)
+            val language = detectLanguage(text)
+            SpeechResult(text = text, language = language)
+        } finally {
+            stream.release()  // CRITICAL: free native memory
+        }
     }
 
     /**

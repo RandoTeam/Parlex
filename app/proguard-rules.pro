@@ -19,6 +19,10 @@
 # OcrEngine
 -keep class com.translive.app.engine.OcrEngine { *; }
 
+# SpeechEngine + TtsEngine (sherpa-onnx native interop)
+-keep class com.translive.app.engine.SpeechEngine { *; }
+-keep class com.translive.app.engine.TtsEngine { *; }
+
 # Room entities
 -keep class com.translive.app.data.model.** { *; }
 -keep class com.translive.app.data.db.** { *; }

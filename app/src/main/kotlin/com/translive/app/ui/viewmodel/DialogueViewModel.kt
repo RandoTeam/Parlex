@@ -78,25 +78,6 @@ class DialogueViewModel @Inject constructor(
     fun startConversation() {
         if (_uiState.value.isConversationActive) return
 
-        // Initialize engines
-        viewModelScope.launch(Dispatchers.IO) {
-            if (!speechEngine.isReady.value) {
-                speechEngine.initialize()
-            }
-            if (!ttsEngine.isModelReady.value) {
-                ttsEngine.loadModel()
-            }
-
-            // Create a Room session
-            val state = _uiState.value
-            val session = DialogueSession(
-                languageA = state.sourceLanguage.code,
-                languageB = state.targetLanguage.code,
-                title = "${state.sourceLanguage.flag} ↔ ${state.targetLanguage.flag}"
-            )
-            currentSessionId = dialogueDao.insertSession(session)
-        }
-
         _uiState.update {
             it.copy(
                 isConversationActive = true,
@@ -105,8 +86,48 @@ class DialogueViewModel @Inject constructor(
             )
         }
 
-        speechEngine.startListening { result ->
-            onSpeechRecognized(result)
+        // Initialize engines THEN start listening (sequential)
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (!speechEngine.isReady.value) {
+                    val ok = speechEngine.initialize()
+                    if (!ok) {
+                        _uiState.update {
+                            it.copy(
+                                isConversationActive = false,
+                                phase = DialoguePhase.ERROR,
+                                error = "STT модели не загружены. Скачайте в разделе Модели."
+                            )
+                        }
+                        return@launch
+                    }
+                }
+                if (!ttsEngine.isModelReady.value) {
+                    ttsEngine.loadModel()
+                }
+
+                // Create a Room session
+                val state = _uiState.value
+                val session = DialogueSession(
+                    languageA = state.sourceLanguage.code,
+                    languageB = state.targetLanguage.code,
+                    title = "${state.sourceLanguage.flag} ↔ ${state.targetLanguage.flag}"
+                )
+                currentSessionId = dialogueDao.insertSession(session)
+
+                // Now safe to start listening
+                speechEngine.startListening { result ->
+                    onSpeechRecognized(result)
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isConversationActive = false,
+                        phase = DialoguePhase.ERROR,
+                        error = "Ошибка запуска: ${e.message}"
+                    )
+                }
+            }
         }
     }
 
