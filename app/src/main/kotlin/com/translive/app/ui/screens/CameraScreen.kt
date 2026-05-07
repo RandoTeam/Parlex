@@ -275,22 +275,21 @@ private fun LiveCameraView(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { Executors.newSingleThreadExecutor() }
+    val previewView = remember {
+        PreviewView(context).apply {
+            layoutParams = ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            scaleType = PreviewView.ScaleType.FILL_CENTER
+        }
+    }
 
-    AndroidView(
-        factory = { ctx ->
-            PreviewView(ctx).apply {
-                layoutParams = ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                )
-                scaleType = PreviewView.ScaleType.FILL_CENTER
-                onPreviewView(this)
-            }
-        },
-        modifier = Modifier.fillMaxSize(),
-        update = { previewView ->
-            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-            cameraProviderFuture.addListener({
+    // Bind camera exactly once
+    DisposableEffect(lifecycleOwner) {
+        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+        cameraProviderFuture.addListener({
+            try {
                 val provider = cameraProviderFuture.get()
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = previewView.surfaceProvider
@@ -303,17 +302,30 @@ private fun LiveCameraView(
                             viewModel.processLiveFrame(imageProxy)
                         }
                     }
-                try {
-                    provider.unbindAll()
-                    provider.bindToLifecycle(
-                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview, imageAnalysis
-                    )
-                } catch (e: Exception) {
-                    android.util.Log.e("CameraScreen", "Camera bind failed: ${e.message}")
-                }
-            }, ContextCompat.getMainExecutor(context))
+                provider.unbindAll()
+                provider.bindToLifecycle(
+                    lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
+                    preview, imageAnalysis
+                )
+                android.util.Log.i("CameraScreen", "Camera bound OK, analyzer attached")
+            } catch (e: Exception) {
+                android.util.Log.e("CameraScreen", "Camera bind failed: ${e.message}", e)
+            }
+        }, ContextCompat.getMainExecutor(context))
+
+        onPreviewView(previewView)
+
+        onDispose {
+            try {
+                val provider = ProcessCameraProvider.getInstance(context).get()
+                provider.unbindAll()
+            } catch (_: Exception) {}
         }
+    }
+
+    AndroidView(
+        factory = { previewView },
+        modifier = Modifier.fillMaxSize()
     )
 }
 

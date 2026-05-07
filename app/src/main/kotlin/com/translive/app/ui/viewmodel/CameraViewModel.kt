@@ -128,6 +128,7 @@ class CameraViewModel @Inject constructor(
         }
         isLiveProcessing = true
         frameCounter++
+        Log.d("CameraVM", "processLiveFrame #$frameCounter, img=${imageProxy.width}x${imageProxy.height}")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -189,7 +190,8 @@ class CameraViewModel @Inject constructor(
                         imageHeight = ocrResult.imageHeight
                     )
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.e("CameraVM", "processLiveFrame error: ${e.message}", e)
             } finally {
                 isLiveProcessing = false
             }
