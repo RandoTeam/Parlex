@@ -172,6 +172,26 @@ fun CameraScreen(
                                 }
                             }
                         }
+
+                        // NMT error badge
+                        if (uiState.nmtError != null && !uiState.isNmtDownloading) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 8.dp)
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .background(Color(0xCCCC3333))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Filled.Warning, null, tint = Color.White,
+                                        modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(uiState.nmtError ?: "", color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
                     }
                     CameraMode.CAPTURE -> {
                         CaptureImageView(
@@ -282,6 +302,9 @@ private fun LiveCameraView(
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
             scaleType = PreviewView.ScaleType.FILL_CENTER
+            // COMPATIBLE = TextureView → guarantees .bitmap is non-null
+            // PERFORMANCE = SurfaceView → .bitmap returns null on many devices
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
     }
 

@@ -48,7 +48,8 @@ data class CameraUiState(
     val hasCameraPermission: Boolean = false,
     /** ML Kit model download status */
     val isNmtReady: Boolean = false,
-    val isNmtDownloading: Boolean = false
+    val isNmtDownloading: Boolean = false,
+    val nmtError: String? = null
 )
 
 @HiltViewModel
@@ -85,7 +86,12 @@ class CameraViewModel @Inject constructor(
         // Prepare NMT for default language pair
         viewModelScope.launch(Dispatchers.IO) {
             val state = _uiState.value
-            cameraTranslateEngine.prepare(state.sourceLanguage.code, state.targetLanguage.code)
+            val ok = cameraTranslateEngine.prepare(state.sourceLanguage.code, state.targetLanguage.code)
+            if (!ok) {
+                _uiState.update { it.copy(nmtError = "Модель перевода недоступна. Нужен интернет для первой загрузки.") }
+            } else {
+                _uiState.update { it.copy(nmtError = null) }
+            }
         }
     }
 
@@ -113,7 +119,12 @@ class CameraViewModel @Inject constructor(
     private fun prepareNmt() {
         viewModelScope.launch(Dispatchers.IO) {
             val state = _uiState.value
-            cameraTranslateEngine.prepare(state.sourceLanguage.code, state.targetLanguage.code)
+            val ok = cameraTranslateEngine.prepare(state.sourceLanguage.code, state.targetLanguage.code)
+            if (!ok) {
+                _uiState.update { it.copy(nmtError = "Модель перевода не скачана") }
+            } else {
+                _uiState.update { it.copy(nmtError = null) }
+            }
         }
     }
 

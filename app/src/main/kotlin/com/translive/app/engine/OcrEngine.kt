@@ -154,20 +154,25 @@ class OcrEngine @Inject constructor(
             }
         }
 
+        // ML Kit path — MUST keep imageProxy open until ML Kit finishes processing.
+        // InputImage.fromMediaImage() does NOT copy data; it holds a reference
+        // to the underlying buffer. Closing imageProxy before process() completes
+        // destroys the buffer → empty/garbage OCR results.
         val mediaImage = imageProxy.image ?: run {
             imageProxy.close()
             return OcrResult(emptyList(), 0, 0)
         }
-        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val image = InputImage.fromMediaImage(mediaImage, rotation)
+        val w = imageProxy.width
+        val h = imageProxy.height
         val recognizer = when (backend) {
             OcrBackend.MLKIT_CHINESE -> chineseRecognizer
             OcrBackend.MLKIT_DEVANAGARI -> devanagariRecognizer
             else -> latinRecognizer
         }
-        return try {
-            recognizeWithMlKit(image, recognizer)
-        } finally {
-            imageProxy.close()
+        return recognizeWithMlKit(image, recognizer, w, h) {
+            imageProxy.close()  // close AFTER ML Kit is done
         }
     }
 
@@ -175,7 +180,10 @@ class OcrEngine @Inject constructor(
 
     private suspend fun recognizeWithMlKit(
         image: InputImage,
-        recognizer: TextRecognizer
+        recognizer: TextRecognizer,
+        imageWidth: Int = image.width,
+        imageHeight: Int = image.height,
+        onComplete: (() -> Unit)? = null
     ): OcrResult = suspendCoroutine { cont ->
         recognizer.process(image)
             .addOnSuccessListener { result ->
@@ -188,11 +196,13 @@ class OcrEngine @Inject constructor(
                     if (lines.isEmpty()) return@mapNotNull null
                     OcrBlock(text = textBlock.text, boundingBox = blockBox, lines = lines)
                 }
-                cont.resume(OcrResult(blocks, image.width, image.height))
+                onComplete?.invoke()
+                cont.resume(OcrResult(blocks, imageWidth, imageHeight))
             }
             .addOnFailureListener { e ->
                 Log.e(TAG, "ML Kit OCR failed: ${e.message}", e)
-                cont.resume(OcrResult(emptyList(), image.width, image.height))
+                onComplete?.invoke()
+                cont.resume(OcrResult(emptyList(), imageWidth, imageHeight))
             }
     }
 
@@ -314,28 +324,51 @@ class OcrEngine @Inject constructor(
     @androidx.camera.core.ExperimentalGetImage
     private fun imageProxyToBitmap(imageProxy: androidx.camera.core.ImageProxy): Bitmap? {
         val image = imageProxy.image ?: return null
-        val planes = image.planes
-        val yBuffer = planes[0].buffer
-        val uBuffer = planes[1].buffer
-        val vBuffer = planes[2].buffer
+        val width = image.width
+        val height = image.height
 
-        val ySize = yBuffer.remaining()
-        val uSize = uBuffer.remaining()
-        val vSize = vBuffer.remaining()
+        val yPlane = image.planes[0]
+        val uPlane = image.planes[1]
+        val vPlane = image.planes[2]
 
-        val nv21 = ByteArray(ySize + uSize + vSize)
-        yBuffer.get(nv21, 0, ySize)
-        vBuffer.get(nv21, ySize, vSize)
-        uBuffer.get(nv21, ySize + vSize, uSize)
+        val yRowStride = yPlane.rowStride
+        val uvRowStride = uPlane.rowStride
+        val uvPixelStride = uPlane.pixelStride
+
+        // Build NV21 byte array: Y plane + interleaved VU
+        val nv21 = ByteArray(width * height * 3 / 2)
+
+        // Copy Y plane row by row (handles rowStride > width)
+        val yBuffer = yPlane.buffer
+        for (row in 0 until height) {
+            yBuffer.position(row * yRowStride)
+            yBuffer.get(nv21, row * width, width)
+        }
+
+        // Copy UV planes interleaved as VU (NV21 format)
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        val uvHeight = height / 2
+        val uvWidth = width / 2
+        var uvIndex = width * height
+
+        for (row in 0 until uvHeight) {
+            for (col in 0 until uvWidth) {
+                val bufferIndex = row * uvRowStride + col * uvPixelStride
+                nv21[uvIndex++] = vBuffer.get(bufferIndex)  // V first (NV21)
+                nv21[uvIndex++] = uBuffer.get(bufferIndex)  // then U
+            }
+        }
 
         val yuvImage = android.graphics.YuvImage(
             nv21, android.graphics.ImageFormat.NV21,
-            image.width, image.height, null
+            width, height, null
         )
         val out = java.io.ByteArrayOutputStream()
-        yuvImage.compressToJpeg(Rect(0, 0, image.width, image.height), 90, out)
+        yuvImage.compressToJpeg(Rect(0, 0, width, height), 95, out)
         val bytes = out.toByteArray()
         val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: return null
 
         val rotation = imageProxy.imageInfo.rotationDegrees
         return if (rotation != 0) {

@@ -21,6 +21,10 @@
 -keep class com.translive.app.engine.OcrEngine { *; }
 -keep class com.translive.app.engine.CameraTranslateEngine { *; }
 
+# Tesseract4Android (JNI native methods)
+-keep class com.googlecode.tesseract.android.** { *; }
+-keep class com.googlecode.leptonica.android.** { *; }
+
 # SpeechEngine + TtsEngine (sherpa-onnx native interop)
 -keep class com.translive.app.engine.SpeechEngine { *; }
 -keep class com.translive.app.engine.TtsEngine { *; }

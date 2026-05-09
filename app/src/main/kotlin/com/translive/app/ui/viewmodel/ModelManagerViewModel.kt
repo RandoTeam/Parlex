@@ -1,5 +1,6 @@
 package com.translive.app.ui.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
@@ -62,25 +63,27 @@ class ModelManagerViewModel @Inject constructor(
     private val settings: SettingsRepository
 ) : ViewModel() {
 
+    companion object {
+        private const val TAG = "ModelManagerVM"
+    }
+
     private val _uiState = MutableStateFlow(ModelManagerUiState())
     val uiState: StateFlow<ModelManagerUiState> = _uiState.asStateFlow()
-
-    // Track active downloads
-    private val downloadStates = MutableStateFlow<Map<String, DownloadState>>(emptyMap())
 
     init {
         refreshModels()
 
-        // React to download state changes
+        // Observe persistent download states from the singleton manager
         viewModelScope.launch {
-            downloadStates.collect { refreshModels() }
+            downloadManager.activeDownloads.collect { downloads ->
+                updateDownloadStates(downloads)
+            }
         }
     }
 
-    fun refreshModels() {
+    private fun updateDownloadStates(downloads: Map<String, DownloadState>) {
+        // Update GGUF model states
         val activeId = repo.getActiveModelId()
-        val downloads = downloadStates.value
-
         val models = ModelVariant.ALL.map { variant ->
             val isDownloaded = repo.isDownloaded(variant)
             val isActive = variant.id == activeId && isDownloaded
@@ -100,49 +103,61 @@ class ModelManagerViewModel @Inject constructor(
             )
         }
 
-        _uiState.update {
-            it.copy(
+        // Update TTS/STT progress from download states
+        val ttsState = downloads["tts-kokoro"]
+        val sttVadState = downloads["stt-vad"]
+        val sttWhisperState = downloads["stt-whisper"]
+
+        _uiState.update { old ->
+            old.copy(
                 models = models,
                 totalDownloadedSize = repo.getTotalDownloadedSize(),
                 availableSpace = repo.getAvailableSpace(),
                 ttsDownloaded = ttsEngine.isModelDownloaded(),
-                sttDownloaded = speechEngine.areModelsDownloaded()
+                ttsDownloading = ttsState is DownloadState.Downloading,
+                ttsProgress = when (ttsState) {
+                    is DownloadState.Downloading -> ttsState.progress
+                    else -> old.ttsProgress
+                },
+                sttDownloaded = speechEngine.areModelsDownloaded(),
+                sttDownloading = sttVadState is DownloadState.Downloading ||
+                        sttWhisperState is DownloadState.Downloading,
+                sttProgress = when {
+                    sttWhisperState is DownloadState.Downloading ->
+                        0.05f + sttWhisperState.progress * 0.9f
+                    sttVadState is DownloadState.Downloading ->
+                        sttVadState.progress * 0.05f
+                    else -> old.sttProgress
+                }
             )
         }
     }
 
+    fun refreshModels() {
+        updateDownloadStates(downloadManager.activeDownloads.value)
+    }
+
     fun downloadModel(variant: ModelVariant) {
-        // Check space
         if (repo.getAvailableSpace() < variant.sizeBytes * 1.1) {
             _uiState.update { it.copy(error = "Недостаточно места: нужно ${variant.sizeLabel}") }
             return
         }
 
-        viewModelScope.launch {
-            val destFile = repo.getDownloadFile(variant)
+        val destFile = repo.getDownloadFile(variant)
 
-            downloadManager.downloadModel(variant, destFile).collect { state ->
-                downloadStates.update { it + (variant.id to state) }
-
-                when (state) {
-                    is DownloadState.Completed -> {
-                        downloadStates.update { it - variant.id }
-                        // Auto-activate if no model is active
-                        if (repo.getActiveModelId() == null) {
-                            selectModel(variant)
-                        } else {
-                            refreshModels()
-                        }
+        downloadManager.startDownload(variant, destFile) { state ->
+            when (state) {
+                is DownloadState.Completed -> {
+                    if (repo.getActiveModelId() == null) {
+                        selectModel(variant)
+                    } else {
+                        refreshModels()
                     }
-                    is DownloadState.Failed -> {
-                        _uiState.update { it.copy(error = "Ошибка: ${state.error}") }
-                        downloadStates.update { it - variant.id }
-                    }
-                    is DownloadState.Cancelled -> {
-                        downloadStates.update { it - variant.id }
-                    }
-                    else -> {}
                 }
+                is DownloadState.Failed -> {
+                    _uiState.update { it.copy(error = "Ошибка: ${state.error}") }
+                }
+                else -> {}
             }
         }
     }
@@ -158,14 +173,10 @@ class ModelManagerViewModel @Inject constructor(
 
         viewModelScope.launch {
             try {
-                // Unload current model
                 engine.unloadModel()
-
-                // Set new active
                 repo.setActiveModelId(variant.id)
                 val path = repo.getModelPath(variant) ?: return@launch
 
-                // Load new model
                 val threads = settings.threads
                 val loaded = engine.loadModel(path, threads)
 
@@ -194,138 +205,136 @@ class ModelManagerViewModel @Inject constructor(
     }
 
     fun downloadTtsModel() {
+        if (_uiState.value.ttsDownloading) return
         _uiState.update { it.copy(ttsDownloading = true, ttsProgress = 0f) }
 
-        viewModelScope.launch {
-            try {
-                val ttsDir = File(ttsEngine.modelDir.parent ?: return@launch)
-                ttsDir.mkdirs()
-                val archiveFile = File(ttsDir, TtsModelInfo.ARCHIVE_FILENAME)
+        val ttsDir = File(ttsEngine.modelDir.parent ?: return)
+        ttsDir.mkdirs()
+        val archiveFile = File(ttsDir, TtsModelInfo.ARCHIVE_FILENAME)
 
-                // Create a fake ModelVariant for the download manager
-                val ttsVariant = ModelVariant(
-                    id = "tts-kokoro",
-                    quantName = TtsModelInfo.DISPLAY_NAME,
-                    displayName = TtsModelInfo.DISPLAY_NAME,
-                    description = TtsModelInfo.DESCRIPTION,
-                    sizeBytes = TtsModelInfo.SIZE_BYTES,
-                    ramEstimateMb = TtsModelInfo.RAM_ESTIMATE_MB,
-                    downloadUrl = TtsModelInfo.DOWNLOAD_URL,
-                    filename = TtsModelInfo.ARCHIVE_FILENAME
-                )
+        val ttsVariant = ModelVariant(
+            id = "tts-kokoro",
+            quantName = TtsModelInfo.DISPLAY_NAME,
+            displayName = TtsModelInfo.DISPLAY_NAME,
+            description = TtsModelInfo.DESCRIPTION,
+            sizeBytes = TtsModelInfo.SIZE_BYTES,
+            ramEstimateMb = TtsModelInfo.RAM_ESTIMATE_MB,
+            downloadUrl = TtsModelInfo.DOWNLOAD_URL,
+            filename = TtsModelInfo.ARCHIVE_FILENAME
+        )
 
-                downloadManager.downloadModel(ttsVariant, archiveFile).collect { state ->
-                    when (state) {
-                        is DownloadState.Downloading -> {
-                            _uiState.update { it.copy(ttsProgress = state.progress) }
+        downloadManager.startDownload(ttsVariant, archiveFile) { state ->
+            when (state) {
+                is DownloadState.Completed -> {
+                    try {
+                        _uiState.update { it.copy(ttsProgress = 0.99f) }
+                        withContext(Dispatchers.IO) {
+                            extractTarBz2(archiveFile, ttsDir)
+                            archiveFile.delete()
+                            ttsEngine.loadModel()
                         }
-                        is DownloadState.Completed -> {
-                            // Extract tar.bz2 on IO thread (CPU-heavy)
-                            _uiState.update { it.copy(ttsProgress = 0.99f) }
-                            withContext(Dispatchers.IO) {
-                                extractTarBz2(archiveFile, ttsDir)
-                                archiveFile.delete()
-                                ttsEngine.loadModel()
-                            }
-                            _uiState.update {
-                                it.copy(ttsDownloading = false, ttsDownloaded = true, ttsProgress = 1f)
-                            }
+                        _uiState.update {
+                            it.copy(ttsDownloading = false, ttsDownloaded = true, ttsProgress = 1f)
                         }
-                        is DownloadState.Failed -> {
-                            _uiState.update {
-                                it.copy(ttsDownloading = false, error = "TTS: ${state.error}")
-                            }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "TTS extract error: ${e.message}", e)
+                        _uiState.update {
+                            it.copy(ttsDownloading = false, error = "TTS extract: ${e.message}")
                         }
-                        else -> {}
                     }
                 }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(ttsDownloading = false, error = "TTS error: ${e.message}")
+                is DownloadState.Failed -> {
+                    _uiState.update {
+                        it.copy(ttsDownloading = false, error = "TTS: ${state.error}")
+                    }
                 }
+                is DownloadState.Cancelled -> {
+                    _uiState.update { it.copy(ttsDownloading = false) }
+                }
+                else -> {}
             }
         }
     }
 
     fun downloadSttModels() {
+        if (_uiState.value.sttDownloading) return
         _uiState.update { it.copy(sttDownloading = true, sttProgress = 0f) }
 
-        viewModelScope.launch {
-            try {
-                val sttDir = File(speechEngine.vadFile.parent ?: return@launch)
-                sttDir.mkdirs()
+        val sttDir = File(speechEngine.vadFile.parent ?: return)
+        sttDir.mkdirs()
 
-                // Step 1: Download Silero VAD (~2 MB) — simple single file
-                val vadVariant = ModelVariant(
-                    id = "stt-vad",
-                    quantName = SttModelInfo.VAD_DISPLAY_NAME,
-                    displayName = SttModelInfo.VAD_DISPLAY_NAME,
-                    description = "VAD",
-                    sizeBytes = SttModelInfo.VAD_SIZE_BYTES,
-                    ramEstimateMb = 50,
-                    downloadUrl = SttModelInfo.VAD_DOWNLOAD_URL,
-                    filename = SttModelInfo.VAD_FILENAME
-                )
-                var vadFailed = false
-                downloadManager.downloadModel(vadVariant, speechEngine.vadFile).collect { state ->
-                    when (state) {
-                        is DownloadState.Downloading -> {
-                            _uiState.update { it.copy(sttProgress = state.progress * 0.05f) }
-                        }
-                        is DownloadState.Completed -> {
-                            // VAD done, proceed to Whisper
-                        }
-                        is DownloadState.Failed -> {
-                            _uiState.update {
-                                it.copy(sttDownloading = false, error = "VAD: ${state.error}")
-                            }
-                            vadFailed = true
-                        }
-                        else -> {}
+        // Step 1: VAD
+        val vadVariant = ModelVariant(
+            id = "stt-vad",
+            quantName = SttModelInfo.VAD_DISPLAY_NAME,
+            displayName = SttModelInfo.VAD_DISPLAY_NAME,
+            description = "VAD",
+            sizeBytes = SttModelInfo.VAD_SIZE_BYTES,
+            ramEstimateMb = 50,
+            downloadUrl = SttModelInfo.VAD_DOWNLOAD_URL,
+            filename = SttModelInfo.VAD_FILENAME
+        )
+
+        downloadManager.startDownload(vadVariant, speechEngine.vadFile) { vadState ->
+            when (vadState) {
+                is DownloadState.Completed -> {
+                    // VAD done — now download Whisper
+                    downloadWhisper(sttDir)
+                }
+                is DownloadState.Failed -> {
+                    _uiState.update {
+                        it.copy(sttDownloading = false, error = "VAD: ${vadState.error}")
                     }
                 }
-                if (vadFailed) return@launch
+                is DownloadState.Cancelled -> {
+                    _uiState.update { it.copy(sttDownloading = false) }
+                }
+                else -> {}
+            }
+        }
+    }
 
-                // Step 2: Download Whisper tiny archive (~40 MB)
-                val whisperArchive = File(sttDir, SttModelInfo.WHISPER_ARCHIVE)
-                val whisperVariant = ModelVariant(
-                    id = "stt-whisper",
-                    quantName = SttModelInfo.WHISPER_DISPLAY_NAME,
-                    displayName = SttModelInfo.WHISPER_DISPLAY_NAME,
-                    description = SttModelInfo.WHISPER_DESCRIPTION,
-                    sizeBytes = SttModelInfo.WHISPER_SIZE_BYTES,
-                    ramEstimateMb = SttModelInfo.WHISPER_RAM_MB,
-                    downloadUrl = "${SttModelInfo.WHISPER_BASE_URL}/${SttModelInfo.WHISPER_ARCHIVE}",
-                    filename = SttModelInfo.WHISPER_ARCHIVE
-                )
-                downloadManager.downloadModel(whisperVariant, whisperArchive).collect { state ->
-                    when (state) {
-                        is DownloadState.Downloading -> {
-                            _uiState.update { it.copy(sttProgress = 0.05f + state.progress * 0.9f) }
+    private fun downloadWhisper(sttDir: File) {
+        val whisperArchive = File(sttDir, SttModelInfo.WHISPER_ARCHIVE)
+        val whisperVariant = ModelVariant(
+            id = "stt-whisper",
+            quantName = SttModelInfo.WHISPER_DISPLAY_NAME,
+            displayName = SttModelInfo.WHISPER_DISPLAY_NAME,
+            description = SttModelInfo.WHISPER_DESCRIPTION,
+            sizeBytes = SttModelInfo.WHISPER_SIZE_BYTES,
+            ramEstimateMb = SttModelInfo.WHISPER_RAM_MB,
+            downloadUrl = "${SttModelInfo.WHISPER_BASE_URL}/${SttModelInfo.WHISPER_ARCHIVE}",
+            filename = SttModelInfo.WHISPER_ARCHIVE
+        )
+
+        downloadManager.startDownload(whisperVariant, whisperArchive) { state ->
+            when (state) {
+                is DownloadState.Completed -> {
+                    try {
+                        _uiState.update { it.copy(sttProgress = 0.95f) }
+                        withContext(Dispatchers.IO) {
+                            extractTarBz2(whisperArchive, sttDir)
+                            whisperArchive.delete()
                         }
-                        is DownloadState.Completed -> {
-                            // Extract tar.bz2 on IO thread (CPU-heavy — was crashing on Main!)
-                            _uiState.update { it.copy(sttProgress = 0.95f) }
-                            withContext(Dispatchers.IO) {
-                                extractTarBz2(whisperArchive, sttDir)
-                                whisperArchive.delete()
-                            }
-                            _uiState.update {
-                                it.copy(sttDownloading = false, sttDownloaded = true, sttProgress = 1f)
-                            }
+                        _uiState.update {
+                            it.copy(sttDownloading = false, sttDownloaded = true, sttProgress = 1f)
                         }
-                        is DownloadState.Failed -> {
-                            _uiState.update {
-                                it.copy(sttDownloading = false, error = "Whisper: ${state.error}")
-                            }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "STT extract error: ${e.message}", e)
+                        _uiState.update {
+                            it.copy(sttDownloading = false, error = "STT extract: ${e.message}")
                         }
-                        else -> {}
                     }
                 }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(sttDownloading = false, error = "STT error: ${e.message}")
+                is DownloadState.Failed -> {
+                    _uiState.update {
+                        it.copy(sttDownloading = false, error = "Whisper: ${state.error}")
+                    }
                 }
+                is DownloadState.Cancelled -> {
+                    _uiState.update { it.copy(sttDownloading = false) }
+                }
+                else -> {}
             }
         }
     }
