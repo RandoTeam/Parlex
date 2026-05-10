@@ -1,5 +1,8 @@
 package com.translive.app.ui.screens
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -23,7 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.engine.DownloadState
 import com.translive.app.data.model.SttModelInfo
-import com.translive.app.data.model.TtsModelInfo
 import com.translive.app.ui.viewmodel.ModelItemState
 import com.translive.app.ui.viewmodel.ModelManagerViewModel
 import com.translive.app.ui.viewmodel.ModelStatus
@@ -40,13 +42,33 @@ fun ModelManagerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
+    // File picker for GGUF import
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.importModelFromUri(it) }
+    }
+
+    // SAF picker for GGUF export
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? ->
+        uri?.let { viewModel.exportToUri(it) }
+    }
+
     // Refresh on screen entry
     LaunchedEffect(Unit) { viewModel.refreshModels() }
 
-    // Error snackbar
+    // Error/success snackbar
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(uiState.error) {
         uiState.error?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearError()
+        }
+    }
+    LaunchedEffect(uiState.successMessage) {
+        uiState.successMessage?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearError()
         }
@@ -62,38 +84,27 @@ fun ModelManagerScreen(
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") },
-                    label = { Text("Текст") }
+                    icon = { Icon(Icons.Filled.Translate, "Translate") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") },
-                    label = { Text("Диалог") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToCamera,
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") },
-                    label = { Text("Камера") }
+                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    icon = { Icon(Icons.Filled.History, "History") }
                 )
                 NavigationBarItem(
                     selected = true,
                     onClick = { },
-                    icon = { Icon(Icons.Filled.Storage, "Models") },
-                    label = { Text("Модели") }
+                    icon = { Icon(Icons.Filled.Storage, "Models") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, "Settings") }
                 )
             }
         }
@@ -174,37 +185,63 @@ fun ModelManagerScreen(
                 val onCancel = remember(variant) { { viewModel.cancelDownload(variant) } }
                 val onSelect = remember(variant) { { viewModel.selectModel(variant) } }
                 val onDelete = remember(variant) { { viewModel.deleteModel(variant) } }
+                val onExport = remember(variant) { {
+                    viewModel.startExport(variant)
+                    exportLauncher.launch(variant.filename)
+                } }
                 ModelCard(
                     state = modelState,
                     onDownload = onDownload,
                     onCancel = onCancel,
                     onSelect = onSelect,
                     onDelete = onDelete,
+                    onExport = onExport,
+                    isExporting = uiState.isExporting,
+                    exportProgress = uiState.exportProgress,
                     modifier = Modifier
                         .padding(horizontal = 16.dp, vertical = 4.dp)
                         .animateItem()
                 )
             }
 
-            // TTS section
-            item(key = "tts_header", contentType = "section_header") {
-                Spacer(modifier = Modifier.height(16.dp))
-                Text(
-                    text = "Голос (TTS)",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
+            // Import from file button
+            item(key = "import_button", contentType = "import") {
+                Spacer(modifier = Modifier.height(8.dp))
 
-            item(key = "tts_card", contentType = "tts_card") {
-                TtsModelCard(
-                    isDownloaded = uiState.ttsDownloaded,
-                    isDownloading = uiState.ttsDownloading,
-                    progress = uiState.ttsProgress,
-                    onDownload = { viewModel.downloadTtsModel() },
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                )
+                if (uiState.isImporting) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Text(
+                            text = "Импорт модели... ${(uiState.importProgress * 100).toInt()}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { uiState.importProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
+                        )
+                    }
+                } else {
+                    OutlinedButton(
+                        onClick = { importLauncher.launch(arrayOf("*/*")) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Установить из файла (.gguf)")
+                    }
+                }
             }
 
             // STT section
@@ -224,121 +261,9 @@ fun ModelManagerScreen(
                     isDownloading = uiState.sttDownloading,
                     progress = uiState.sttProgress,
                     onDownload = { viewModel.downloadSttModels() },
+                    onDelete = { viewModel.deleteSttModels() },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
-            }
-        }
-    }
-}
-
-@Composable
-private fun TtsModelCard(
-    isDownloaded: Boolean,
-    isDownloading: Boolean,
-    progress: Float,
-    onDownload: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isDownloaded)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.surfaceVariant
-        )
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    Icons.Filled.RecordVoiceOver, null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = TtsModelInfo.DISPLAY_NAME,
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f)
-                )
-                if (isDownloaded) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                    ) {
-                        Text(
-                            text = "✓ Готова",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = TtsModelInfo.DESCRIPTION,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(Icons.Outlined.FolderZip, null, modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    text = TtsModelInfo.SIZE_LABEL,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(Icons.Outlined.Memory, null, modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(
-                    text = "~${TtsModelInfo.RAM_ESTIMATE_MB} МБ RAM",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (isDownloading) {
-                Spacer(modifier = Modifier.height(8.dp))
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(RoundedCornerShape(3.dp)),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            if (!isDownloaded && !isDownloading) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    FilledTonalButton(onClick = onDownload) {
-                        Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Скачать")
-                    }
-                }
             }
         }
     }
@@ -350,6 +275,7 @@ private fun SttModelCard(
     isDownloading: Boolean,
     progress: Float,
     onDownload: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -453,6 +379,25 @@ private fun SttModelCard(
                     }
                 }
             }
+
+            if (isDownloaded && !isDownloading) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = onDelete,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(Icons.Filled.Delete, null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Удалить")
+                    }
+                }
+            }
         }
     }
 }
@@ -501,6 +446,9 @@ private fun ModelCard(
     onCancel: () -> Unit,
     onSelect: () -> Unit,
     onDelete: () -> Unit,
+    onExport: () -> Unit,
+    isExporting: Boolean = false,
+    exportProgress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
     val variant = state.variant
@@ -660,6 +608,12 @@ private fun ModelCard(
                                 tint = MaterialTheme.colorScheme.error
                             )
                         }
+                        IconButton(onClick = onExport, enabled = !isExporting) {
+                            Icon(
+                                Icons.Outlined.Share, "Export",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(onClick = onSelect) {
                             Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(18.dp))
@@ -672,6 +626,12 @@ private fun ModelCard(
                             Icon(
                                 Icons.Outlined.Delete, "Delete",
                                 tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+                            )
+                        }
+                        IconButton(onClick = onExport, enabled = !isExporting) {
+                            Icon(
+                                Icons.Outlined.Share, "Export",
+                                tint = MaterialTheme.colorScheme.primary
                             )
                         }
                         Spacer(modifier = Modifier.width(8.dp))

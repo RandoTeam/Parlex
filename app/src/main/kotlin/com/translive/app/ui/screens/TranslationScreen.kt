@@ -24,8 +24,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.data.model.Language
-import com.translive.app.engine.TtsEngine
-import com.translive.app.engine.TtsState
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.theme.Teal
 import com.translive.app.ui.viewmodel.TranslationViewModel
@@ -42,8 +40,11 @@ fun TranslationScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val clipboardManager = LocalClipboardManager.current
-    val ttsEngine = viewModel.ttsEngine
-    val ttsState by ttsEngine.state.collectAsState()
+    val systemTts = viewModel.systemTts
+    val isSpeaking by systemTts.isSpeaking.collectAsState()
+
+    // Initialize System TTS
+    LaunchedEffect(Unit) { systemTts.initialize() }
 
     var showSourceLangPicker by remember { mutableStateOf(false) }
     var showTargetLangPicker by remember { mutableStateOf(false) }
@@ -60,38 +61,27 @@ fun TranslationScreen(
                 NavigationBarItem(
                     selected = true,
                     onClick = { },
-                    icon = { Icon(Icons.Filled.Translate, "Translate") },
-                    label = { Text("Текст") }
+                    icon = { Icon(Icons.Filled.Translate, "Translate") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") },
-                    label = { Text("Диалог") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToCamera,
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") },
-                    label = { Text("Камера") }
+                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    icon = { Icon(Icons.Filled.History, "History") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") },
-                    label = { Text("Модели") }
+                    icon = { Icon(Icons.Filled.Storage, "Models") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, "Settings") }
                 )
             }
         }
@@ -189,7 +179,7 @@ fun TranslationScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .height(52.dp),
-                enabled = uiState.sourceText.isNotBlank() && uiState.isModelLoaded && !uiState.isTranslating,
+                enabled = uiState.sourceText.isNotBlank() && !uiState.isTranslating && !uiState.isModelLoading,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
@@ -314,17 +304,20 @@ fun TranslationScreen(
                                 )
                             }
                             IconButton(onClick = {
-                                if (ttsState == TtsState.SPEAKING) {
-                                    ttsEngine.stop()
+                                if (isSpeaking) {
+                                    systemTts.stop()
                                 } else {
-                                    ttsEngine.speak(uiState.translatedText)
+                                    systemTts.speak(
+                                        uiState.translatedText,
+                                        uiState.targetLanguage.code
+                                    )
                                 }
-                            }, enabled = ttsEngine.isModelReady.collectAsState().value) {
+                            }) {
                                 Icon(
-                                    if (ttsState == TtsState.SPEAKING) Icons.Filled.StopCircle
+                                    if (isSpeaking) Icons.Filled.StopCircle
                                     else Icons.Filled.VolumeUp,
                                     "Speak",
-                                    tint = if (ttsState == TtsState.SPEAKING)
+                                    tint = if (isSpeaking)
                                         MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.primary
                                 )

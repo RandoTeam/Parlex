@@ -1,14 +1,19 @@
 package com.translive.app.ui.screens
 
 import android.Manifest
+import android.graphics.Matrix
+import android.graphics.RectF
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.view.transform.CoordinateTransform
+import androidx.camera.view.transform.ImageProxyTransformFactory
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -83,33 +88,27 @@ fun CameraScreen(
             NavigationBar(tonalElevation = 0.dp) {
                 NavigationBarItem(
                     selected = false, onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Text") },
-                    label = { Text("Текст") }
+                    icon = { Icon(Icons.Filled.Translate, "Text") }
                 )
                 NavigationBarItem(
                     selected = false, onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.RecordVoiceOver, "Dialogue") },
-                    label = { Text("Диалог") }
+                    icon = { Icon(Icons.Filled.RecordVoiceOver, "Dialogue") }
                 )
                 NavigationBarItem(
                     selected = true, onClick = {},
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") },
-                    label = { Text("Камера") }
+                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") }
                 )
                 NavigationBarItem(
                     selected = false, onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    icon = { Icon(Icons.Filled.History, "History") }
                 )
                 NavigationBarItem(
                     selected = false, onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.DownloadForOffline, "Models") },
-                    label = { Text("Модели") }
+                    icon = { Icon(Icons.Filled.DownloadForOffline, "Models") }
                 )
                 NavigationBarItem(
                     selected = false, onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, "Settings") }
                 )
             }
         }
@@ -142,9 +141,10 @@ fun CameraScreen(
                         )
 
                         // Live translation overlay
-                        if (uiState.blocks.isNotEmpty() && uiState.imageWidth > 0) {
+                        if (uiState.blocks.isNotEmpty()) {
                             TranslationOverlay(
                                 blocks = uiState.blocks,
+                                transformMatrix = uiState.transformMatrix,
                                 imageWidth = uiState.imageWidth,
                                 imageHeight = uiState.imageHeight
                             )
@@ -302,11 +302,14 @@ private fun LiveCameraView(
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
             scaleType = PreviewView.ScaleType.FILL_CENTER
-            // COMPATIBLE = TextureView → guarantees .bitmap is non-null
-            // PERFORMANCE = SurfaceView → .bitmap returns null on many devices
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
         }
     }
+
+    val transformFactory = remember { ImageProxyTransformFactory().apply { isUsingRotationDegrees = true } }
+
+    // Cached transform matrix — computed when preview starts streaming
+    var cachedMatrix by remember { mutableStateOf<Matrix?>(null) }
 
     // Bind camera exactly once
     DisposableEffect(lifecycleOwner) {
@@ -322,15 +325,47 @@ private fun LiveCameraView(
                     .build()
                     .also { analysis ->
                         analysis.setAnalyzer(executor) { imageProxy ->
-                            viewModel.processLiveFrame(imageProxy)
+                            // Try to compute transform matrix if not cached yet
+                            if (cachedMatrix == null) {
+                                try {
+                                    val targetTransform = previewView.outputTransform
+                                    if (targetTransform != null) {
+                                        val sourceTransform = transformFactory.getOutputTransform(imageProxy)
+                                        val coordTransform = CoordinateTransform(sourceTransform, targetTransform)
+                                        val m = Matrix()
+                                        coordTransform.transform(m)
+                                        cachedMatrix = m
+                                        android.util.Log.i("CameraScreen", "CoordinateTransform matrix cached OK")
+                                    }
+                                } catch (e: Exception) {
+                                    android.util.Log.w("CameraScreen", "Transform not ready: ${e.message}")
+                                }
+                            }
+                            viewModel.processLiveFrame(imageProxy, cachedMatrix)
                         }
                     }
+
                 provider.unbindAll()
-                provider.bindToLifecycle(
-                    lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
-                    preview, imageAnalysis
-                )
-                android.util.Log.i("CameraScreen", "Camera bound OK, analyzer attached")
+
+                // Use UseCaseGroup with shared ViewPort for accurate coordinate alignment
+                val viewPort = previewView.viewPort
+                if (viewPort != null) {
+                    val useCaseGroup = UseCaseGroup.Builder()
+                        .setViewPort(viewPort)
+                        .addUseCase(preview)
+                        .addUseCase(imageAnalysis)
+                        .build()
+                    provider.bindToLifecycle(
+                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, useCaseGroup
+                    )
+                } else {
+                    // Fallback: bind without ViewPort (first frame before layout)
+                    provider.bindToLifecycle(
+                        lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview, imageAnalysis
+                    )
+                }
+                android.util.Log.i("CameraScreen", "Camera bound OK with UseCaseGroup, analyzer attached")
             } catch (e: Exception) {
                 android.util.Log.e("CameraScreen", "Camera bind failed: ${e.message}", e)
             }
@@ -353,29 +388,47 @@ private fun LiveCameraView(
 }
 
 /**
- * Live translation overlay — shows translated text inside semi-transparent boxes.
- * If no translation available, shows thin border only.
+ * Live translation overlay — uses CameraX CoordinateTransform matrix when available,
+ * falls back to manual FILL_CENTER calculation otherwise.
  */
 @Composable
 private fun TranslationOverlay(
     blocks: List<TranslatedBlock>,
+    transformMatrix: Matrix?,
     imageWidth: Int,
     imageHeight: Int
 ) {
     Canvas(modifier = Modifier.fillMaxSize()) {
-        // FILL_CENTER: scale to fill, center crop
-        val scaleX = size.width / imageWidth.toFloat()
-        val scaleY = size.height / imageHeight.toFloat()
-        val scale = maxOf(scaleX, scaleY)
-        val offsetX = (size.width - imageWidth * scale) / 2f
-        val offsetY = (size.height - imageHeight * scale) / 2f
-
         for (block in blocks) {
             val box = block.boundingBox
-            val left = box.left * scale + offsetX
-            val top = box.top * scale + offsetY
-            val w = box.width() * scale
-            val h = box.height() * scale
+            val left: Float
+            val top: Float
+            val w: Float
+            val h: Float
+
+            if (transformMatrix != null) {
+                // Official CameraX transform — handles rotation, crop, scaling
+                val mappedRect = RectF(
+                    box.left.toFloat(), box.top.toFloat(),
+                    box.right.toFloat(), box.bottom.toFloat()
+                )
+                transformMatrix.mapRect(mappedRect)
+                left = mappedRect.left
+                top = mappedRect.top
+                w = mappedRect.width()
+                h = mappedRect.height()
+            } else if (imageWidth > 0 && imageHeight > 0) {
+                // Fallback: manual FILL_CENTER math
+                val scaleX = size.width / imageWidth.toFloat()
+                val scaleY = size.height / imageHeight.toFloat()
+                val scale = maxOf(scaleX, scaleY)
+                val offsetX = (size.width - imageWidth * scale) / 2f
+                val offsetY = (size.height - imageHeight * scale) / 2f
+                left = box.left * scale + offsetX
+                top = box.top * scale + offsetY
+                w = box.width() * scale
+                h = box.height() * scale
+            } else continue
 
             if (block.translatedText.isNotBlank()) {
                 // Semi-transparent dark background

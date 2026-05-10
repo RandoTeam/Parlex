@@ -1,5 +1,7 @@
 package com.translive.app.ui.viewmodel
 
+import android.net.Uri
+
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,12 +9,10 @@ import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
-import com.translive.app.data.model.TtsModelInfo
 import com.translive.app.engine.DownloadState
 import com.translive.app.engine.ModelDownloadManager
 import com.translive.app.engine.SpeechEngine
 import com.translive.app.engine.TranslationEngine
-import com.translive.app.engine.TtsEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -44,13 +44,15 @@ data class ModelManagerUiState(
     val totalDownloadedSize: Long = 0L,
     val availableSpace: Long = 0L,
     val isLoadingModel: Boolean = false,
-    val ttsDownloaded: Boolean = false,
-    val ttsDownloading: Boolean = false,
-    val ttsProgress: Float = 0f,
+    val isImporting: Boolean = false,
+    val importProgress: Float = 0f,
+    val isExporting: Boolean = false,
+    val exportProgress: Float = 0f,
     val sttDownloaded: Boolean = false,
     val sttDownloading: Boolean = false,
     val sttProgress: Float = 0f,
-    val error: String? = null
+    val error: String? = null,
+    val successMessage: String? = null
 )
 
 @HiltViewModel
@@ -58,7 +60,6 @@ class ModelManagerViewModel @Inject constructor(
     private val repo: ModelRepository,
     private val downloadManager: ModelDownloadManager,
     private val engine: TranslationEngine,
-    private val ttsEngine: TtsEngine,
     private val speechEngine: SpeechEngine,
     private val settings: SettingsRepository
 ) : ViewModel() {
@@ -69,6 +70,10 @@ class ModelManagerViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ModelManagerUiState())
     val uiState: StateFlow<ModelManagerUiState> = _uiState.asStateFlow()
+
+    /** Variant awaiting SAF picker result for export */
+    var pendingExportVariant: ModelVariant? = null
+        private set
 
     init {
         refreshModels()
@@ -104,7 +109,6 @@ class ModelManagerViewModel @Inject constructor(
         }
 
         // Update TTS/STT progress from download states
-        val ttsState = downloads["tts-kokoro"]
         val sttVadState = downloads["stt-vad"]
         val sttWhisperState = downloads["stt-whisper"]
 
@@ -113,12 +117,6 @@ class ModelManagerViewModel @Inject constructor(
                 models = models,
                 totalDownloadedSize = repo.getTotalDownloadedSize(),
                 availableSpace = repo.getAvailableSpace(),
-                ttsDownloaded = ttsEngine.isModelDownloaded(),
-                ttsDownloading = ttsState is DownloadState.Downloading,
-                ttsProgress = when (ttsState) {
-                    is DownloadState.Downloading -> ttsState.progress
-                    else -> old.ttsProgress
-                },
                 sttDownloaded = speechEngine.areModelsDownloaded(),
                 sttDownloading = sttVadState is DownloadState.Downloading ||
                         sttWhisperState is DownloadState.Downloading,
@@ -200,61 +198,102 @@ class ModelManagerViewModel @Inject constructor(
         refreshModels()
     }
 
-    fun clearError() {
-        _uiState.update { it.copy(error = null) }
+
+
+    fun deleteSttModels() {
+        speechEngine.release()
+        val sttDir = File(speechEngine.vadFile.parent ?: return)
+        if (sttDir.exists()) sttDir.deleteRecursively()
+        refreshModels()
     }
 
-    fun downloadTtsModel() {
-        if (_uiState.value.ttsDownloading) return
-        _uiState.update { it.copy(ttsDownloading = true, ttsProgress = 0f) }
+    fun clearError() {
+        _uiState.update { it.copy(error = null, successMessage = null) }
+    }
 
-        val ttsDir = File(ttsEngine.modelDir.parent ?: return)
-        ttsDir.mkdirs()
-        val archiveFile = File(ttsDir, TtsModelInfo.ARCHIVE_FILENAME)
+    /** Called by UI when user presses Export on a model card */
+    fun startExport(variant: ModelVariant) {
+        pendingExportVariant = variant
+    }
 
-        val ttsVariant = ModelVariant(
-            id = "tts-kokoro",
-            quantName = TtsModelInfo.DISPLAY_NAME,
-            displayName = TtsModelInfo.DISPLAY_NAME,
-            description = TtsModelInfo.DESCRIPTION,
-            sizeBytes = TtsModelInfo.SIZE_BYTES,
-            ramEstimateMb = TtsModelInfo.RAM_ESTIMATE_MB,
-            downloadUrl = TtsModelInfo.DOWNLOAD_URL,
-            filename = TtsModelInfo.ARCHIVE_FILENAME
-        )
+    /** Called by UI after SAF CreateDocument picker returns a URI */
+    fun exportToUri(uri: Uri) {
+        val variant = pendingExportVariant ?: return
+        pendingExportVariant = null
 
-        downloadManager.startDownload(ttsVariant, archiveFile) { state ->
-            when (state) {
-                is DownloadState.Completed -> {
-                    try {
-                        _uiState.update { it.copy(ttsProgress = 0.99f) }
-                        withContext(Dispatchers.IO) {
-                            extractTarBz2(archiveFile, ttsDir)
-                            archiveFile.delete()
-                            ttsEngine.loadModel()
-                        }
-                        _uiState.update {
-                            it.copy(ttsDownloading = false, ttsDownloaded = true, ttsProgress = 1f)
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "TTS extract error: ${e.message}", e)
-                        _uiState.update {
-                            it.copy(ttsDownloading = false, error = "TTS extract: ${e.message}")
-                        }
-                    }
-                }
-                is DownloadState.Failed -> {
-                    _uiState.update {
-                        it.copy(ttsDownloading = false, error = "TTS: ${state.error}")
-                    }
-                }
-                is DownloadState.Cancelled -> {
-                    _uiState.update { it.copy(ttsDownloading = false) }
-                }
-                else -> {}
+        if (_uiState.value.isExporting) return
+        _uiState.update { it.copy(isExporting = true, exportProgress = 0f) }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = repo.exportModel(variant, uri) { progress ->
+                _uiState.update { it.copy(exportProgress = progress) }
             }
+
+            result.fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            isExporting = false,
+                            exportProgress = 1f,
+                            successMessage = "Модель \"${variant.quantName}\" экспортирована"
+                        )
+                    }
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            isExporting = false,
+                            error = "Экспорт: ${error.message}"
+                        )
+                    }
+                }
+            )
         }
     }
+
+    fun importModelFromUri(uri: Uri) {
+        if (_uiState.value.isImporting) return
+        _uiState.update { it.copy(isImporting = true, importProgress = 0f, error = null) }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val result = repo.importModelFromUri(uri) { progress ->
+                _uiState.update { it.copy(importProgress = progress) }
+            }
+
+            result.fold(
+                onSuccess = { filename ->
+                    // Auto-activate if no model is currently active
+                    val shouldActivate = repo.getActiveModelId() == null
+                    if (shouldActivate) {
+                        repo.setActiveByFilename(filename)
+                        val path = repo.getActiveModelPath()
+                        if (path != null) {
+                            val threads = settings.threads
+                            engine.loadModel(path, threads)
+                        }
+                    }
+                    _uiState.update {
+                        it.copy(
+                            isImporting = false,
+                            importProgress = 1f,
+                            successMessage = "Модель \"$filename\" установлена"
+                        )
+                    }
+                    refreshModels()
+                },
+                onFailure = { error ->
+                    _uiState.update {
+                        it.copy(
+                            isImporting = false,
+                            error = error.message ?: "Ошибка импорта"
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+
 
     fun downloadSttModels() {
         if (_uiState.value.sttDownloading) return
@@ -340,6 +379,7 @@ class ModelManagerViewModel @Inject constructor(
     }
 
     private fun extractTarBz2(archive: File, destDir: File) {
+        Log.i(TAG, "Extracting ${archive.name} (${archive.length()} bytes) to ${destDir.absolutePath}")
         val fis = FileInputStream(archive)
         val bis = BufferedInputStream(fis)
         val bzis = BZip2CompressorInputStream(bis)
@@ -351,11 +391,13 @@ class ModelManagerViewModel @Inject constructor(
                 val outFile = File(destDir, entry.name)
                 if (entry.isDirectory) {
                     outFile.mkdirs()
+                    Log.d(TAG, "  DIR: ${entry.name}")
                 } else {
                     outFile.parentFile?.mkdirs()
                     outFile.outputStream().use { out ->
                         tais.copyTo(out)
                     }
+                    Log.i(TAG, "  FILE: ${entry.name} -> ${outFile.length()} bytes")
                 }
                 entry = tais.nextEntry
             }
@@ -365,5 +407,6 @@ class ModelManagerViewModel @Inject constructor(
             bis.close()
             fis.close()
         }
+        Log.i(TAG, "Extraction complete")
     }
 }

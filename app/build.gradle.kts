@@ -126,7 +126,7 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
     // Sherpa-ONNX for Kokoro TTS
-    implementation(files("libs/sherpa-onnx-1.13.0.aar"))
+    implementation(files("libs/sherpa-onnx-1.13.1.aar"))
 
     // Apache Commons Compress for tar.bz2 extraction
     implementation("org.apache.commons:commons-compress:1.26.1")

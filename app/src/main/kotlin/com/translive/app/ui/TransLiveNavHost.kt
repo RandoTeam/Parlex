@@ -12,9 +12,15 @@ fun TransLiveNavHost() {
     val navController = rememberNavController()
 
     fun navigateTo(route: String) {
-        navController.navigate(route) {
-            popUpTo("translate") { inclusive = route == "translate" }
-            launchSingleTop = true
+        if (route == "translate") {
+            // Return to translate without recreating it
+            navController.popBackStack("translate", inclusive = false)
+        } else {
+            navController.navigate(route) {
+                popUpTo("translate") { saveState = true }
+                launchSingleTop = true
+                restoreState = true
+            }
         }
     }
 

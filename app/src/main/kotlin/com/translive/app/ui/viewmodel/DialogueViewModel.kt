@@ -7,6 +7,7 @@ import com.translive.app.data.ModelRepository
 import com.translive.app.data.db.DialogueDao
 import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.Language
+import com.translive.app.data.SettingsRepository
 import com.translive.app.engine.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +40,7 @@ data class DialogueUiState(
     val isTranslationModelReady: Boolean = false,
     val isSttReady: Boolean = false,
     val isTtsReady: Boolean = true,  // System TTS always available
+    val hasMicPermission: Boolean = false,
     val sourceLanguage: Language = Language.RUSSIAN,
     val targetLanguage: Language = Language.ENGLISH,
     val error: String? = null
@@ -49,6 +51,7 @@ class DialogueViewModel @Inject constructor(
     private val app: Application,
     private val engine: TranslationEngine,
     private val modelRepository: ModelRepository,
+    private val settings: SettingsRepository,
     private val systemTts: SystemTtsEngine,
     private val speechEngine: SpeechEngine,
     private val dialogueDao: DialogueDao
@@ -64,16 +67,31 @@ class DialogueViewModel @Inject constructor(
         // Initialize system TTS immediately — no download needed
         systemTts.initialize()
 
-        viewModelScope.launch {
-            val activeId = modelRepository.getActiveModelId()
+        viewModelScope.launch(Dispatchers.IO) {
+            val sttReady = speechEngine.areModelsDownloaded()
+
+            // Check if model is actually loaded in memory, not just selected
+            var modelReady = engine.isLoaded
+            if (!modelReady) {
+                val path = modelRepository.getActiveModelPath()
+                if (path != null) {
+                    val threads = settings.threads
+                    modelReady = engine.loadModel(path, threads)
+                }
+            }
+
             _uiState.update {
                 it.copy(
-                    isTranslationModelReady = activeId != null,
-                    isSttReady = speechEngine.areModelsDownloaded(),
-                    isTtsReady = true  // System TTS is always ready
+                    isTranslationModelReady = modelReady,
+                    isSttReady = sttReady,
+                    isTtsReady = true
                 )
             }
         }
+    }
+
+    fun setMicPermission(granted: Boolean) {
+        _uiState.update { it.copy(hasMicPermission = granted) }
     }
 
     fun setSourceLanguage(lang: Language) {
@@ -92,6 +110,10 @@ class DialogueViewModel @Inject constructor(
 
     fun startConversation() {
         if (_uiState.value.isConversationActive) return
+        if (!_uiState.value.hasMicPermission) {
+            _uiState.update { it.copy(error = "Нет доступа к микрофону. Разрешите в настройках.") }
+            return
+        }
 
         _uiState.update {
             it.copy(
@@ -101,24 +123,61 @@ class DialogueViewModel @Inject constructor(
             )
         }
 
-        // Initialize STT then start listening (sequential, no race condition)
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                if (!speechEngine.isReady.value) {
-                    val ok = speechEngine.initialize()
-                    if (!ok) {
+                // 1. Ensure translation model is loaded
+                if (!engine.isLoaded) {
+                    val path = modelRepository.getActiveModelPath()
+                    if (path == null) {
                         _uiState.update {
                             it.copy(
                                 isConversationActive = false,
                                 phase = DialoguePhase.ERROR,
-                                error = "STT модели не загружены. Скачайте в разделе Модели."
+                                error = "Модель перевода не скачана. Скачайте в разделе Модели."
+                            )
+                        }
+                        return@launch
+                    }
+                    val threads = settings.threads
+                    val loaded = engine.loadModel(path, threads)
+                    if (!loaded) {
+                        _uiState.update {
+                            it.copy(
+                                isConversationActive = false,
+                                phase = DialoguePhase.ERROR,
+                                error = "Не удалось загрузить модель перевода."
                             )
                         }
                         return@launch
                     }
                 }
 
-                // Create a Room session
+                // 2. Initialize STT with file integrity validation
+                if (!speechEngine.isReady.value) {
+                    if (!speechEngine.areModelsDownloaded()) {
+                        _uiState.update {
+                            it.copy(
+                                isConversationActive = false,
+                                phase = DialoguePhase.ERROR,
+                                error = "STT модели не загружены или повреждены. Переустановите в разделе Модели."
+                            )
+                        }
+                        return@launch
+                    }
+                    val ok = speechEngine.initialize()
+                    if (!ok) {
+                        _uiState.update {
+                            it.copy(
+                                isConversationActive = false,
+                                phase = DialoguePhase.ERROR,
+                                error = "Не удалось инициализировать STT. Модели повреждены — переустановите."
+                            )
+                        }
+                        return@launch
+                    }
+                }
+
+                // 3. Create a Room session
                 val state = _uiState.value
                 val session = DialogueSession(
                     languageA = state.sourceLanguage.code,
@@ -127,7 +186,7 @@ class DialogueViewModel @Inject constructor(
                 )
                 currentSessionId = dialogueDao.insertSession(session)
 
-                // Now safe to start listening
+                // 4. Start listening
                 speechEngine.startListening { result ->
                     onSpeechRecognized(result)
                 }
@@ -172,16 +231,10 @@ class DialogueViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val state = _uiState.value
-                val fromLang: Language
-                val toLang: Language
-
-                if (result.language == state.sourceLanguage.code) {
-                    fromLang = state.sourceLanguage
-                    toLang = state.targetLanguage
-                } else {
-                    fromLang = state.targetLanguage
-                    toLang = state.sourceLanguage
-                }
+                // Always translate from selected source → target
+                // User controls direction via the language picker
+                val fromLang = state.sourceLanguage
+                val toLang = state.targetLanguage
 
                 val translated = engine.translateSafe(
                     sourceText = result.text,
@@ -218,12 +271,16 @@ class DialogueViewModel @Inject constructor(
                     dialogueDao.updateSessionTime(sessionId)
                 }
 
+                // Stop microphone to prevent feedback loop (TTS → mic → Whisper → translate → TTS...)
+                speechEngine.stopListening()
+
                 // Speak translation with system TTS (suspends until done)
                 systemTts.speakAndWait(translated, toLang.code)
 
-                // Resume listening
+                // Resume listening after TTS finishes
                 if (_uiState.value.isConversationActive) {
                     _uiState.update { it.copy(phase = DialoguePhase.LISTENING) }
+                    speechEngine.startListening { onSpeechRecognized(it) }
                 }
             } catch (e: Exception) {
                 _uiState.update {
@@ -233,9 +290,8 @@ class DialogueViewModel @Inject constructor(
         }
     }
 
-    fun speakMessage(text: String) {
-        val state = _uiState.value
-        systemTts.speak(text, state.targetLanguage.code)
+    fun speakMessage(text: String, langCode: String) {
+        systemTts.speak(text, langCode)
     }
 
     override fun onCleared() {

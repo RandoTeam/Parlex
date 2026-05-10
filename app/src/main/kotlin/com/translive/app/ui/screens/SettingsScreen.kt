@@ -43,38 +43,27 @@ fun SettingsScreen(
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") },
-                    label = { Text("Текст") }
+                    icon = { Icon(Icons.Filled.Translate, "Translate") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") },
-                    label = { Text("Диалог") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToCamera,
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") },
-                    label = { Text("Камера") }
+                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    icon = { Icon(Icons.Filled.History, "History") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") },
-                    label = { Text("Модели") }
+                    icon = { Icon(Icons.Filled.Storage, "Models") }
                 )
                 NavigationBarItem(
                     selected = true,
                     onClick = { },
-                    icon = { Icon(Icons.Filled.Settings, "Settings") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, "Settings") }
                 )
             }
         }
@@ -121,19 +110,39 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val threadOptions = SettingsRepository.THREAD_OPTIONS
+                val currentIndex = threadOptions.indexOf(threads).coerceAtLeast(0)
+
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SettingsRepository.THREAD_OPTIONS.forEach { t ->
-                        FilterChip(
-                            selected = threads == t,
-                            onClick = { viewModel.setThreads(t) },
-                            label = { Text("$t") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
+                    Text(
+                        text = "$threads",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Slider(
+                    value = currentIndex.toFloat(),
+                    onValueChange = { viewModel.setThreads(threadOptions[it.toInt()]) },
+                    valueRange = 0f..(threadOptions.size - 1).toFloat(),
+                    steps = threadOptions.size - 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("${threadOptions.first()}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${threadOptions.last()}", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 
@@ -184,28 +193,41 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                val options = SettingsRepository.TIMEOUT_OPTIONS
+                val currentIndex = options.indexOf(timeoutMinutes).coerceAtLeast(0)
+                val currentLabel = if (timeoutMinutes == 0) "Выключено" else "$timeoutMinutes мин"
+
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    SettingsRepository.TIMEOUT_OPTIONS.forEach { t ->
-                        val label = if (t == 0) "Выкл" else "${t} мин"
-                        FilterChip(
-                            selected = timeoutMinutes == t,
-                            onClick = { viewModel.setIdleTimeout(t) },
-                            label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
-                if (timeoutMinutes > 0) {
-                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Модель выгрузится через $timeoutMinutes мин. после последнего перевода",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary
+                        text = currentLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (timeoutMinutes == 0) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.primary
                     )
+                }
+
+                Slider(
+                    value = currentIndex.toFloat(),
+                    onValueChange = { viewModel.setIdleTimeout(options[it.toInt()]) },
+                    valueRange = 0f..(options.size - 1).toFloat(),
+                    steps = options.size - 2,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Выкл", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${options.last()} мин", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
 

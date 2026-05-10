@@ -58,14 +58,17 @@ class SpeechEngine @Inject constructor(
     val vadFile: File get() = File(sttDir, "silero_vad.onnx")
     val whisperDir: File get() = File(sttDir, "sherpa-onnx-whisper-tiny")
 
-    fun isVadDownloaded(): Boolean = vadFile.exists()
+    fun isVadDownloaded(): Boolean = vadFile.exists() && vadFile.length() > 500_000L
 
     fun isWhisperDownloaded(): Boolean {
         val dir = whisperDir
-        return dir.exists() &&
-                File(dir, "tiny-encoder.onnx").exists() &&
-                File(dir, "tiny-decoder.onnx").exists() &&
-                File(dir, "tiny-tokens.txt").exists()
+        val encoder = File(dir, "tiny-encoder.onnx")
+        val decoder = File(dir, "tiny-decoder.onnx")
+        val tokens = File(dir, "tiny-tokens.txt")
+        // Validate both existence and minimum file size to catch truncated downloads
+        return encoder.exists() && encoder.length() > 10_000_000L &&
+                decoder.exists() && decoder.length() > 15_000_000L &&
+                tokens.exists()  && tokens.length()  > 100_000L
     }
 
     fun areModelsDownloaded(): Boolean = isVadDownloaded() && isWhisperDownloaded()
@@ -75,7 +78,8 @@ class SpeechEngine @Inject constructor(
         if (!areModelsDownloaded()) return false
 
         return try {
-            val assetManager = context.assets
+            // Models are on disk (not in APK assets), so pass null for assetManager.
+            // Sherpa-ONNX fatally crashes if assetManager is non-null with absolute paths.
 
             // Initialize VAD
             val sileroConfig = SileroVadModelConfig(
@@ -90,7 +94,7 @@ class SpeechEngine @Inject constructor(
                 sampleRate = SAMPLE_RATE,
                 numThreads = 1
             )
-            vad = Vad(assetManager, vadConfig)
+            vad = Vad(null, vadConfig)
 
             // Initialize Whisper (non-streaming / offline)
             val wDir = whisperDir.absolutePath
@@ -109,17 +113,14 @@ class SpeechEngine @Inject constructor(
             val recConfig = OfflineRecognizerConfig(
                 modelConfig = modelConfig
             )
-            recognizer = OfflineRecognizer(assetManager, recConfig)
+            recognizer = OfflineRecognizer(null, recConfig)
 
             _isReady.value = true
             Log.i(TAG, "SpeechEngine initialized (VAD + Whisper)")
             true
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Catch Throwable to handle both Exception and Error (e.g. UnsatisfiedLinkError)
             Log.e(TAG, "Failed to initialize: ${e.message}", e)
-            _isReady.value = false
-            false
-        } catch (e: UnsatisfiedLinkError) {
-            Log.e(TAG, "Native library error: ${e.message}", e)
             _isReady.value = false
             false
         }
@@ -220,12 +221,40 @@ class SpeechEngine @Inject constructor(
     }
 
     /**
-     * Simple heuristic: count Cyrillic vs Latin chars.
+     * Detect language by counting script-specific characters.
+     * Supports: Chinese (CJK), Russian (Cyrillic), English (Latin),
+     * Arabic, Thai, Hindi (Devanagari), Japanese (Kana), Korean (Hangul).
      */
     private fun detectLanguage(text: String): String {
         val cyrillicCount = text.count { it in '\u0400'..'\u04FF' }
         val latinCount = text.count { it in 'A'..'Z' || it in 'a'..'z' }
-        return if (cyrillicCount > latinCount) "ru" else "en"
+        val cjkCount = text.count {
+            it in '\u4E00'..'\u9FFF' ||  // CJK Unified Ideographs
+            it in '\u3400'..'\u4DBF' ||  // CJK Extension A
+            it in '\u3000'..'\u303F'     // CJK Symbols & Punctuation
+        }
+        val kanaCount = text.count {
+            it in '\u3040'..'\u309F' ||  // Hiragana
+            it in '\u30A0'..'\u30FF'     // Katakana
+        }
+        val hangulCount = text.count { it in '\uAC00'..'\uD7AF' }
+        val arabicCount = text.count { it in '\u0600'..'\u06FF' }
+        val thaiCount = text.count { it in '\u0E00'..'\u0E7F' }
+        val devanagariCount = text.count { it in '\u0900'..'\u097F' }
+
+        val counts = mapOf(
+            "zh" to cjkCount,
+            "ja" to kanaCount,
+            "ko" to hangulCount,
+            "ru" to cyrillicCount,
+            "en" to latinCount,
+            "ar" to arabicCount,
+            "th" to thaiCount,
+            "hi" to devanagariCount
+        )
+
+        val best = counts.maxByOrNull { it.value }
+        return if (best != null && best.value > 0) best.key else "en"
     }
 
     fun stopListening() {

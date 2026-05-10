@@ -1,5 +1,8 @@
 package com.translive.app.ui.screens
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -16,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -24,6 +28,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.translive.app.data.model.Language
+import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.DialogueUiMessage
 import com.translive.app.ui.viewmodel.DialoguePhase
 import com.translive.app.ui.viewmodel.DialogueViewModel
@@ -39,6 +45,20 @@ fun DialogueScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    // Microphone permission
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> viewModel.setMicPermission(granted) }
+
+    LaunchedEffect(Unit) {
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+            context, Manifest.permission.RECORD_AUDIO
+        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (granted) viewModel.setMicPermission(true)
+        else micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+    }
 
     // Auto-scroll on new messages
     LaunchedEffect(uiState.messages.size) {
@@ -56,38 +76,27 @@ fun DialogueScreen(
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") },
-                    label = { Text("Текст") }
+                    icon = { Icon(Icons.Filled.Translate, "Translate") }
                 )
                 NavigationBarItem(
                     selected = true,
                     onClick = { },
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") },
-                    label = { Text("Диалог") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToCamera,
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") },
-                    label = { Text("Камера") }
+                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    icon = { Icon(Icons.Filled.History, "History") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") },
-                    label = { Text("Модели") }
+                    icon = { Icon(Icons.Filled.Storage, "Models") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, "Settings") }
                 )
             }
         }
@@ -100,6 +109,34 @@ fun DialogueScreen(
             // Header with phase indicator
             DialogueHeader(phase = uiState.phase)
 
+            // Language selector
+            var showSourceLangPicker by remember { mutableStateOf(false) }
+            var showTargetLangPicker by remember { mutableStateOf(false) }
+
+            DialogueLanguageSelector(
+                sourceLanguage = uiState.sourceLanguage,
+                targetLanguage = uiState.targetLanguage,
+                onSourceClick = { showSourceLangPicker = true },
+                onTargetClick = { showTargetLangPicker = true },
+                onSwap = { viewModel.swapLanguages() },
+                enabled = !uiState.isConversationActive,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
+
+            if (showSourceLangPicker) {
+                LanguagePickerSheet(
+                    selectedLanguage = uiState.sourceLanguage,
+                    onLanguageSelected = { viewModel.setSourceLanguage(it); showSourceLangPicker = false },
+                    onDismiss = { showSourceLangPicker = false }
+                )
+            }
+            if (showTargetLangPicker) {
+                LanguagePickerSheet(
+                    selectedLanguage = uiState.targetLanguage,
+                    onLanguageSelected = { viewModel.setTargetLanguage(it); showTargetLangPicker = false },
+                    onDismiss = { showTargetLangPicker = false }
+                )
+            }
             // Check readiness
             val allReady = uiState.isTranslationModelReady && uiState.isSttReady
 
@@ -132,7 +169,8 @@ fun DialogueScreen(
                     items(uiState.messages) { message ->
                         DialogueBubble(
                             message = message,
-                            onSpeak = { viewModel.speakMessage(message.translatedText) },
+                            onSpeakSource = { viewModel.speakMessage(message.sourceText, message.sourceLang) },
+                            onSpeakTranslation = { viewModel.speakMessage(message.translatedText, message.targetLang) },
                             ttsReady = uiState.isTtsReady
                         )
                     }
@@ -333,14 +371,56 @@ private fun EmptyStateHint(modifier: Modifier = Modifier) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
             )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "Русский → English • English → Русский",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-                textAlign = TextAlign.Center
+        }
+    }
+}
+
+@Composable
+private fun DialogueLanguageSelector(
+    sourceLanguage: Language,
+    targetLanguage: Language,
+    onSourceClick: () -> Unit,
+    onTargetClick: () -> Unit,
+    onSwap: () -> Unit,
+    enabled: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        AssistChip(
+            onClick = onSourceClick,
+            label = { Text("${sourceLanguage.flag} ${sourceLanguage.nativeName}") },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
+            enabled = enabled
+        )
+
+        IconButton(
+            onClick = onSwap,
+            enabled = enabled,
+            modifier = Modifier
+                .padding(horizontal = 4.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 0.1f else 0.05f))
+        ) {
+            Icon(
+                Icons.Filled.SwapHoriz,
+                contentDescription = "Swap languages",
+                tint = if (enabled) MaterialTheme.colorScheme.primary
+                       else MaterialTheme.colorScheme.outline
             )
         }
+
+        AssistChip(
+            onClick = onTargetClick,
+            label = { Text("${targetLanguage.flag} ${targetLanguage.nativeName}") },
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(12.dp),
+            enabled = enabled
+        )
     }
 }
 
@@ -399,11 +479,12 @@ private fun ConversationButton(
 @Composable
 private fun DialogueBubble(
     message: DialogueUiMessage,
-    onSpeak: () -> Unit,
+    onSpeakSource: () -> Unit,
+    onSpeakTranslation: () -> Unit,
     ttsReady: Boolean
 ) {
-    val langLabel = if (message.sourceLang == "ru") "🇷🇺" else "🇬🇧"
-    val targetLabel = if (message.targetLang == "ru") "🇷🇺" else "🇬🇧"
+    val langLabel = Language.allLanguages.find { it.code == message.sourceLang }?.flag ?: "🌐"
+    val targetLabel = Language.allLanguages.find { it.code == message.targetLang }?.flag ?: "🌐"
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Source (original speech)
@@ -412,6 +493,18 @@ private fun DialogueBubble(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.Bottom
         ) {
+            if (ttsReady) {
+                IconButton(
+                    onClick = onSpeakSource,
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.VolumeUp, "Озвучить",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                    )
+                }
+            }
             Text(
                 text = langLabel,
                 fontSize = 14.sp,
@@ -458,7 +551,7 @@ private fun DialogueBubble(
             )
             if (ttsReady) {
                 IconButton(
-                    onClick = onSpeak,
+                    onClick = onSpeakTranslation,
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(

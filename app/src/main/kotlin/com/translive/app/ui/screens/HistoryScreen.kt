@@ -53,38 +53,27 @@ fun HistoryScreen(
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") },
-                    label = { Text("Текст") }
+                    icon = { Icon(Icons.Filled.Translate, "Translate") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") },
-                    label = { Text("Диалог") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToCamera,
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") },
-                    label = { Text("Камера") }
+                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
                 )
                 NavigationBarItem(
                     selected = true,
                     onClick = { },
-                    icon = { Icon(Icons.Filled.History, "History") },
-                    label = { Text("История") }
+                    icon = { Icon(Icons.Filled.History, "History") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") },
-                    label = { Text("Модели") }
+                    icon = { Icon(Icons.Filled.Storage, "Models") }
                 )
                 NavigationBarItem(
                     selected = false,
                     onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") },
-                    label = { Text("Настройки") }
+                    icon = { Icon(Icons.Filled.Settings, "Settings") }
                 )
             }
         }

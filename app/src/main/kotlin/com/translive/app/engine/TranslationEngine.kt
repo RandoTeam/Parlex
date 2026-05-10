@@ -83,7 +83,7 @@ class TranslationEngine {
         target: Language,
         maxTokens: Int = 2048
     ): String {
-        require(isLoaded) { "Model not loaded. Call loadModel() first." }
+        if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
         val prompt = buildPrompt(sourceText, source, target)
         // Note: caller must hold inferenceMutex when calling from coroutines
         return nativeTranslate(contextPtr, prompt, maxTokens).trim()
@@ -111,7 +111,7 @@ class TranslationEngine {
         maxTokens: Int = 2048,
         onComplete: ((StreamResult) -> Unit)? = null
     ): Flow<String> = channelFlow {
-        require(isLoaded) { "Model not loaded. Call loadModel() first." }
+        if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
         val prompt = buildPrompt(sourceText, source, target)
 
         val callback = object : TokenCallback {

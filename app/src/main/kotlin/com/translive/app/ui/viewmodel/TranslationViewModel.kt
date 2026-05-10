@@ -2,6 +2,7 @@ package com.translive.app.ui.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
@@ -9,7 +10,7 @@ import com.translive.app.data.db.TranslationDao
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.TranslationEntry
 import com.translive.app.engine.TranslationEngine
-import com.translive.app.engine.TtsEngine
+import com.translive.app.engine.SystemTtsEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
@@ -42,10 +43,22 @@ class TranslationViewModel @Inject constructor(
     private val translationDao: TranslationDao,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
-    val ttsEngine: TtsEngine
+    val systemTts: SystemTtsEngine,
+    private val savedStateHandle: SavedStateHandle
 ) : AndroidViewModel(app) {
 
-    private val _uiState = MutableStateFlow(TranslationUiState())
+    private val _uiState = MutableStateFlow(
+        TranslationUiState(
+            sourceText = savedStateHandle["sourceText"] ?: "",
+            translatedText = savedStateHandle["translatedText"] ?: "",
+            sourceLanguage = savedStateHandle.get<String>("srcLang")?.let { code ->
+                Language.entries.find { it.code == code }
+            } ?: Language.RUSSIAN,
+            targetLanguage = savedStateHandle.get<String>("tgtLang")?.let { code ->
+                Language.entries.find { it.code == code }
+            } ?: Language.ENGLISH
+        )
+    )
     val uiState: StateFlow<TranslationUiState> = _uiState.asStateFlow()
 
     val history = translationDao.getRecentTranslations().stateIn(
@@ -90,14 +103,7 @@ class TranslationViewModel @Inject constructor(
                     )
                 }
 
-                // Auto-load TTS if available (non-fatal)
                 if (loaded) {
-                    try {
-                        ttsEngine.loadModel()
-                    } catch (e: Exception) {
-                        // TTS load failure should never crash the app
-                        android.util.Log.w("TranslationVM", "TTS auto-load failed: ${e.message}")
-                    }
                     resetIdleTimer()
                 }
             } catch (e: Exception) {
@@ -110,14 +116,17 @@ class TranslationViewModel @Inject constructor(
 
     fun setSourceText(text: String) {
         _uiState.update { it.copy(sourceText = text) }
+        savedStateHandle["sourceText"] = text
     }
 
     fun setSourceLanguage(lang: Language) {
         _uiState.update { it.copy(sourceLanguage = lang) }
+        savedStateHandle["srcLang"] = lang.code
     }
 
     fun setTargetLanguage(lang: Language) {
         _uiState.update { it.copy(targetLanguage = lang) }
+        savedStateHandle["tgtLang"] = lang.code
     }
 
     fun swapLanguages() {
@@ -133,7 +142,22 @@ class TranslationViewModel @Inject constructor(
 
     fun translate() {
         val state = _uiState.value
-        if (state.sourceText.isBlank() || !state.isModelLoaded || state.isTranslating) return
+        if (state.sourceText.isBlank() || state.isTranslating) return
+
+        // Auto-reload model if it was unloaded (idle timer, other VM, etc.)
+        if (!engine.isLoaded) {
+            _uiState.update { it.copy(isModelLoaded = false) }
+            loadModel()  // will set isModelLoaded=true on success
+            // Queue translation after load completes
+            viewModelScope.launch {
+                // Wait for model to finish loading
+                _uiState.first { !it.isModelLoading }
+                if (_uiState.value.isModelLoaded) {
+                    translate()  // retry
+                }
+            }
+            return
+        }
 
         _uiState.update { it.copy(isTranslating = true, error = null, stats = null, translatedText = "") }
 
@@ -176,6 +200,7 @@ class TranslationViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(translatedText = result, isTranslating = false, stats = stats)
                 }
+                savedStateHandle["translatedText"] = result
 
                 // Save to history
                 translationDao.insertTranslation(
@@ -208,9 +233,8 @@ class TranslationViewModel @Inject constructor(
 
         idleTimerJob = viewModelScope.launch {
             delay(timeoutMinutes * 60_000L)
-            // Unload model after idle
             if (engine.isLoaded) {
-                engine.unloadModel()
+                // Update UI state FIRST to close the race window
                 _uiState.update {
                     it.copy(
                         isModelLoaded = false,
@@ -218,6 +242,7 @@ class TranslationViewModel @Inject constructor(
                         error = "Модель выгружена (простой ${timeoutMinutes} мин.)"
                     )
                 }
+                engine.unloadModel()
             }
         }
     }
@@ -237,6 +262,7 @@ class TranslationViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         idleTimerJob?.cancel()
-        engine.unloadModel()
+        // Do NOT call engine.unloadModel() — engine is a @Singleton shared
+        // with DialogueViewModel and CameraViewModel
     }
 }
