@@ -108,7 +108,7 @@ class TranslationEngine {
         if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
         val style = getActivePromptStyle()
         val prompt = buildPrompt(sourceText, source, target, style)
-        val useChatTemplate = style != PromptStyle.TRANSLATE_GEMMA
+        val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
         return nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
     }
 
@@ -137,7 +137,7 @@ class TranslationEngine {
         if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
         val style = getActivePromptStyle()
         val prompt = buildPrompt(sourceText, source, target, style)
-        val useChatTemplate = style != PromptStyle.TRANSLATE_GEMMA
+        val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
 
         val callback = object : TokenCallback {
             override fun onToken(token: String): Boolean {
@@ -177,10 +177,12 @@ class TranslationEngine {
         }
     }
 
-    /** TranslateGemma: Google's recommended prompt format */
+    /**
+     * TranslateGemma: simple instruction format.
+     * Chat template wrapping is handled by the native layer.
+     * Do NOT include output markers like "English:" — the model generates after <start_of_turn>model.
+     */
     private fun buildTranslateGemmaPrompt(text: String, source: Language, target: Language): String {
-        return "Translate the following text from ${source.displayName} to ${target.displayName}.\n" +
-               "${source.displayName}: $text\n" +
-               "${target.displayName}:"
+        return "Translate the following text from ${source.displayName} to ${target.displayName}:\n$text"
     }
 }

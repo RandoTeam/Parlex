@@ -99,14 +99,17 @@ static int prefill_prompt(TransLiveContext* tlctx, const std::vector<llama_token
  * Create translation sampler with official HY-MT 1.5 recommended parameters.
  * Source: https://huggingface.co/tencent/HY-MT1.5-1.8B
  * { "top_k": 20, "top_p": 0.6, "repetition_penalty": 1.05, "temperature": 0.7 }
+ *
+ * Chain order follows llama.cpp convention: penalties → top_k → top_p → temp → dist
+ * Penalties must see full logit distribution before filtering.
  * Caller must free with llama_sampler_free().
  */
 static llama_sampler* create_translation_sampler() {
     llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.05f, 0.0f, 0.0f));
     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(20));
     llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.6f, 1));
     llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.7f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.05f, 0.0f, 0.0f));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     return sampler;
 }
