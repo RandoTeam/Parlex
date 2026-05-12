@@ -1,5 +1,7 @@
 package com.translive.app.ui.viewmodel
 
+import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.graphics.*
 import android.os.SystemClock
 import android.text.TextPaint
@@ -14,6 +16,11 @@ import com.translive.app.engine.OcrResult
 import com.translive.app.engine.OcrEngine
 import com.translive.app.engine.TranslationEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +28,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 import kotlin.math.abs
 import kotlin.math.max
@@ -40,6 +49,26 @@ private data class PaintLine(
 private data class CaptureOcrPass(
     val result: OcrResult,
     val sourceLanguage: Language
+)
+
+private data class CaptureDebugLine(
+    val index: Int,
+    val sourceText: String,
+    val translatedText: String,
+    val box: Rect
+)
+
+private data class CaptureDebugSnapshot(
+    val createdAtMs: Long,
+    val requestedSourceLanguage: Language,
+    val effectiveSourceLanguage: Language,
+    val targetLanguage: Language,
+    val ocrBackend: String,
+    val ocrLanguage: String,
+    val imageWidth: Int,
+    val imageHeight: Int,
+    val blocks: List<com.translive.app.engine.OcrBlock>,
+    val lines: List<CaptureDebugLine>
 )
 
 enum class CameraMode { LIVE, CAPTURE }
@@ -69,6 +98,7 @@ data class CameraUiState(
 
 @HiltViewModel
 class CameraViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val ocrEngine: OcrEngine,
     private val translationEngine: TranslationEngine,
     private val cameraTranslateEngine: CameraTranslateEngine
@@ -78,6 +108,8 @@ class CameraViewModel @Inject constructor(
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
 
     private var translateJob: Job? = null
+    @Volatile
+    private var lastCaptureDebugSnapshot: CaptureDebugSnapshot? = null
 
     @Volatile
     private var isLiveProcessing = false
@@ -147,6 +179,7 @@ class CameraViewModel @Inject constructor(
     private fun resetModeVisuals() {
         translateJob?.cancel()
         clearLiveSession()
+        lastCaptureDebugSnapshot = null
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
@@ -407,6 +440,7 @@ class CameraViewModel @Inject constructor(
     private fun enterCaptureMode(workBitmap: Bitmap) {
         translateJob?.cancel()
         clearLiveSession()
+        lastCaptureDebugSnapshot = null
         _uiState.update {
             it.copy(
                 mode = CameraMode.CAPTURE,
@@ -430,6 +464,14 @@ class CameraViewModel @Inject constructor(
             val effectiveSourceLanguage = captureOcr.sourceLanguage
 
             if (ocrResult.blocks.isEmpty()) {
+                rememberCaptureDebugSnapshot(
+                    sourceLanguage,
+                    effectiveSourceLanguage,
+                    targetLanguage,
+                    ocrResult,
+                    emptyList(),
+                    emptyList()
+                )
                 _uiState.update {
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
@@ -442,6 +484,14 @@ class CameraViewModel @Inject constructor(
             val allLines = extractCaptureLines(ocrResult)
 
             if (allLines.isEmpty()) {
+                rememberCaptureDebugSnapshot(
+                    sourceLanguage,
+                    effectiveSourceLanguage,
+                    targetLanguage,
+                    ocrResult,
+                    emptyList(),
+                    emptyList()
+                )
                 _uiState.update {
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
@@ -454,6 +504,14 @@ class CameraViewModel @Inject constructor(
             _uiState.update { it.copy(captureMessage = "Перевожу найденные строки") }
 
             val translatedParts = translateCaptureLines(allLines, effectiveSourceLanguage, targetLanguage)
+            rememberCaptureDebugSnapshot(
+                sourceLanguage,
+                effectiveSourceLanguage,
+                targetLanguage,
+                ocrResult,
+                allLines,
+                translatedParts
+            )
             val painted = paintOnBitmap(bitmap, allLines, translatedParts)
 
             _uiState.update {
@@ -558,6 +616,210 @@ class CameraViewModel @Inject constructor(
             texts
         }
     }
+
+    private fun rememberCaptureDebugSnapshot(
+        requestedSourceLanguage: Language,
+        effectiveSourceLanguage: Language,
+        targetLanguage: Language,
+        ocrResult: OcrResult,
+        lines: List<PaintLine>,
+        translations: List<String>
+    ) {
+        lastCaptureDebugSnapshot = CaptureDebugSnapshot(
+            createdAtMs = System.currentTimeMillis(),
+            requestedSourceLanguage = requestedSourceLanguage,
+            effectiveSourceLanguage = effectiveSourceLanguage,
+            targetLanguage = targetLanguage,
+            ocrBackend = ocrEngine.backendNameFor(effectiveSourceLanguage.code),
+            ocrLanguage = ocrEngine.engineLanguageFor(effectiveSourceLanguage.code),
+            imageWidth = ocrResult.imageWidth,
+            imageHeight = ocrResult.imageHeight,
+            blocks = ocrResult.blocks,
+            lines = lines.mapIndexed { index, line ->
+                CaptureDebugLine(
+                    index = index,
+                    sourceText = line.text,
+                    translatedText = translations.getOrNull(index).orEmpty(),
+                    box = Rect(line.box)
+                )
+            }
+        )
+    }
+
+    fun saveDebugCapturePack() {
+        val isDebuggable = (appContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        if (!isDebuggable) return
+
+        val state = _uiState.value
+        val snapshot = lastCaptureDebugSnapshot
+        val original = state.capturedBitmap
+        if (snapshot == null || original == null) {
+            _uiState.update { it.copy(captureMessage = "Debug data is not ready") }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val packDir = writeCaptureDebugPack(
+                    snapshot = snapshot,
+                    original = original,
+                    translatedOverlay = state.paintedBitmap ?: original
+                )
+                _uiState.update { it.copy(captureMessage = "Debug pack saved: ${packDir.name}") }
+                Log.i("CameraVM", "Debug capture pack saved: ${packDir.absolutePath}")
+            } catch (e: Exception) {
+                Log.e("CameraVM", "Debug capture pack save failed: ${e.message}", e)
+                _uiState.update { it.copy(captureMessage = "Debug pack save failed") }
+            }
+        }
+    }
+
+    private fun writeCaptureDebugPack(
+        snapshot: CaptureDebugSnapshot,
+        original: Bitmap,
+        translatedOverlay: Bitmap
+    ): File {
+        val root = appContext.getExternalFilesDir("camera-debug")
+            ?: File(appContext.filesDir, "camera-debug")
+        val dirName = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)
+            .format(Date(snapshot.createdAtMs))
+        val packDir = File(root, dirName)
+        packDir.mkdirs()
+
+        val files = JSONObject()
+            .put("original", "original.png")
+            .put("ocrBoxes", "ocr_boxes.png")
+            .put("translatedOverlay", "translated_overlay.png")
+            .put("recognizedText", "recognized.txt")
+            .put("translationText", "translation.txt")
+
+        saveBitmap(File(packDir, "original.png"), original)
+        saveBitmap(File(packDir, "ocr_boxes.png"), drawDebugBoxes(original, snapshot.lines))
+        saveBitmap(File(packDir, "translated_overlay.png"), translatedOverlay)
+        File(packDir, "recognized.txt").writeText(
+            snapshot.lines.joinToString("\n") { it.sourceText },
+            Charsets.UTF_8
+        )
+        File(packDir, "translation.txt").writeText(
+            snapshot.lines.joinToString("\n") { it.translatedText },
+            Charsets.UTF_8
+        )
+        File(packDir, "metadata.json").writeText(
+            snapshot.toJson(files).toString(2),
+            Charsets.UTF_8
+        )
+
+        return packDir
+    }
+
+    private fun saveBitmap(file: File, bitmap: Bitmap) {
+        file.outputStream().use { output ->
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        }
+    }
+
+    private fun drawDebugBoxes(original: Bitmap, lines: List<CaptureDebugLine>): Bitmap {
+        val result = original.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(result)
+        val strokePaint = Paint().apply {
+            color = Color.argb(230, 255, 64, 64)
+            style = Paint.Style.STROKE
+            strokeWidth = max(2f, result.width / 700f)
+            isAntiAlias = true
+        }
+        val fillPaint = Paint().apply {
+            color = Color.argb(190, 0, 0, 0)
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        val labelPaint = Paint().apply {
+            color = Color.WHITE
+            textSize = max(18f, result.width / 72f)
+            isAntiAlias = true
+            isFakeBoldText = true
+        }
+
+        for (line in lines) {
+            val box = clippedBox(line.box, result.width, result.height)
+            if (box.width() <= 0 || box.height() <= 0) continue
+            canvas.drawRect(box, strokePaint)
+
+            val label = (line.index + 1).toString()
+            val labelWidth = labelPaint.measureText(label) + 10f
+            val labelHeight = labelPaint.textSize + 8f
+            val labelLeft = box.left.toFloat()
+            val labelTop = (box.top - labelHeight).coerceAtLeast(0f)
+            canvas.drawRect(
+                labelLeft,
+                labelTop,
+                labelLeft + labelWidth,
+                labelTop + labelHeight,
+                fillPaint
+            )
+            canvas.drawText(label, labelLeft + 5f, labelTop + labelPaint.textSize + 1f, labelPaint)
+        }
+
+        return result
+    }
+
+    private fun CaptureDebugSnapshot.toJson(files: JSONObject): JSONObject =
+        JSONObject()
+            .put("createdAtMs", createdAtMs)
+            .put(
+                "languages",
+                JSONObject()
+                    .put("requestedSource", requestedSourceLanguage.code)
+                    .put("effectiveSource", effectiveSourceLanguage.code)
+                    .put("target", targetLanguage.code)
+            )
+            .put(
+                "ocr",
+                JSONObject()
+                    .put("backend", ocrBackend)
+                    .put("engineLanguage", ocrLanguage)
+                    .put("imageWidth", imageWidth)
+                    .put("imageHeight", imageHeight)
+                    .put("blockCount", blocks.size)
+                    .put("lineCount", lines.size)
+            )
+            .put("files", files)
+            .put(
+                "blocks",
+                JSONArray().also { array ->
+                    blocks.forEachIndexed { index, block ->
+                        array.put(
+                            JSONObject()
+                                .put("index", index)
+                                .put("text", block.text)
+                                .put("box", block.boundingBox.toJson())
+                                .put("lineCount", block.lines.size)
+                        )
+                    }
+                }
+            )
+            .put(
+                "lines",
+                JSONArray().also { array ->
+                    lines.forEach { line ->
+                        array.put(
+                            JSONObject()
+                                .put("index", line.index)
+                                .put("sourceText", line.sourceText)
+                                .put("translatedText", line.translatedText)
+                                .put("box", line.box.toJson())
+                        )
+                    }
+                }
+            )
+
+    private fun Rect.toJson(): JSONObject =
+        JSONObject()
+            .put("left", left)
+            .put("top", top)
+            .put("right", right)
+            .put("bottom", bottom)
+            .put("width", width())
+            .put("height", height())
 
     /**
      * Paint translated text directly on bitmap.
@@ -675,6 +937,7 @@ class CameraViewModel @Inject constructor(
     fun backToLive() {
         translateJob?.cancel()
         clearLiveSession()
+        lastCaptureDebugSnapshot = null
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,

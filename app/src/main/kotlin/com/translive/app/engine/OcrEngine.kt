@@ -119,6 +119,15 @@ class OcrEngine @Inject constructor(
 
     // ── Public API ───────────────────────────────────────────────────────
 
+    fun backendNameFor(sourceLanguageCode: String): String =
+        backendFor(sourceLanguageCode).name
+
+    fun engineLanguageFor(sourceLanguageCode: String): String =
+        when (backendFor(sourceLanguageCode)) {
+            OcrBackend.TESSERACT -> tessLangFor(sourceLanguageCode)
+            else -> sourceLanguageCode
+        }
+
     suspend fun recognize(bitmap: Bitmap, sourceLanguageCode: String = "en"): OcrResult {
         return when (backendFor(sourceLanguageCode)) {
             OcrBackend.MLKIT_LATIN -> {

@@ -2,6 +2,7 @@ package com.translive.app.ui.screens
 
 import android.Manifest
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.hardware.camera2.CameraCharacteristics
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -290,6 +291,9 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val isDebugBuild = remember(context) {
+        (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+    }
     val cameraPrefs = remember(context) {
         context.getSharedPreferences(CAMERA_PREFS, Context.MODE_PRIVATE)
     }
@@ -471,6 +475,12 @@ fun CameraScreen(
                             status = uiState.captureStatus,
                             message = uiState.captureMessage
                         )
+                        if (isDebugBuild) {
+                            CameraDebugCaptureButton(
+                                enabled = !uiState.isCaptureProcessing && uiState.capturedBitmap != null,
+                                onClick = viewModel::saveDebugCapturePack
+                            )
+                        }
                     }
                 }
 
@@ -696,6 +706,33 @@ private fun BoxScope.CameraCaptureStatusBadge(
             Text(
                 text = message ?: "",
                 style = MaterialTheme.typography.labelSmall
+            )
+        }
+    }
+}
+
+@Composable
+private fun BoxScope.CameraDebugCaptureButton(
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(12.dp),
+        color = Color.Black.copy(alpha = 0.58f),
+        contentColor = Color.White,
+        shape = CircleShape
+    ) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Filled.BugReport,
+                contentDescription = "Save debug capture pack",
+                tint = if (enabled) Color.White else Color.White.copy(alpha = 0.38f)
             )
         }
     }
