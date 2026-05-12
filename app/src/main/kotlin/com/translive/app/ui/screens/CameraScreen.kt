@@ -45,6 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.translive.app.ui.components.AppBottomNavigation
+import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.CameraMode
 import com.translive.app.ui.viewmodel.CameraViewModel
@@ -85,32 +87,15 @@ fun CameraScreen(
     Scaffold(
         containerColor = Color.Black,
         bottomBar = {
-            NavigationBar(tonalElevation = 0.dp) {
-                NavigationBarItem(
-                    selected = false, onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Text") }
-                )
-                NavigationBarItem(
-                    selected = false, onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.RecordVoiceOver, "Dialogue") }
-                )
-                NavigationBarItem(
-                    selected = true, onClick = {},
-                    icon = { Icon(Icons.Filled.CameraAlt, "Camera") }
-                )
-                NavigationBarItem(
-                    selected = false, onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") }
-                )
-                NavigationBarItem(
-                    selected = false, onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.DownloadForOffline, "Models") }
-                )
-                NavigationBarItem(
-                    selected = false, onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") }
-                )
-            }
+            AppBottomNavigation(
+                selected = BottomNavDestination.CAMERA,
+                onNavigateToTranslate = onNavigateToTranslate,
+                onNavigateToDialogue = onNavigateToDialogue,
+                onNavigateToCamera = {},
+                onNavigateToHistory = onNavigateToHistory,
+                onNavigateToModels = onNavigateToModels,
+                onNavigateToSettings = onNavigateToSettings
+            )
         }
     ) { paddingValues ->
         Box(
@@ -139,6 +124,8 @@ fun CameraScreen(
                             viewModel = viewModel,
                             onPreviewView = { previewViewRef = it }
                         )
+
+                        CameraBetaBadge()
 
                         // Live translation overlay
                         if (uiState.blocks.isNotEmpty()) {
@@ -281,6 +268,24 @@ fun CameraScreen(
             excludeLanguage = uiState.sourceLanguage,
             onLanguageSelected = { viewModel.setTargetLanguage(it); showTargetPicker = false },
             onDismiss = { showTargetPicker = false }
+        )
+    }
+}
+
+@Composable
+private fun BoxScope.CameraBetaBadge() {
+    Surface(
+        modifier = Modifier
+            .align(Alignment.TopStart)
+            .padding(12.dp),
+        color = Color.Black.copy(alpha = 0.55f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Text(
+            text = "Beta",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            style = MaterialTheme.typography.labelSmall
         )
     }
 }

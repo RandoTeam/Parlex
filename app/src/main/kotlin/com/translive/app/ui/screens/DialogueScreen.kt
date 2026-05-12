@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.data.model.Language
+import com.translive.app.ui.components.AppBottomNavigation
+import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.DialogueUiMessage
 import com.translive.app.ui.viewmodel.DialoguePhase
@@ -69,36 +71,15 @@ fun DialogueScreen(
 
     Scaffold(
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp
-            ) {
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") }
-                )
-                NavigationBarItem(
-                    selected = true,
-                    onClick = { },
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") }
-                )
-            }
+            AppBottomNavigation(
+                selected = BottomNavDestination.DIALOGUE,
+                onNavigateToTranslate = onNavigateToTranslate,
+                onNavigateToDialogue = {},
+                onNavigateToCamera = onNavigateToCamera,
+                onNavigateToHistory = onNavigateToHistory,
+                onNavigateToModels = onNavigateToModels,
+                onNavigateToSettings = onNavigateToSettings
+            )
         }
     ) { padding ->
         Column(

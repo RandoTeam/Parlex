@@ -19,6 +19,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.data.SettingsRepository
+import com.translive.app.ui.components.AppBottomNavigation
+import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.viewmodel.SettingsViewModel
 
 @Composable
@@ -36,36 +38,15 @@ fun SettingsScreen(
 
     Scaffold(
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp
-            ) {
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToHistory,
-                    icon = { Icon(Icons.Filled.History, "History") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") }
-                )
-                NavigationBarItem(
-                    selected = true,
-                    onClick = { },
-                    icon = { Icon(Icons.Filled.Settings, "Settings") }
-                )
-            }
+            AppBottomNavigation(
+                selected = BottomNavDestination.SETTINGS,
+                onNavigateToTranslate = onNavigateToTranslate,
+                onNavigateToDialogue = onNavigateToDialogue,
+                onNavigateToCamera = onNavigateToCamera,
+                onNavigateToHistory = onNavigateToHistory,
+                onNavigateToModels = onNavigateToModels,
+                onNavigateToSettings = {}
+            )
         }
     ) { padding ->
         Column(

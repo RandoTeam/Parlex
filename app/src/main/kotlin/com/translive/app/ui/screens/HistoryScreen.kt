@@ -27,6 +27,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.data.model.DialogueMessage
 import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.TranslationEntry
+import com.translive.app.ui.components.AppBottomNavigation
+import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.viewmodel.HistoryTab
 import com.translive.app.ui.viewmodel.HistoryViewModel
 import java.text.SimpleDateFormat
@@ -46,36 +48,15 @@ fun HistoryScreen(
 
     Scaffold(
         bottomBar = {
-            NavigationBar(
-                containerColor = MaterialTheme.colorScheme.surface,
-                tonalElevation = 0.dp
-            ) {
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToTranslate,
-                    icon = { Icon(Icons.Filled.Translate, "Translate") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToDialogue,
-                    icon = { Icon(Icons.Filled.Mic, "Dialogue") }
-                )
-                NavigationBarItem(
-                    selected = true,
-                    onClick = { },
-                    icon = { Icon(Icons.Filled.History, "History") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToModels,
-                    icon = { Icon(Icons.Filled.Storage, "Models") }
-                )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onNavigateToSettings,
-                    icon = { Icon(Icons.Filled.Settings, "Settings") }
-                )
-            }
+            AppBottomNavigation(
+                selected = BottomNavDestination.HISTORY,
+                onNavigateToTranslate = onNavigateToTranslate,
+                onNavigateToDialogue = onNavigateToDialogue,
+                onNavigateToCamera = onNavigateToCamera,
+                onNavigateToHistory = {},
+                onNavigateToModels = onNavigateToModels,
+                onNavigateToSettings = onNavigateToSettings
+            )
         }
     ) { padding ->
         Column(
