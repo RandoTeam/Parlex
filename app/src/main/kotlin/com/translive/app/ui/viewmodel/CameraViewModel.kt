@@ -48,7 +48,26 @@ private data class PaintLine(
 
 private data class CaptureOcrPass(
     val result: OcrResult,
-    val sourceLanguage: Language
+    val sourceLanguage: Language,
+    val attempts: List<CaptureOcrAttempt>
+)
+
+private data class CaptureOcrAttempt(
+    val language: Language,
+    val result: OcrResult,
+    val score: CaptureOcrScore
+)
+
+private data class CaptureOcrScore(
+    val expectedScript: OcrTextScript,
+    val lineCount: Int,
+    val textLength: Int,
+    val letterCount: Int,
+    val expectedLetterCount: Int,
+    val conflictingLetterCount: Int,
+    val expectedScriptRatio: Float,
+    val selectionScore: Float,
+    val isStrongForExpectedScript: Boolean
 )
 
 private data class CaptureDebugLine(
@@ -56,6 +75,18 @@ private data class CaptureDebugLine(
     val sourceText: String,
     val translatedText: String,
     val box: Rect
+)
+
+private data class CaptureDebugAttempt(
+    val languageCode: String,
+    val backend: String,
+    val engineLanguage: String,
+    val expectedScript: OcrTextScript,
+    val lineCount: Int,
+    val textLength: Int,
+    val expectedScriptRatio: Float,
+    val selectionScore: Float,
+    val selected: Boolean
 )
 
 private data class CaptureDebugSnapshot(
@@ -68,8 +99,13 @@ private data class CaptureDebugSnapshot(
     val imageWidth: Int,
     val imageHeight: Int,
     val blocks: List<com.translive.app.engine.OcrBlock>,
+    val attempts: List<CaptureDebugAttempt>,
     val lines: List<CaptureDebugLine>
 )
+
+private enum class OcrTextScript {
+    CYRILLIC, LATIN, CJK, DEVANAGARI, ARABIC, HEBREW, OTHER
+}
 
 enum class CameraMode { LIVE, CAPTURE }
 
@@ -469,6 +505,7 @@ class CameraViewModel @Inject constructor(
                     effectiveSourceLanguage,
                     targetLanguage,
                     ocrResult,
+                    captureOcr.attempts,
                     emptyList(),
                     emptyList()
                 )
@@ -481,7 +518,7 @@ class CameraViewModel @Inject constructor(
                 return
             }
 
-            val allLines = extractCaptureLines(ocrResult)
+            val allLines = extractCaptureLines(ocrResult, effectiveSourceLanguage)
 
             if (allLines.isEmpty()) {
                 rememberCaptureDebugSnapshot(
@@ -489,6 +526,7 @@ class CameraViewModel @Inject constructor(
                     effectiveSourceLanguage,
                     targetLanguage,
                     ocrResult,
+                    captureOcr.attempts,
                     emptyList(),
                     emptyList()
                 )
@@ -509,6 +547,7 @@ class CameraViewModel @Inject constructor(
                 effectiveSourceLanguage,
                 targetLanguage,
                 ocrResult,
+                captureOcr.attempts,
                 allLines,
                 translatedParts
             )
@@ -536,59 +575,200 @@ class CameraViewModel @Inject constructor(
         bitmap: Bitmap,
         sourceLanguage: Language
     ): CaptureOcrPass {
-        val primaryResult = ocrEngine.recognize(bitmap, sourceLanguage.code)
-        if (hasUsableCaptureText(primaryResult)) {
-            return CaptureOcrPass(primaryResult, sourceLanguage)
-        }
-
+        val attempts = mutableListOf(recognizeCaptureAttempt(bitmap, sourceLanguage))
         val triedCodes = mutableSetOf(sourceLanguage.code)
-        for (fallbackCode in captureOcrFallbackCodes(sourceLanguage)) {
+        for (fallbackCode in captureOcrFallbackCodes(sourceLanguage, attempts.first().score)) {
             if (!triedCodes.add(fallbackCode)) continue
 
-            val fallbackResult = ocrEngine.recognize(bitmap, fallbackCode)
-            if (hasUsableCaptureText(fallbackResult) && matchesExpectedScript(fallbackResult, fallbackCode)) {
-                val fallbackLanguage = Language.fromCode(fallbackCode) ?: sourceLanguage
-                Log.i("CameraVM", "Capture OCR fallback: ${sourceLanguage.code} -> $fallbackCode")
-                return CaptureOcrPass(fallbackResult, fallbackLanguage)
-            }
+            val fallbackLanguage = Language.fromCode(fallbackCode) ?: continue
+            attempts += recognizeCaptureAttempt(bitmap, fallbackLanguage)
         }
 
-        return CaptureOcrPass(primaryResult, sourceLanguage)
+        val selectedAttempt = selectCaptureOcrAttempt(sourceLanguage, attempts)
+        if (selectedAttempt.language.code != sourceLanguage.code) {
+            Log.i(
+                "CameraVM",
+                "Capture OCR fallback: ${sourceLanguage.code} -> ${selectedAttempt.language.code}, " +
+                    "score=${selectedAttempt.score.selectionScore}, lines=${selectedAttempt.score.lineCount}"
+            )
+        }
+        return CaptureOcrPass(selectedAttempt.result, selectedAttempt.language, attempts)
     }
 
-    private fun captureOcrFallbackCodes(sourceLanguage: Language): List<String> =
-        when (sourceLanguage.code) {
-            "ru" -> listOf("uk", "en")
-            "uk" -> listOf("ru", "en")
-            "en", "fr", "de", "es", "pt", "it", "nl", "pl", "cs",
-            "tr", "vi", "id", "ms", "fil" -> listOf("ru", "uk")
+    private suspend fun recognizeCaptureAttempt(
+        bitmap: Bitmap,
+        language: Language
+    ): CaptureOcrAttempt {
+        val result = ocrEngine.recognize(bitmap, language.code)
+        return CaptureOcrAttempt(
+            language = language,
+            result = result,
+            score = scoreCaptureOcrResult(result, language.code)
+        )
+    }
+
+    private fun captureOcrFallbackCodes(
+        sourceLanguage: Language,
+        primaryScore: CaptureOcrScore
+    ): List<String> {
+        if (primaryScore.isStrongForExpectedScript) return emptyList()
+
+        return when (expectedScriptForLanguage(sourceLanguage.code)) {
+            OcrTextScript.CYRILLIC -> when (sourceLanguage.code) {
+                "ru" -> listOf("uk", "en")
+                "uk" -> listOf("ru", "en")
+                else -> listOf("ru", "en")
+            }
+            OcrTextScript.LATIN -> listOf("ru", "uk")
             else -> emptyList()
         }
+    }
 
-    private fun hasUsableCaptureText(result: OcrResult): Boolean =
-        result.blocks.any { block ->
-            block.lines.any { line ->
-                line.text.isNotBlank() &&
-                    line.boundingBox.width() > 20 &&
-                    line.boundingBox.height() > 8
+    private fun selectCaptureOcrAttempt(
+        requestedSourceLanguage: Language,
+        attempts: List<CaptureOcrAttempt>
+    ): CaptureOcrAttempt {
+        val requestedScript = expectedScriptForLanguage(requestedSourceLanguage.code)
+        return attempts.maxByOrNull { attempt ->
+            var score = attempt.score.selectionScore
+            if (attempt.language.code == requestedSourceLanguage.code) score += 24f
+            if (attempt.score.expectedScript == requestedScript) score += 8f
+            if (!attempt.score.isStrongForExpectedScript) score -= 20f
+            score
+        } ?: attempts.first()
+    }
+
+    private fun scoreCaptureOcrResult(result: OcrResult, languageCode: String): CaptureOcrScore {
+        val expectedScript = expectedScriptForLanguage(languageCode)
+        val lines = extractRawCaptureLines(result)
+        val text = lines.joinToString(" ") { it.text }
+        var letterCount = 0
+        var expectedLetterCount = 0
+        var conflictingLetterCount = 0
+
+        for (char in text) {
+            val script = scriptForChar(char)
+            if (script == OcrTextScript.OTHER) continue
+
+            letterCount++
+            when {
+                script == expectedScript -> expectedLetterCount++
+                isConflictingScript(script, expectedScript) -> conflictingLetterCount++
             }
         }
 
-    private fun matchesExpectedScript(result: OcrResult, languageCode: String): Boolean {
-        val text = result.blocks.joinToString(" ") { it.text }
-        return when (languageCode) {
-            "ru", "uk", "mn" -> text.any { it in '\u0400'..'\u04FF' }
-            "en" -> text.any { it in 'A'..'Z' || it in 'a'..'z' }
-            else -> true
+        val textLength = text.count { !it.isWhitespace() }
+        val expectedScriptRatio = if (letterCount > 0 && expectedScript != OcrTextScript.OTHER) {
+            expectedLetterCount.toFloat() / letterCount.toFloat()
+        } else if (textLength > 0 && expectedScript == OcrTextScript.OTHER) {
+            1f
+        } else {
+            0f
         }
+        val requiredExpectedLetters = if (textLength < 8) 2 else 6
+        val isStrong = lines.isNotEmpty() &&
+            textLength >= 3 &&
+            (
+                expectedScript == OcrTextScript.OTHER ||
+                    (expectedLetterCount >= requiredExpectedLetters && expectedScriptRatio >= 0.45f)
+                )
+        val selectionScore = lines.size * 12f +
+            textLength.coerceAtMost(240) * 0.55f +
+            expectedLetterCount * 2.1f -
+            conflictingLetterCount * 2.4f +
+            expectedScriptRatio * 32f
+
+        return CaptureOcrScore(
+            expectedScript = expectedScript,
+            lineCount = lines.size,
+            textLength = textLength,
+            letterCount = letterCount,
+            expectedLetterCount = expectedLetterCount,
+            conflictingLetterCount = conflictingLetterCount,
+            expectedScriptRatio = expectedScriptRatio,
+            selectionScore = selectionScore,
+            isStrongForExpectedScript = isStrong
+        )
     }
 
-    private fun extractCaptureLines(ocrResult: OcrResult): List<PaintLine> =
+    private fun extractRawCaptureLines(ocrResult: OcrResult): List<PaintLine> =
         ocrResult.blocks.flatMap { block ->
             block.lines
                 .filter { it.boundingBox.width() > 20 && it.boundingBox.height() > 8 }
                 .map { PaintLine(it.text, it.boundingBox) }
         }
+
+    private fun extractCaptureLines(
+        ocrResult: OcrResult,
+        sourceLanguage: Language
+    ): List<PaintLine> {
+        val rawLines = extractRawCaptureLines(ocrResult)
+        val expectedScript = expectedScriptForLanguage(sourceLanguage.code)
+        if (expectedScript == OcrTextScript.OTHER) return rawLines
+
+        val preferredLines = rawLines.filter { isPreferredCaptureLine(it.text, expectedScript) }
+        return if (preferredLines.isNotEmpty()) preferredLines else rawLines
+    }
+
+    private fun isPreferredCaptureLine(text: String, expectedScript: OcrTextScript): Boolean {
+        var letterCount = 0
+        var expectedLetterCount = 0
+        var conflictingLetterCount = 0
+
+        for (char in text) {
+            val script = scriptForChar(char)
+            if (script == OcrTextScript.OTHER) continue
+
+            letterCount++
+            when {
+                script == expectedScript -> expectedLetterCount++
+                isConflictingScript(script, expectedScript) -> conflictingLetterCount++
+            }
+        }
+
+        return letterCount == 0 || (expectedLetterCount > 0 && expectedLetterCount >= conflictingLetterCount)
+    }
+
+    private fun expectedScriptForLanguage(languageCode: String): OcrTextScript =
+        when (languageCode) {
+            "ru", "uk", "mn" -> OcrTextScript.CYRILLIC
+            "en", "fr", "de", "es", "pt", "it", "nl", "pl", "cs",
+            "tr", "vi", "id", "ms", "fil" -> OcrTextScript.LATIN
+            "zh", "zh-Hant", "ja", "ko", "yue", "nan" -> OcrTextScript.CJK
+            "hi", "mr", "gu" -> OcrTextScript.DEVANAGARI
+            "ar", "fa", "ur", "ug" -> OcrTextScript.ARABIC
+            "he" -> OcrTextScript.HEBREW
+            else -> OcrTextScript.OTHER
+        }
+
+    private fun scriptForChar(char: Char): OcrTextScript {
+        return when {
+            char in '\u0400'..'\u052F' -> OcrTextScript.CYRILLIC
+            char in 'A'..'Z' || char in 'a'..'z' ||
+                char in '\u00C0'..'\u024F' ||
+                char in '\u1E00'..'\u1EFF' -> OcrTextScript.LATIN
+            char in '\u3040'..'\u30FF' ||
+                char in '\u3400'..'\u4DBF' ||
+                char in '\u4E00'..'\u9FFF' ||
+                char in '\uAC00'..'\uD7AF' -> OcrTextScript.CJK
+            char in '\u0900'..'\u097F' -> OcrTextScript.DEVANAGARI
+            char in '\u0600'..'\u06FF' ||
+                char in '\u0750'..'\u077F' ||
+                char in '\u08A0'..'\u08FF' ||
+                char in '\uFB50'..'\uFDFF' ||
+                char in '\uFE70'..'\uFEFF' -> OcrTextScript.ARABIC
+            char in '\u0590'..'\u05FF' -> OcrTextScript.HEBREW
+            else -> OcrTextScript.OTHER
+        }
+    }
+
+    private fun isConflictingScript(
+        actualScript: OcrTextScript,
+        expectedScript: OcrTextScript
+    ): Boolean =
+        actualScript != OcrTextScript.OTHER &&
+            expectedScript != OcrTextScript.OTHER &&
+            actualScript != expectedScript
 
     private suspend fun translateCaptureLines(
         lines: List<PaintLine>,
@@ -622,6 +802,7 @@ class CameraViewModel @Inject constructor(
         effectiveSourceLanguage: Language,
         targetLanguage: Language,
         ocrResult: OcrResult,
+        attempts: List<CaptureOcrAttempt>,
         lines: List<PaintLine>,
         translations: List<String>
     ) {
@@ -635,6 +816,19 @@ class CameraViewModel @Inject constructor(
             imageWidth = ocrResult.imageWidth,
             imageHeight = ocrResult.imageHeight,
             blocks = ocrResult.blocks,
+            attempts = attempts.map { attempt ->
+                CaptureDebugAttempt(
+                    languageCode = attempt.language.code,
+                    backend = ocrEngine.backendNameFor(attempt.language.code),
+                    engineLanguage = ocrEngine.engineLanguageFor(attempt.language.code),
+                    expectedScript = attempt.score.expectedScript,
+                    lineCount = attempt.score.lineCount,
+                    textLength = attempt.score.textLength,
+                    expectedScriptRatio = attempt.score.expectedScriptRatio,
+                    selectionScore = attempt.score.selectionScore,
+                    selected = attempt.language.code == effectiveSourceLanguage.code
+                )
+            },
             lines = lines.mapIndexed { index, line ->
                 CaptureDebugLine(
                     index = index,
@@ -783,6 +977,25 @@ class CameraViewModel @Inject constructor(
                     .put("lineCount", lines.size)
             )
             .put("files", files)
+            .put(
+                "attempts",
+                JSONArray().also { array ->
+                    attempts.forEach { attempt ->
+                        array.put(
+                            JSONObject()
+                                .put("language", attempt.languageCode)
+                                .put("backend", attempt.backend)
+                                .put("engineLanguage", attempt.engineLanguage)
+                                .put("expectedScript", attempt.expectedScript.name)
+                                .put("lineCount", attempt.lineCount)
+                                .put("textLength", attempt.textLength)
+                                .put("expectedScriptRatio", attempt.expectedScriptRatio.toDouble())
+                                .put("selectionScore", attempt.selectionScore.toDouble())
+                                .put("selected", attempt.selected)
+                        )
+                    }
+                }
+            )
             .put(
                 "blocks",
                 JSONArray().also { array ->
