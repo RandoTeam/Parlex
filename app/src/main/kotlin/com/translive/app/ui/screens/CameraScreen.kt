@@ -3,6 +3,10 @@ package com.translive.app.ui.screens
 import android.Manifest
 import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
+import android.text.TextUtils
 import android.hardware.camera2.CameraCharacteristics
 import android.view.MotionEvent
 import android.view.ViewGroup
@@ -1050,48 +1054,101 @@ private fun TranslationOverlay(
             val top = box.top * scale + offsetY
             val w = box.width() * scale
             val h = box.height() * scale
+            if (w <= 2f || h <= 2f) continue
+
+            val expandedLeft = (left - 2f).coerceAtLeast(0f)
+            val expandedTop = (top - 1f).coerceAtLeast(0f)
+            val expandedWidth = (w + 4f).coerceAtMost(size.width - expandedLeft)
+            val expandedHeight = (h + 2f).coerceAtMost(size.height - expandedTop)
 
             if (block.translatedText.isNotBlank()) {
-                // Semi-transparent dark background
                 drawRoundRect(
-                    color = Color(0xDD222222),
-                    topLeft = Offset(left, top),
-                    size = Size(w, h),
-                    cornerRadius = CornerRadius(4f)
+                    color = Color.Black.copy(alpha = 0.64f),
+                    topLeft = Offset(expandedLeft, expandedTop),
+                    size = Size(expandedWidth, expandedHeight),
+                    cornerRadius = CornerRadius(6f)
                 )
 
-                // Draw translated text using native canvas
                 drawIntoCanvas { canvas ->
                     val nativeCanvas = canvas.nativeCanvas
-                    val textPaint = android.text.TextPaint().apply {
+                    val textPaint = TextPaint().apply {
                         isAntiAlias = true
-                        color = android.graphics.Color.WHITE
-                        textSize = (h * 0.65f).coerceIn(10f, 36f)
+                        color = android.graphics.Color.rgb(250, 250, 250)
+                        textSize = (h * 0.58f).coerceIn(11f, 30f)
                         isFakeBoldText = true
+                        setShadowLayer(2f, 0f, 1f, android.graphics.Color.BLACK)
                     }
-                    // Shrink if too wide
-                    var measured = textPaint.measureText(block.translatedText)
-                    while (measured > w - 4f && textPaint.textSize > 8f) {
-                        textPaint.textSize -= 1f
-                        measured = textPaint.measureText(block.translatedText)
-                    }
-                    val textX = left + 3f
-                    val textY = top + (h - textPaint.descent() - textPaint.ascent()) / 2f
-                    nativeCanvas.drawText(block.translatedText, textX, textY, textPaint)
+                    val padding = (h * 0.12f).coerceIn(3f, 8f)
+                    val textWidth = (expandedWidth - padding * 2f).toInt().coerceAtLeast(1)
+                    val textHeight = expandedHeight - padding * 2f
+                    val maxLines = if (textHeight > textPaint.textSize * 1.9f) 2 else 1
+                    val layout = buildOverlayTextLayout(
+                        text = block.translatedText,
+                        paint = textPaint,
+                        width = textWidth,
+                        maxHeight = textHeight,
+                        maxLines = maxLines
+                    )
+                    val textY = expandedTop + padding +
+                        ((textHeight - layout.height).coerceAtLeast(0f) / 2f)
+                    nativeCanvas.save()
+                    nativeCanvas.clipRect(
+                        expandedLeft + padding,
+                        expandedTop + padding,
+                        expandedLeft + padding + textWidth,
+                        expandedTop + expandedHeight - padding
+                    )
+                    nativeCanvas.translate(expandedLeft + padding, textY)
+                    layout.draw(nativeCanvas)
+                    nativeCanvas.restore()
                 }
             } else {
                 // No translation yet — thin border
                 drawRoundRect(
-                    color = Color(0xFF4FC3F7),
-                    topLeft = Offset(left, top),
-                    size = Size(w, h),
+                    color = Color.White.copy(alpha = 0.72f),
+                    topLeft = Offset(expandedLeft, expandedTop),
+                    size = Size(expandedWidth, expandedHeight),
                     cornerRadius = CornerRadius(4f),
-                    style = Stroke(width = 2f)
+                    style = Stroke(width = 1.4f)
                 )
             }
         }
     }
 }
+
+private fun buildOverlayTextLayout(
+    text: String,
+    paint: TextPaint,
+    width: Int,
+    maxHeight: Float,
+    maxLines: Int
+): StaticLayout {
+    val normalizedText = text.replace(Regex("\\s+"), " ").trim()
+    val minTextSize = 9f
+    var layout = createOverlayTextLayout(normalizedText, paint, width, maxLines)
+    while (
+        (layout.height > maxHeight || layout.lineCount > maxLines) &&
+        paint.textSize > minTextSize
+    ) {
+        paint.textSize -= 1f
+        layout = createOverlayTextLayout(normalizedText, paint, width, maxLines)
+    }
+    return layout
+}
+
+private fun createOverlayTextLayout(
+    text: String,
+    paint: TextPaint,
+    width: Int,
+    maxLines: Int
+): StaticLayout =
+    StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setIncludePad(false)
+        .setLineSpacing(0f, 0.95f)
+        .setMaxLines(maxLines)
+        .setEllipsize(TextUtils.TruncateAt.END)
+        .build()
 
 /** Display the painted bitmap (with translations baked in) with pinch-to-zoom. */
 @Composable

@@ -3,6 +3,8 @@ package com.translive.app.ui.viewmodel
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.*
+import android.text.Layout
+import android.text.StaticLayout
 import android.os.SystemClock
 import android.text.TextPaint
 import android.text.TextUtils
@@ -1178,48 +1180,112 @@ class CameraViewModel @Inject constructor(
             val box = clippedBox(line.box, result.width, result.height)
             if (box.width() <= 0 || box.height() <= 0) continue
 
+            val paintBox = expandedBox(box, result.width, result.height)
             // Sample background color around the box to choose contrast
-            val bgColor = sampleBackgroundColor(original, box)
+            val bgColor = sampleBackgroundColor(original, paintBox)
             val textColor = contrastColor(bgColor)
 
             // Draw semi-transparent background (matching surrounding color)
-            bgPaint.color = Color.argb(210,
+            bgPaint.color = Color.argb(232,
                 Color.red(bgColor),
                 Color.green(bgColor),
                 Color.blue(bgColor)
             )
-            canvas.drawRect(box, bgPaint)
+            val radius = (paintBox.height() * 0.12f).coerceIn(3f, 10f)
+            canvas.drawRoundRect(RectF(paintBox), radius, radius, bgPaint)
 
-            // Fit text size: ~80% of box height
-            val boxH = box.height().toFloat()
-            val padding = (boxH * 0.10f).coerceIn(2f, 6f)
-            val maxTextWidth = (box.width().toFloat() - padding * 2f).coerceAtLeast(1f)
-            val minTextSize = (boxH * 0.48f).coerceIn(8f, 18f)
-            textPaint.textSize = (boxH * 0.78f).coerceIn(10f, 48f)
+            val boxH = paintBox.height().toFloat()
+            val padding = (boxH * 0.12f).coerceIn(3f, 10f)
+            val maxTextWidth = (paintBox.width().toFloat() - padding * 2f).toInt().coerceAtLeast(1)
+            val maxTextHeight = (boxH - padding * 2f).coerceAtLeast(1f)
+            val minTextSize = (boxH * 0.34f).coerceIn(9f, 18f)
+            textPaint.textSize = (boxH * 0.62f).coerceIn(12f, 42f)
             textPaint.color = textColor
+            textPaint.setShadowLayer(
+                1.6f,
+                0f,
+                0.8f,
+                if (textColor == Color.WHITE) Color.BLACK else Color.WHITE
+            )
 
-            // Shrink if too wide
             val singleLineText = translatedText.replace(Regex("\\s+"), " ")
-            var measured = textPaint.measureText(singleLineText)
-            while (measured > maxTextWidth && textPaint.textSize > minTextSize) {
-                textPaint.textSize -= 1f
-                measured = textPaint.measureText(singleLineText)
+            val maxLines = when {
+                maxTextHeight >= textPaint.textSize * 3.1f -> 3
+                maxTextHeight >= textPaint.textSize * 1.9f -> 2
+                else -> 1
             }
-            val displayText = TextUtils.ellipsize(
-                singleLineText,
-                textPaint,
-                maxTextWidth,
-                TextUtils.TruncateAt.END
-            ).toString()
+            val layout = buildBitmapTextLayout(
+                text = singleLineText,
+                paint = textPaint,
+                width = maxTextWidth,
+                maxHeight = maxTextHeight,
+                maxLines = maxLines,
+                minTextSize = minTextSize
+            )
+            val textLeft = paintBox.left.toFloat() + padding
+            val textTop = paintBox.top.toFloat() + padding +
+                ((maxTextHeight - layout.height).coerceAtLeast(0f) / 2f)
 
             // Draw text — vertically centered
-            val x = box.left.toFloat() + padding
-            val y = box.top.toFloat() + (boxH - textPaint.descent() - textPaint.ascent()) / 2f
-            canvas.drawText(displayText, x, y, textPaint)
+            canvas.save()
+            canvas.clipRect(
+                textLeft,
+                paintBox.top.toFloat() + padding,
+                textLeft + maxTextWidth,
+                paintBox.bottom.toFloat() - padding
+            )
+            canvas.translate(textLeft, textTop)
+            layout.draw(canvas)
+            canvas.restore()
         }
 
         return result
     }
+
+    private fun expandedBox(box: Rect, width: Int, height: Int): Rect {
+        val padX = (box.width() * 0.04f).toInt().coerceIn(1, 10)
+        val padY = (box.height() * 0.12f).toInt().coerceIn(1, 8)
+        return Rect(
+            (box.left - padX).coerceAtLeast(0),
+            (box.top - padY).coerceAtLeast(0),
+            (box.right + padX).coerceAtMost(width),
+            (box.bottom + padY).coerceAtMost(height)
+        )
+    }
+
+    private fun buildBitmapTextLayout(
+        text: String,
+        paint: TextPaint,
+        width: Int,
+        maxHeight: Float,
+        maxLines: Int,
+        minTextSize: Float
+    ): StaticLayout {
+        val normalizedText = text.trim()
+        var layout = createBitmapTextLayout(normalizedText, paint, width, maxLines)
+        while (
+            (layout.height > maxHeight || layout.lineCount > maxLines) &&
+            paint.textSize > minTextSize
+        ) {
+            paint.textSize -= 1f
+            layout = createBitmapTextLayout(normalizedText, paint, width, maxLines)
+        }
+        return layout
+    }
+
+    private fun createBitmapTextLayout(
+        text: String,
+        paint: TextPaint,
+        width: Int,
+        maxLines: Int
+    ): StaticLayout =
+        StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+            .setIncludePad(false)
+            .setLineSpacing(0f, 0.95f)
+            .setMaxLines(maxLines)
+            .setEllipsize(TextUtils.TruncateAt.END)
+            .build()
 
     private fun clippedBox(box: Rect, width: Int, height: Int): Rect {
         val left = box.left.coerceIn(0, width)
