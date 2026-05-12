@@ -47,7 +47,9 @@ data class TranslatedBlock(
 private data class PaintLine(
     val id: String,
     val text: String,
-    val box: Rect
+    val box: Rect,
+    val sourceLanguage: Language? = null,
+    val ocrLanguage: Language? = null
 )
 
 /** OCR block translated as one context unit, while keeping per-line boxes for painting. */
@@ -60,6 +62,8 @@ private data class CaptureOcrPass(
     val result: OcrResult,
     val sourceLanguage: Language,
     val ocrLanguage: Language,
+    val detectedSourceLanguages: List<Language>,
+    val mixedBlocks: List<PaintBlock>,
     val attempts: List<CaptureOcrAttempt>
 )
 
@@ -90,9 +94,16 @@ private data class CaptureOcrScore(
 private data class CaptureDebugLine(
     val id: String,
     val index: Int,
+    val sourceLanguageCode: String,
+    val ocrLanguageCode: String,
     val sourceText: String,
     val translatedText: String,
     val box: Rect
+)
+
+private data class MixedLineCandidate(
+    val line: PaintLine,
+    val score: Float
 )
 
 private data class CaptureDebugAttempt(
@@ -144,6 +155,7 @@ data class CameraUiState(
     val sourceLanguage: Language = Language.RUSSIAN,
     val isSourceAuto: Boolean = false,
     val detectedSourceLanguage: Language? = null,
+    val detectedSourceLanguages: List<Language> = emptyList(),
     val targetLanguage: Language = Language.ENGLISH,
     val liveBlocks: List<TranslatedBlock> = emptyList(),
     val captureStatus: CaptureStatus = CaptureStatus.IDLE,
@@ -230,7 +242,8 @@ class CameraViewModel @Inject constructor(
             it.copy(
                 sourceLanguage = lang,
                 isSourceAuto = false,
-                detectedSourceLanguage = null
+                detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList()
             )
         }
         resetModeVisuals()
@@ -242,6 +255,7 @@ class CameraViewModel @Inject constructor(
             it.copy(
                 isSourceAuto = true,
                 detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
                 isNmtReady = false,
                 nmtError = null
             )
@@ -281,6 +295,7 @@ class CameraViewModel @Inject constructor(
                 imageWidth = 0,
                 imageHeight = 0,
                 detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
             )
         }
@@ -307,6 +322,8 @@ class CameraViewModel @Inject constructor(
             it.copy(
                 captureStatus = CaptureStatus.PROCESSING,
                 captureMessage = "Снимаю кадр",
+                detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
             )
         }
@@ -317,6 +334,8 @@ class CameraViewModel @Inject constructor(
             it.copy(
                 captureStatus = CaptureStatus.ERROR,
                 captureMessage = message,
+                detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
             )
         }
@@ -391,6 +410,11 @@ class CameraViewModel @Inject constructor(
                             } else {
                                 null
                             },
+                            detectedSourceLanguages = if (state.isSourceAuto) {
+                                it.detectedSourceLanguages
+                            } else {
+                                emptyList()
+                            },
                             qualityWarnings = qualityWarnings
                         )
                     }
@@ -410,6 +434,11 @@ class CameraViewModel @Inject constructor(
                         imageWidth = ocrResult.imageWidth,
                         imageHeight = ocrResult.imageHeight,
                         detectedSourceLanguage = if (state.isSourceAuto) liveOcr.sourceLanguage else null,
+                        detectedSourceLanguages = if (state.isSourceAuto) {
+                            listOf(liveOcr.sourceLanguage)
+                        } else {
+                            emptyList()
+                        },
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -565,6 +594,19 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    private fun canCameraTranslateAll(
+        lines: List<PaintLine>,
+        defaultSourceLanguage: Language,
+        targetLanguage: Language
+    ): Boolean =
+        lines
+            .map { it.sourceLanguage ?: defaultSourceLanguage }
+            .distinctBy { it.code }
+            .all { sourceLanguage ->
+                sourceLanguage.code == targetLanguage.code ||
+                    cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)
+            }
+
     private suspend fun translateLiveLines(
         lines: List<OcrLine>,
         sourceLanguage: Language,
@@ -666,6 +708,8 @@ class CameraViewModel @Inject constructor(
                 liveBlocks = emptyList(),
                 captureStatus = CaptureStatus.PROCESSING,
                 captureMessage = "Ищу текст на снимке",
+                detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
             )
         }
@@ -681,18 +725,21 @@ class CameraViewModel @Inject constructor(
             val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage, sourceAuto)
             val ocrResult = captureOcr.result
             val effectiveSourceLanguage = captureOcr.sourceLanguage
-            val rawCaptureLines = extractRawCaptureLines(ocrResult)
+            val rawCaptureLines = captureOcr.mixedBlocks
+                .flatMap { it.lines }
+                .ifEmpty { extractRawCaptureLines(ocrResult) }
             val qualityWarnings = buildQualityWarnings(
                 ocrResult = ocrResult,
                 lineTexts = rawCaptureLines.map { it.text },
                 lineBoxes = rawCaptureLines.map { it.box },
                 sourceLanguage = effectiveSourceLanguage,
+                allowMixedScripts = sourceAuto && captureOcr.detectedSourceLanguages.size > 1,
                 canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
                     translationEngine.isLoaded ||
-                    cameraTranslateEngine.isReadyFor(effectiveSourceLanguage.code, targetLanguage.code)
+                    canCameraTranslateAll(rawCaptureLines, effectiveSourceLanguage, targetLanguage)
             )
 
-            if (ocrResult.blocks.isEmpty()) {
+            if (rawCaptureLines.isEmpty()) {
                 rememberCaptureDebugSnapshot(
                     sourceLanguage,
                     sourceAuto,
@@ -709,13 +756,15 @@ class CameraViewModel @Inject constructor(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = "Текст не найден",
                         detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
+                        detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
                         qualityWarnings = qualityWarnings
                     )
                 }
                 return
             }
 
-            val captureBlocks = extractCaptureBlocks(ocrResult, effectiveSourceLanguage)
+            val captureBlocks = captureOcr.mixedBlocks
+                .ifEmpty { extractCaptureBlocks(ocrResult, effectiveSourceLanguage) }
             val allLines = captureBlocks.flatMap { it.lines }
 
             if (allLines.isEmpty()) {
@@ -735,6 +784,7 @@ class CameraViewModel @Inject constructor(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = "Подходящие строки не найдены",
                         detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
+                        detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -751,9 +801,10 @@ class CameraViewModel @Inject constructor(
                 lineTexts = rawCaptureLines.map { it.text },
                 lineBoxes = rawCaptureLines.map { it.box },
                 sourceLanguage = effectiveSourceLanguage,
+                allowMixedScripts = sourceAuto && captureOcr.detectedSourceLanguages.size > 1,
                 canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
                     translationEngine.isLoaded ||
-                    cameraTranslateEngine.isReadyFor(effectiveSourceLanguage.code, targetLanguage.code)
+                    canCameraTranslateAll(allLines, effectiveSourceLanguage, targetLanguage)
             )
             val translatedParts = translateCaptureBlocks(captureBlocks, effectiveSourceLanguage, targetLanguage)
             rememberCaptureDebugSnapshot(
@@ -775,6 +826,7 @@ class CameraViewModel @Inject constructor(
                     captureStatus = CaptureStatus.READY,
                     captureMessage = null,
                     detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
+                    detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
                     qualityWarnings = finalQualityWarnings
                 )
             }
@@ -784,6 +836,8 @@ class CameraViewModel @Inject constructor(
                 it.copy(
                     captureStatus = CaptureStatus.ERROR,
                     captureMessage = "Ошибка обработки снимка",
+                    detectedSourceLanguage = null,
+                    detectedSourceLanguages = emptyList(),
                     qualityWarnings = emptyList()
                 )
             }
@@ -820,6 +874,8 @@ class CameraViewModel @Inject constructor(
             result = selectedAttempt.result,
             sourceLanguage = selectedAttempt.language,
             ocrLanguage = selectedAttempt.language,
+            detectedSourceLanguages = listOf(selectedAttempt.language),
+            mixedBlocks = emptyList(),
             attempts = attempts
         )
     }
@@ -829,20 +885,30 @@ class CameraViewModel @Inject constructor(
             recognizeCaptureAttempt(bitmap, language)
         }
         val selectedAttempt = selectAutoOcrAttempt(attempts)
-        val detectedLanguage = detectSourceLanguageFromText(
-            selectedAttempt.result,
-            selectedAttempt.language
+        val mixedBlocks = buildMixedCaptureBlocks(attempts)
+        val mixedLines = mixedBlocks.flatMap { it.lines }
+        val detectedLanguages = mixedLines
+            .map { it.sourceLanguage ?: selectedAttempt.language }
+            .distinctBy { it.code }
+            .ifEmpty {
+                listOf(detectSourceLanguageFromText(selectedAttempt.result, selectedAttempt.language))
+            }
+        val detectedLanguage = dominantSourceLanguage(
+            lines = mixedLines,
+            fallback = detectedLanguages.first()
         )
         Log.i(
             "CameraVM",
             "Auto capture OCR selected ${selectedAttempt.language.code}, source=${detectedLanguage.code}, " +
-                "score=${selectedAttempt.score.selectionScore}, lines=${selectedAttempt.score.lineCount}"
+                "languages=${detectedLanguages.joinToString { it.code }}, lines=${mixedLines.size}"
         )
 
         return CaptureOcrPass(
             result = selectedAttempt.result,
             sourceLanguage = detectedLanguage,
             ocrLanguage = selectedAttempt.language,
+            detectedSourceLanguages = detectedLanguages,
+            mixedBlocks = mixedBlocks,
             attempts = attempts
         )
     }
@@ -858,6 +924,122 @@ class CameraViewModel @Inject constructor(
             score = scoreCaptureOcrResult(result, language.code)
         )
     }
+
+    private fun buildMixedCaptureBlocks(attempts: List<CaptureOcrAttempt>): List<PaintBlock> {
+        val selectedCandidates = mutableListOf<MixedLineCandidate>()
+
+        attempts.forEachIndexed { attemptIndex, attempt ->
+            val rawLines = extractRawCaptureLines(attempt.result)
+            rawLines.forEach { line ->
+                val sourceLanguage = detectSourceLanguageForText(line.text, attempt.language)
+                val candidate = MixedLineCandidate(
+                    line = line.copy(
+                        id = "a$attemptIndex:${line.id}",
+                        sourceLanguage = sourceLanguage,
+                        ocrLanguage = attempt.language
+                    ),
+                    score = scoreMixedLineCandidate(
+                        line = line,
+                        sourceLanguage = sourceLanguage,
+                        ocrLanguage = attempt.language,
+                        attemptScore = attempt.score
+                    )
+                )
+
+                if (candidate.score < MIXED_LINE_MIN_SCORE) return@forEach
+                val overlappingIndex = selectedCandidates.indexOfFirst {
+                    lineBoxesOverlap(it.line.box, candidate.line.box)
+                }
+                if (overlappingIndex < 0) {
+                    selectedCandidates += candidate
+                } else if (candidate.score > selectedCandidates[overlappingIndex].score) {
+                    selectedCandidates[overlappingIndex] = candidate
+                }
+            }
+        }
+
+        val lines = selectedCandidates
+            .sortedWith(compareBy<MixedLineCandidate>({ it.line.box.top }, { it.line.box.left }))
+            .mapIndexed { index, candidate ->
+                candidate.line.copy(id = "m$index")
+            }
+
+        return if (lines.isEmpty()) emptyList() else listOf(PaintBlock("mixed", lines))
+    }
+
+    private fun detectSourceLanguageForText(text: String, ocrLanguage: Language): Language =
+        when (expectedScriptForLanguage(ocrLanguage.code)) {
+            OcrTextScript.LATIN -> guessLatinLanguage(text)
+            OcrTextScript.CJK -> guessCjkLanguage(text)
+            OcrTextScript.CYRILLIC -> guessCyrillicLanguage(text)
+            else -> ocrLanguage
+        }
+
+    private fun scoreMixedLineCandidate(
+        line: PaintLine,
+        sourceLanguage: Language,
+        ocrLanguage: Language,
+        attemptScore: CaptureOcrScore
+    ): Float {
+        val sourceScript = expectedScriptForLanguage(sourceLanguage.code)
+        val ocrScript = expectedScriptForLanguage(ocrLanguage.code)
+        var letterCount = 0
+        var sourceLetters = 0
+        var conflictLetters = 0
+
+        for (char in line.text) {
+            val script = scriptForChar(char)
+            if (script == OcrTextScript.OTHER) continue
+
+            letterCount++
+            when {
+                script == sourceScript -> sourceLetters++
+                isConflictingScript(script, sourceScript) -> conflictLetters++
+            }
+        }
+
+        val scriptRatio = if (letterCount > 0 && sourceScript != OcrTextScript.OTHER) {
+            sourceLetters.toFloat() / letterCount.toFloat()
+        } else {
+            1f
+        }
+        val geometryScore = line.box.width().coerceAtMost(800) * 0.015f +
+            line.box.height().coerceAtMost(120) * 0.12f
+        val textScore = line.text.count { !it.isWhitespace() }.coerceAtMost(80) * 0.6f
+        val backendBonus = if (sourceScript == ocrScript) 12f else 0f
+        val attemptBonus = if (attemptScore.isStrongForExpectedScript) 6f else 0f
+
+        return geometryScore +
+            textScore +
+            sourceLetters * 2.4f -
+            conflictLetters * 3.2f +
+            scriptRatio * 22f +
+            backendBonus +
+            attemptBonus
+    }
+
+    private fun lineBoxesOverlap(first: Rect, second: Rect): Boolean {
+        val left = max(first.left, second.left)
+        val top = max(first.top, second.top)
+        val right = minOf(first.right, second.right)
+        val bottom = minOf(first.bottom, second.bottom)
+        if (right <= left || bottom <= top) return false
+
+        val intersection = (right - left).toFloat() * (bottom - top).toFloat()
+        val smallerArea = minOf(first.width() * first.height(), second.width() * second.height())
+            .coerceAtLeast(1)
+            .toFloat()
+        return intersection / smallerArea > MIXED_LINE_OVERLAP_THRESHOLD
+    }
+
+    private fun dominantSourceLanguage(lines: List<PaintLine>, fallback: Language): Language =
+        lines
+            .groupBy { it.sourceLanguage ?: fallback }
+            .maxByOrNull { (_, groupedLines) ->
+                groupedLines.sumOf { it.text.count { char -> !char.isWhitespace() } }
+            }
+            ?.key
+            ?: fallback
 
     private fun captureOcrFallbackCodes(
         sourceLanguage: Language,
@@ -1104,6 +1286,7 @@ class CameraViewModel @Inject constructor(
         lineTexts: List<String>,
         lineBoxes: List<Rect>,
         sourceLanguage: Language,
+        allowMixedScripts: Boolean = false,
         canTranslate: Boolean
     ): List<CameraQualityWarning> {
         val warnings = mutableListOf<CameraQualityWarning>()
@@ -1121,7 +1304,7 @@ class CameraViewModel @Inject constructor(
             warnings += CameraQualityWarning.SOFT_FOCUS
         }
 
-        if (hasScriptMismatch(lineTexts, sourceLanguage.code)) {
+        if (!allowMixedScripts && hasScriptMismatch(lineTexts, sourceLanguage.code)) {
             warnings += CameraQualityWarning.SCRIPT_MISMATCH
         }
 
@@ -1174,33 +1357,66 @@ class CameraViewModel @Inject constructor(
         sourceLanguage: Language,
         targetLanguage: Language
     ): List<String> {
-        val texts = blocks.flatMap { block -> block.lines.map { it.text } }
+        val translatedByLineId = mutableMapOf<String, String>()
+
+        for (block in blocks) {
+            val groupedLines = block.lines.groupBy { it.sourceLanguage ?: sourceLanguage }
+            for ((lineSourceLanguage, sourceLines) in groupedLines) {
+                val sourceBlock = block.copy(lines = sourceLines)
+                val translations = translateCaptureSingleSourceBlock(
+                    block = sourceBlock,
+                    sourceLanguage = lineSourceLanguage,
+                    targetLanguage = targetLanguage
+                )
+                sourceLines.forEachIndexed { index, line ->
+                    translatedByLineId[line.id] = translations.getOrElse(index) { line.text }
+                }
+            }
+        }
+
+        return blocks.flatMap { block ->
+            block.lines.map { line -> translatedByLineId[line.id] ?: line.text }
+        }
+    }
+
+    private suspend fun translateCaptureSingleSourceBlock(
+        block: PaintBlock,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): List<String> {
+        val texts = block.lines.map { it.text }
         if (sourceLanguage.code == targetLanguage.code) return texts
 
         return if (translationEngine.isLoaded) {
             try {
-                val translatedLines = mutableListOf<String>()
-                for (block in blocks) {
-                    translatedLines += translateCaptureBlockWithStructure(
-                        block = block,
-                        sourceLanguage = sourceLanguage,
-                        targetLanguage = targetLanguage
-                    ) ?: translateCaptureLinesWithMainModel(
-                        lines = block.lines,
-                        sourceLanguage = sourceLanguage,
-                        targetLanguage = targetLanguage
-                    )
-                }
-                translatedLines
+                translateCaptureBlockWithStructure(
+                    block = block,
+                    sourceLanguage = sourceLanguage,
+                    targetLanguage = targetLanguage
+                ) ?: translateCaptureLinesWithMainModel(
+                    lines = block.lines,
+                    sourceLanguage = sourceLanguage,
+                    targetLanguage = targetLanguage
+                )
             } catch (e: Exception) {
-                Log.e("CameraVM", "Structured HY-MT failed, falling back to ML Kit: ${e.message}")
-                if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
-                    cameraTranslateEngine.translateLines(texts)
-                } else {
-                    texts
-                }
+                Log.e("CameraVM", "Structured HY-MT failed for ${sourceLanguage.code}: ${e.message}")
+                translateCaptureLinesWithCameraModel(block.lines, sourceLanguage, targetLanguage)
             }
-        } else if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+        } else {
+            translateCaptureLinesWithCameraModel(block.lines, sourceLanguage, targetLanguage)
+        }
+    }
+
+    private suspend fun translateCaptureLinesWithCameraModel(
+        lines: List<PaintLine>,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): List<String> {
+        val texts = lines.map { it.text }
+        if (sourceLanguage.code == targetLanguage.code) return texts
+
+        prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
+        return if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
             cameraTranslateEngine.translateLines(texts)
         } else {
             texts
@@ -1328,6 +1544,8 @@ class CameraViewModel @Inject constructor(
                 CaptureDebugLine(
                     id = line.id,
                     index = index,
+                    sourceLanguageCode = (line.sourceLanguage ?: effectiveSourceLanguage).code,
+                    ocrLanguageCode = (line.ocrLanguage ?: selectedOcrLanguage).code,
                     sourceText = line.text,
                     translatedText = translations.getOrNull(index).orEmpty(),
                     box = Rect(line.box)
@@ -1387,11 +1605,15 @@ class CameraViewModel @Inject constructor(
         saveBitmap(File(packDir, "ocr_boxes.png"), drawDebugBoxes(original, snapshot.lines))
         saveBitmap(File(packDir, "translated_overlay.png"), translatedOverlay)
         File(packDir, "recognized.txt").writeText(
-            snapshot.lines.joinToString("\n") { it.sourceText },
+            snapshot.lines.joinToString("\n") { line ->
+                "[${line.sourceLanguageCode}] ${line.sourceText}"
+            },
             Charsets.UTF_8
         )
         File(packDir, "translation.txt").writeText(
-            snapshot.lines.joinToString("\n") { it.translatedText },
+            snapshot.lines.joinToString("\n") { line ->
+                "[${line.sourceLanguageCode}] ${line.translatedText}"
+            },
             Charsets.UTF_8
         )
         File(packDir, "metadata.json").writeText(
@@ -1461,6 +1683,14 @@ class CameraViewModel @Inject constructor(
                     .put("requestedSource", if (requestedSourceAuto) "auto" else requestedSourceLanguage.code)
                     .put("effectiveSource", effectiveSourceLanguage.code)
                     .put("selectedOcrSource", selectedOcrLanguage.code)
+                    .put(
+                        "lineSources",
+                        JSONArray().also { array ->
+                            lines.map { it.sourceLanguageCode }.distinct().forEach { code ->
+                                array.put(code)
+                            }
+                        }
+                    )
                     .put("target", targetLanguage.code)
             )
             .put(
@@ -1515,6 +1745,8 @@ class CameraViewModel @Inject constructor(
                             JSONObject()
                                 .put("id", line.id)
                                 .put("index", line.index)
+                                .put("sourceLanguage", line.sourceLanguageCode)
+                                .put("ocrLanguage", line.ocrLanguageCode)
                                 .put("sourceText", line.sourceText)
                                 .put("translatedText", line.translatedText)
                                 .put("box", line.box.toJson())
@@ -1722,6 +1954,7 @@ class CameraViewModel @Inject constructor(
                 captureStatus = CaptureStatus.IDLE,
                 captureMessage = null,
                 detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
             )
         }
@@ -1739,6 +1972,8 @@ private const val SMALL_TEXT_HEIGHT_RATIO_THRESHOLD = 0.028f
 private const val SCRIPT_MISMATCH_MIN_LETTERS = 6
 private const val SCRIPT_MISMATCH_MIN_CONFLICTS = 4
 private const val SCRIPT_MISMATCH_RATIO_THRESHOLD = 0.55f
+private const val MIXED_LINE_MIN_SCORE = 18f
+private const val MIXED_LINE_OVERLAP_THRESHOLD = 0.55f
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 450L

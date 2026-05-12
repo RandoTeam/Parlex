@@ -331,7 +331,18 @@ fun CameraScreen(
             .getOrDefault(CaptureFlashMode.OFF)
     }
     val sourceChipLabel = if (uiState.isSourceAuto) {
-        uiState.detectedSourceLanguage?.let { "Auto • ${it.flag} ${it.nativeName}" } ?: "Auto"
+        when {
+            uiState.detectedSourceLanguages.size > 1 -> "Auto: Mixed ${uiState.detectedSourceLanguages.size}"
+            uiState.detectedSourceLanguages.size == 1 -> {
+                val language = uiState.detectedSourceLanguages.first()
+                "Auto: ${language.flag} ${language.nativeName}"
+            }
+            uiState.detectedSourceLanguage != null -> {
+                val language = uiState.detectedSourceLanguage!!
+                "Auto: ${language.flag} ${language.nativeName}"
+            }
+            else -> "Auto"
+        }
     } else {
         "${uiState.sourceLanguage.flag} ${uiState.sourceLanguage.nativeName}"
     }
