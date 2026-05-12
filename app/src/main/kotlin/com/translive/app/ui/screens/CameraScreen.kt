@@ -79,6 +79,7 @@ import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.CameraMode
+import com.translive.app.ui.viewmodel.CameraQualityWarning
 import com.translive.app.ui.viewmodel.CameraViewModel
 import com.translive.app.ui.viewmodel.CaptureStatus
 import com.translive.app.ui.viewmodel.TranslatedBlock
@@ -442,6 +443,12 @@ fun CameraScreen(
                             onTorchToggle = { torchEnabled = !torchEnabled },
                             onFlashModeChange = { flashModeName = it.name }
                         )
+                        CameraQualityBadge(
+                            warnings = uiState.qualityWarnings,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 48.dp, start = 12.dp, end = 12.dp)
+                        )
 
                         // Live translation overlay
                         if (uiState.liveBlocks.isNotEmpty()) {
@@ -530,6 +537,12 @@ fun CameraScreen(
                         CameraCaptureStatusBadge(
                             status = uiState.captureStatus,
                             message = uiState.captureMessage
+                        )
+                        CameraQualityBadge(
+                            warnings = uiState.qualityWarnings,
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 56.dp, start = 12.dp, end = 12.dp)
                         )
                         if (isDebugBuild) {
                             CameraDebugCaptureButton(
@@ -767,6 +780,61 @@ private fun BoxScope.CameraCaptureStatusBadge(
         }
     }
 }
+
+@Composable
+private fun BoxScope.CameraQualityBadge(
+    warnings: List<CameraQualityWarning>,
+    modifier: Modifier = Modifier
+) {
+    if (warnings.isEmpty()) return
+
+    val primaryWarning = warnings.first()
+    Surface(
+        modifier = modifier
+            .widthIn(max = 300.dp)
+            .zIndex(3f),
+        color = Color.Black.copy(alpha = 0.64f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(18.dp),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.Warning,
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = Color(0xFFFFD54F)
+            )
+            Spacer(Modifier.width(7.dp))
+            Text(
+                text = primaryWarning.qualityLabel(),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (warnings.size > 1) {
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "+${warnings.size - 1}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White.copy(alpha = 0.72f)
+                )
+            }
+        }
+    }
+}
+
+private fun CameraQualityWarning.qualityLabel(): String =
+    when (this) {
+        CameraQualityWarning.LOW_LIGHT -> "Мало света"
+        CameraQualityWarning.SOFT_FOCUS -> "Наведите фокус"
+        CameraQualityWarning.SMALL_TEXT -> "Подойдите ближе"
+        CameraQualityWarning.SCRIPT_MISMATCH -> "Проверьте язык"
+        CameraQualityWarning.TRANSLATION_MODEL_UNAVAILABLE -> "Модель не готова"
+    }
 
 @Composable
 private fun BoxScope.CameraDebugCaptureButton(

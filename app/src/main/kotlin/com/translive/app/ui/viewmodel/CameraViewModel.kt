@@ -122,6 +122,14 @@ enum class CameraMode { LIVE, CAPTURE }
 
 enum class CaptureStatus { IDLE, PROCESSING, READY, EMPTY, ERROR }
 
+enum class CameraQualityWarning {
+    LOW_LIGHT,
+    SOFT_FOCUS,
+    SMALL_TEXT,
+    SCRIPT_MISMATCH,
+    TRANSLATION_MODEL_UNAVAILABLE
+}
+
 data class CameraUiState(
     val mode: CameraMode = CameraMode.LIVE,
     val sourceLanguage: Language = Language.RUSSIAN,
@@ -138,7 +146,8 @@ data class CameraUiState(
     /** ML Kit model download status */
     val isNmtReady: Boolean = false,
     val isNmtDownloading: Boolean = false,
-    val nmtError: String? = null
+    val nmtError: String? = null,
+    val qualityWarnings: List<CameraQualityWarning> = emptyList()
 ) {
     val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
 }
@@ -237,7 +246,8 @@ class CameraViewModel @Inject constructor(
                 captureStatus = CaptureStatus.IDLE,
                 captureMessage = null,
                 imageWidth = 0,
-                imageHeight = 0
+                imageHeight = 0,
+                qualityWarnings = emptyList()
             )
         }
     }
@@ -258,7 +268,8 @@ class CameraViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 captureStatus = CaptureStatus.PROCESSING,
-                captureMessage = "Снимаю кадр"
+                captureMessage = "Снимаю кадр",
+                qualityWarnings = emptyList()
             )
         }
     }
@@ -267,7 +278,8 @@ class CameraViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 captureStatus = CaptureStatus.ERROR,
-                captureMessage = message
+                captureMessage = message,
+                qualityWarnings = emptyList()
             )
         }
     }
@@ -319,13 +331,22 @@ class CameraViewModel @Inject constructor(
                 val state = _uiState.value
                 val ocrResult = ocrEngine.recognize(imageProxy, state.sourceLanguage.code)
                 val rawLines = extractLiveLines(ocrResult)
+                val qualityWarnings = buildQualityWarnings(
+                    ocrResult = ocrResult,
+                    lineTexts = rawLines.map { it.text },
+                    lineBoxes = rawLines.map { it.boundingBox },
+                    sourceLanguage = state.sourceLanguage,
+                    canTranslate = state.sourceLanguage.code == state.targetLanguage.code ||
+                        cameraTranslateEngine.isReady.value
+                )
 
                 if (rawLines.isEmpty()) {
                     _uiState.update {
                         it.copy(
                             liveBlocks = emptyList(),
                             imageWidth = ocrResult.imageWidth,
-                            imageHeight = ocrResult.imageHeight
+                            imageHeight = ocrResult.imageHeight,
+                            qualityWarnings = qualityWarnings
                         )
                     }
                     return@launch
@@ -338,7 +359,8 @@ class CameraViewModel @Inject constructor(
                     it.copy(
                         liveBlocks = translatedBlocks,
                         imageWidth = ocrResult.imageWidth,
-                        imageHeight = ocrResult.imageHeight
+                        imageHeight = ocrResult.imageHeight,
+                        qualityWarnings = qualityWarnings
                     )
                 }
             } catch (e: Exception) {
@@ -496,7 +518,8 @@ class CameraViewModel @Inject constructor(
                 paintedBitmap = workBitmap,
                 liveBlocks = emptyList(),
                 captureStatus = CaptureStatus.PROCESSING,
-                captureMessage = "Ищу текст на снимке"
+                captureMessage = "Ищу текст на снимке",
+                qualityWarnings = emptyList()
             )
         }
     }
@@ -510,6 +533,16 @@ class CameraViewModel @Inject constructor(
             val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage)
             val ocrResult = captureOcr.result
             val effectiveSourceLanguage = captureOcr.sourceLanguage
+            val rawCaptureLines = extractRawCaptureLines(ocrResult)
+            val qualityWarnings = buildQualityWarnings(
+                ocrResult = ocrResult,
+                lineTexts = rawCaptureLines.map { it.text },
+                lineBoxes = rawCaptureLines.map { it.box },
+                sourceLanguage = effectiveSourceLanguage,
+                canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
+                    translationEngine.isLoaded ||
+                    cameraTranslateEngine.isReady.value
+            )
 
             if (ocrResult.blocks.isEmpty()) {
                 rememberCaptureDebugSnapshot(
@@ -524,7 +557,8 @@ class CameraViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
-                        captureMessage = "Текст не найден"
+                        captureMessage = "Текст не найден",
+                        qualityWarnings = qualityWarnings
                     )
                 }
                 return
@@ -546,7 +580,8 @@ class CameraViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
-                        captureMessage = "Подходящие строки не найдены"
+                        captureMessage = "Подходящие строки не найдены",
+                        qualityWarnings = qualityWarnings
                     )
                 }
                 return
@@ -570,7 +605,8 @@ class CameraViewModel @Inject constructor(
                 it.copy(
                     paintedBitmap = painted,
                     captureStatus = CaptureStatus.READY,
-                    captureMessage = null
+                    captureMessage = null,
+                    qualityWarnings = qualityWarnings
                 )
             }
         } catch (e: Exception) {
@@ -578,7 +614,8 @@ class CameraViewModel @Inject constructor(
             _uiState.update {
                 it.copy(
                     captureStatus = CaptureStatus.ERROR,
-                    captureMessage = "Ошибка обработки снимка"
+                    captureMessage = "Ошибка обработки снимка",
+                    qualityWarnings = emptyList()
                 )
             }
         }
@@ -797,6 +834,76 @@ class CameraViewModel @Inject constructor(
         actualScript != OcrTextScript.OTHER &&
             expectedScript != OcrTextScript.OTHER &&
             actualScript != expectedScript
+
+    private fun buildQualityWarnings(
+        ocrResult: OcrResult,
+        lineTexts: List<String>,
+        lineBoxes: List<Rect>,
+        sourceLanguage: Language,
+        canTranslate: Boolean
+    ): List<CameraQualityWarning> {
+        val warnings = mutableListOf<CameraQualityWarning>()
+        val quality = ocrResult.quality
+
+        if (quality != null && quality.averageLuma < LOW_LIGHT_LUMA_THRESHOLD) {
+            warnings += CameraQualityWarning.LOW_LIGHT
+        }
+
+        if (isSmallText(ocrResult.imageHeight, lineBoxes)) {
+            warnings += CameraQualityWarning.SMALL_TEXT
+        }
+
+        if (quality != null && quality.sharpness < SOFT_FOCUS_THRESHOLD) {
+            warnings += CameraQualityWarning.SOFT_FOCUS
+        }
+
+        if (hasScriptMismatch(lineTexts, sourceLanguage.code)) {
+            warnings += CameraQualityWarning.SCRIPT_MISMATCH
+        }
+
+        if (!canTranslate) {
+            warnings += CameraQualityWarning.TRANSLATION_MODEL_UNAVAILABLE
+        }
+
+        return warnings.distinct()
+    }
+
+    private fun isSmallText(imageHeight: Int, lineBoxes: List<Rect>): Boolean {
+        if (imageHeight <= 0 || lineBoxes.isEmpty()) return false
+        val normalizedHeights = lineBoxes
+            .map { it.height().toFloat() / imageHeight.toFloat() }
+            .sorted()
+        val medianHeight = normalizedHeights[normalizedHeights.size / 2]
+        return medianHeight < SMALL_TEXT_HEIGHT_RATIO_THRESHOLD
+    }
+
+    private fun hasScriptMismatch(texts: List<String>, languageCode: String): Boolean {
+        val expectedScript = expectedScriptForLanguage(languageCode)
+        if (expectedScript == OcrTextScript.OTHER || texts.isEmpty()) return false
+
+        var letterCount = 0
+        var expectedLetterCount = 0
+        var conflictingLetterCount = 0
+
+        for (text in texts) {
+            for (char in text) {
+                val script = scriptForChar(char)
+                if (script == OcrTextScript.OTHER) continue
+
+                letterCount++
+                when {
+                    script == expectedScript -> expectedLetterCount++
+                    isConflictingScript(script, expectedScript) -> conflictingLetterCount++
+                }
+            }
+        }
+
+        if (letterCount < SCRIPT_MISMATCH_MIN_LETTERS) return false
+        val conflictRatio = conflictingLetterCount.toFloat() / letterCount.toFloat()
+        return expectedLetterCount == 0 && conflictingLetterCount >= SCRIPT_MISMATCH_MIN_CONFLICTS ||
+            conflictRatio >= SCRIPT_MISMATCH_RATIO_THRESHOLD &&
+            conflictingLetterCount > expectedLetterCount * 2
+    }
 
     private suspend fun translateCaptureBlocks(
         blocks: List<PaintBlock>,
@@ -1340,7 +1447,8 @@ class CameraViewModel @Inject constructor(
                 paintedBitmap = null,
                 liveBlocks = emptyList(),
                 captureStatus = CaptureStatus.IDLE,
-                captureMessage = null
+                captureMessage = null,
+                qualityWarnings = emptyList()
             )
         }
     }
@@ -1351,6 +1459,12 @@ class CameraViewModel @Inject constructor(
     }
 }
 
+private const val LOW_LIGHT_LUMA_THRESHOLD = 54f
+private const val SOFT_FOCUS_THRESHOLD = 5.6f
+private const val SMALL_TEXT_HEIGHT_RATIO_THRESHOLD = 0.028f
+private const val SCRIPT_MISMATCH_MIN_LETTERS = 6
+private const val SCRIPT_MISMATCH_MIN_CONFLICTS = 4
+private const val SCRIPT_MISMATCH_RATIO_THRESHOLD = 0.55f
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 450L

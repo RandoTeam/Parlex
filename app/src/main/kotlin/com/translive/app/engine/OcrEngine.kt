@@ -19,6 +19,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 data class OcrLine(
     val text: String,
@@ -31,10 +34,16 @@ data class OcrBlock(
     val lines: List<OcrLine>
 )
 
+data class OcrFrameQuality(
+    val averageLuma: Float,
+    val sharpness: Float
+)
+
 data class OcrResult(
     val blocks: List<OcrBlock>,
     val imageWidth: Int,
-    val imageHeight: Int
+    val imageHeight: Int,
+    val quality: OcrFrameQuality? = null
 )
 
 /**
@@ -129,7 +138,8 @@ class OcrEngine @Inject constructor(
         }
 
     suspend fun recognize(bitmap: Bitmap, sourceLanguageCode: String = "en"): OcrResult {
-        return when (backendFor(sourceLanguageCode)) {
+        val quality = analyzeFrameQuality(bitmap)
+        val result = when (backendFor(sourceLanguageCode)) {
             OcrBackend.MLKIT_LATIN -> {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 recognizeWithMlKit(image, latinRecognizer)
@@ -146,6 +156,7 @@ class OcrEngine @Inject constructor(
                 recognizeWithTesseract(bitmap, sourceLanguageCode)
             }
         }
+        return result.copy(quality = quality)
     }
 
     @androidx.camera.core.ExperimentalGetImage
@@ -354,6 +365,54 @@ class OcrEngine @Inject constructor(
 
     private fun luminance(pixel: Int): Int =
         (Color.red(pixel) * 299 + Color.green(pixel) * 587 + Color.blue(pixel) * 114) / 1000
+
+    private fun analyzeFrameQuality(bitmap: Bitmap): OcrFrameQuality {
+        if (bitmap.width <= 1 || bitmap.height <= 1) {
+            return OcrFrameQuality(averageLuma = 0f, sharpness = 0f)
+        }
+
+        val step = max(1, min(bitmap.width, bitmap.height) / 120)
+        val sampledColumns = ((bitmap.width - 1) / step) + 1
+        val previousRow = IntArray(sampledColumns) { -1 }
+
+        var lumaSum = 0L
+        var sampleCount = 0
+        var edgeSum = 0L
+        var edgeCount = 0
+
+        var y = 0
+        while (y < bitmap.height) {
+            var x = 0
+            var column = 0
+            var previousLuma = -1
+            while (x < bitmap.width) {
+                val luma = luminance(bitmap.getPixel(x, y))
+                lumaSum += luma
+                sampleCount++
+
+                if (previousLuma >= 0) {
+                    edgeSum += abs(luma - previousLuma)
+                    edgeCount++
+                }
+                val topLuma = previousRow[column]
+                if (topLuma >= 0) {
+                    edgeSum += abs(luma - topLuma)
+                    edgeCount++
+                }
+                previousRow[column] = luma
+                previousLuma = luma
+
+                x += step
+                column++
+            }
+            y += step
+        }
+
+        return OcrFrameQuality(
+            averageLuma = if (sampleCount > 0) lumaSum.toFloat() / sampleCount else 0f,
+            sharpness = if (edgeCount > 0) edgeSum.toFloat() / edgeCount else 0f
+        )
+    }
 
     @androidx.camera.core.ExperimentalGetImage
     fun imageProxyToUprightBitmap(imageProxy: androidx.camera.core.ImageProxy): Bitmap? {
