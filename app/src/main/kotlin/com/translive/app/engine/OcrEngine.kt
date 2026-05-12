@@ -225,6 +225,7 @@ class OcrEngine @Inject constructor(
                 return false
             }
             api.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
+            api.setVariable("preserve_interword_spaces", "1")
 
             tessApi = api
             tessCurrentLang = tessLang
@@ -247,6 +248,11 @@ class OcrEngine @Inject constructor(
         val ocrBitmap = preprocessForTesseract(bitmap)
         try {
             api.setImage(ocrBitmap)
+            val recognizedText = api.getUTF8Text()
+            if (recognizedText.isNullOrBlank()) {
+                Log.d(TAG, "Tesseract $langCode returned no text")
+                return OcrResult(emptyList(), bitmap.width, bitmap.height)
+            }
 
             val blocks = mutableListOf<OcrBlock>()
             val iterator = api.resultIterator
@@ -294,8 +300,10 @@ class OcrEngine @Inject constructor(
                 iterator.delete()
             }
 
+            Log.d(TAG, "Tesseract $langCode found ${blocks.sumOf { it.lines.size }} lines")
             return OcrResult(blocks, bitmap.width, bitmap.height)
         } finally {
+            api.clear()
             if (ocrBitmap !== bitmap) {
                 ocrBitmap.recycle()
             }

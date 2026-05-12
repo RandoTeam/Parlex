@@ -3,6 +3,7 @@ package com.translive.app.ui.viewmodel
 import android.graphics.*
 import android.os.SystemClock
 import android.text.TextPaint
+import android.text.TextUtils
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -36,14 +37,19 @@ private data class PaintLine(
     val box: Rect
 )
 
+private data class CaptureOcrPass(
+    val result: OcrResult,
+    val sourceLanguage: Language
+)
+
 enum class CameraMode { LIVE, CAPTURE }
 
 enum class CaptureStatus { IDLE, PROCESSING, READY, EMPTY, ERROR }
 
 data class CameraUiState(
     val mode: CameraMode = CameraMode.LIVE,
-    val sourceLanguage: Language = Language.ENGLISH,
-    val targetLanguage: Language = Language.RUSSIAN,
+    val sourceLanguage: Language = Language.RUSSIAN,
+    val targetLanguage: Language = Language.ENGLISH,
     val liveBlocks: List<TranslatedBlock> = emptyList(),
     val captureStatus: CaptureStatus = CaptureStatus.IDLE,
     val captureMessage: String? = null,
@@ -380,7 +386,9 @@ class CameraViewModel @Inject constructor(
         targetLanguage: Language
     ) {
         try {
-            val ocrResult = ocrEngine.recognize(bitmap, sourceLanguage.code)
+            val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage)
+            val ocrResult = captureOcr.result
+            val effectiveSourceLanguage = captureOcr.sourceLanguage
 
             if (ocrResult.blocks.isEmpty()) {
                 _uiState.update {
@@ -406,7 +414,7 @@ class CameraViewModel @Inject constructor(
 
             _uiState.update { it.copy(captureMessage = "Перевожу найденные строки") }
 
-            val translatedParts = translateCaptureLines(allLines, sourceLanguage, targetLanguage)
+            val translatedParts = translateCaptureLines(allLines, effectiveSourceLanguage, targetLanguage)
             val painted = paintOnBitmap(bitmap, allLines, translatedParts)
 
             _uiState.update {
@@ -427,6 +435,57 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    private suspend fun recognizeCaptureBitmap(
+        bitmap: Bitmap,
+        sourceLanguage: Language
+    ): CaptureOcrPass {
+        val primaryResult = ocrEngine.recognize(bitmap, sourceLanguage.code)
+        if (hasUsableCaptureText(primaryResult)) {
+            return CaptureOcrPass(primaryResult, sourceLanguage)
+        }
+
+        val triedCodes = mutableSetOf(sourceLanguage.code)
+        for (fallbackCode in captureOcrFallbackCodes(sourceLanguage)) {
+            if (!triedCodes.add(fallbackCode)) continue
+
+            val fallbackResult = ocrEngine.recognize(bitmap, fallbackCode)
+            if (hasUsableCaptureText(fallbackResult) && matchesExpectedScript(fallbackResult, fallbackCode)) {
+                val fallbackLanguage = Language.fromCode(fallbackCode) ?: sourceLanguage
+                Log.i("CameraVM", "Capture OCR fallback: ${sourceLanguage.code} -> $fallbackCode")
+                return CaptureOcrPass(fallbackResult, fallbackLanguage)
+            }
+        }
+
+        return CaptureOcrPass(primaryResult, sourceLanguage)
+    }
+
+    private fun captureOcrFallbackCodes(sourceLanguage: Language): List<String> =
+        when (sourceLanguage.code) {
+            "ru" -> listOf("uk", "en")
+            "uk" -> listOf("ru", "en")
+            "en", "fr", "de", "es", "pt", "it", "nl", "pl", "cs",
+            "tr", "vi", "id", "ms", "fil" -> listOf("ru", "uk")
+            else -> emptyList()
+        }
+
+    private fun hasUsableCaptureText(result: OcrResult): Boolean =
+        result.blocks.any { block ->
+            block.lines.any { line ->
+                line.text.isNotBlank() &&
+                    line.boundingBox.width() > 20 &&
+                    line.boundingBox.height() > 8
+            }
+        }
+
+    private fun matchesExpectedScript(result: OcrResult, languageCode: String): Boolean {
+        val text = result.blocks.joinToString(" ") { it.text }
+        return when (languageCode) {
+            "ru", "uk", "mn" -> text.any { it in '\u0400'..'\u04FF' }
+            "en" -> text.any { it in 'A'..'Z' || it in 'a'..'z' }
+            else -> true
+        }
+    }
+
     private fun extractCaptureLines(ocrResult: OcrResult): List<PaintLine> =
         ocrResult.blocks.flatMap { block ->
             block.lines
@@ -440,20 +499,24 @@ class CameraViewModel @Inject constructor(
         targetLanguage: Language
     ): List<String> {
         val texts = lines.map { it.text }
+        if (sourceLanguage.code == targetLanguage.code) return texts
+
         return if (translationEngine.isLoaded) {
-            val separator = "\n---\n"
-            val allText = texts.joinToString(separator)
+            val translatedLines = mutableListOf<String>()
             try {
-                val translated = translationEngine.translateSafe(allText, sourceLanguage, targetLanguage)
-                translated.split("---").map { it.trim() }
+                for (text in texts) {
+                    val translated = translationEngine.translateSafe(text, sourceLanguage, targetLanguage)
+                    translatedLines.add(translated.trim().ifBlank { text })
+                }
+                translatedLines
             } catch (e: Exception) {
                 Log.e("CameraVM", "HY-MT failed, falling back to ML Kit: ${e.message}")
-                if (cameraTranslateEngine.isReady.value) cameraTranslateEngine.translateLines(texts) else emptyList()
+                if (cameraTranslateEngine.isReady.value) cameraTranslateEngine.translateLines(texts) else texts
             }
         } else if (cameraTranslateEngine.isReady.value) {
             cameraTranslateEngine.translateLines(texts)
         } else {
-            emptyList()
+            texts
         }
     }
 
@@ -484,7 +547,8 @@ class CameraViewModel @Inject constructor(
                 ?.takeIf { it.isNotBlank() }
                 ?: line.text
 
-            val box = line.box
+            val box = clippedBox(line.box, result.width, result.height)
+            if (box.width() <= 0 || box.height() <= 0) continue
 
             // Sample background color around the box to choose contrast
             val bgColor = sampleBackgroundColor(original, box)
@@ -500,24 +564,41 @@ class CameraViewModel @Inject constructor(
 
             // Fit text size: ~80% of box height
             val boxH = box.height().toFloat()
-            val boxW = box.width().toFloat()
+            val padding = (boxH * 0.10f).coerceIn(2f, 6f)
+            val maxTextWidth = (box.width().toFloat() - padding * 2f).coerceAtLeast(1f)
+            val minTextSize = (boxH * 0.48f).coerceIn(8f, 18f)
             textPaint.textSize = (boxH * 0.78f).coerceIn(10f, 48f)
             textPaint.color = textColor
 
             // Shrink if too wide
-            var measured = textPaint.measureText(translatedText)
-            while (measured > boxW && textPaint.textSize > 8f) {
+            val singleLineText = translatedText.replace(Regex("\\s+"), " ")
+            var measured = textPaint.measureText(singleLineText)
+            while (measured > maxTextWidth && textPaint.textSize > minTextSize) {
                 textPaint.textSize -= 1f
-                measured = textPaint.measureText(translatedText)
+                measured = textPaint.measureText(singleLineText)
             }
+            val displayText = TextUtils.ellipsize(
+                singleLineText,
+                textPaint,
+                maxTextWidth,
+                TextUtils.TruncateAt.END
+            ).toString()
 
             // Draw text — vertically centered
-            val x = box.left.toFloat() + 2f
+            val x = box.left.toFloat() + padding
             val y = box.top.toFloat() + (boxH - textPaint.descent() - textPaint.ascent()) / 2f
-            canvas.drawText(translatedText, x, y, textPaint)
+            canvas.drawText(displayText, x, y, textPaint)
         }
 
         return result
+    }
+
+    private fun clippedBox(box: Rect, width: Int, height: Int): Rect {
+        val left = box.left.coerceIn(0, width)
+        val top = box.top.coerceIn(0, height)
+        val right = box.right.coerceIn(left, width)
+        val bottom = box.bottom.coerceIn(top, height)
+        return Rect(left, top, right, bottom)
     }
 
     /** Sample the average color around a bounding box to match background. */
