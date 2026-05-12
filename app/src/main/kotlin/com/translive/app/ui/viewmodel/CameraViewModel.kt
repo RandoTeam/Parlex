@@ -78,6 +78,14 @@ class CameraViewModel @Inject constructor(
     /** Live OCR line tracks keep overlays attached to the same visual row between frames. */
     private val liveTracks = mutableListOf<LiveTextTrack>()
     private var nextLiveTrackId = 0
+    private val liveTranslationCache = object : LinkedHashMap<String, String>(
+        LIVE_TRANSLATION_CACHE_LIMIT,
+        0.75f,
+        true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String>?): Boolean =
+            size > LIVE_TRANSLATION_CACHE_LIMIT
+    }
     private var frameCounter = 0
 
     init {
@@ -130,7 +138,7 @@ class CameraViewModel @Inject constructor(
 
     private fun resetModeVisuals() {
         translateJob?.cancel()
-        clearLiveTracks()
+        clearLiveSession()
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
@@ -255,8 +263,9 @@ class CameraViewModel @Inject constructor(
         return bestTrack
     }
 
-    private fun clearLiveTracks() {
+    private fun clearLiveSession() {
         liveTracks.clear()
+        liveTranslationCache.clear()
         nextLiveTrackId = 0
     }
 
@@ -267,11 +276,37 @@ class CameraViewModel @Inject constructor(
             }
         }
 
-        val translations = cameraTranslateEngine.translateLines(lines.map { it.text })
+        val state = _uiState.value
+        val cacheKeys = lines.map {
+            liveTranslationCacheKey(state.sourceLanguage.code, state.targetLanguage.code, it.text)
+        }
+        val translationsByKey = mutableMapOf<String, String>()
+        val missingTexts = mutableListOf<String>()
+        val missingKeys = mutableListOf<String>()
+
+        cacheKeys.forEachIndexed { index, key ->
+            val cached = liveTranslationCache[key]
+            if (cached != null) {
+                translationsByKey[key] = cached
+            } else if (key !in missingKeys) {
+                missingKeys.add(key)
+                missingTexts.add(lines[index].text)
+            }
+        }
+
+        if (missingTexts.isNotEmpty()) {
+            val freshTranslations = cameraTranslateEngine.translateLines(missingTexts)
+            missingKeys.forEachIndexed { index, key ->
+                val translated = freshTranslations.getOrElse(index) { missingTexts[index] }
+                liveTranslationCache[key] = translated
+                translationsByKey[key] = translated
+            }
+        }
+
         return lines.mapIndexed { i, line ->
             TranslatedBlock(
                 originalText = line.text,
-                translatedText = translations.getOrElse(i) { line.text },
+                translatedText = translationsByKey[cacheKeys[i]] ?: line.text,
                 boundingBox = line.boundingBox
             )
         }
@@ -315,7 +350,7 @@ class CameraViewModel @Inject constructor(
 
     private fun enterCaptureMode(workBitmap: Bitmap) {
         translateJob?.cancel()
-        clearLiveTracks()
+        clearLiveSession()
         _uiState.update {
             it.copy(
                 mode = CameraMode.CAPTURE,
@@ -508,7 +543,7 @@ class CameraViewModel @Inject constructor(
 
     fun backToLive() {
         translateJob?.cancel()
-        clearLiveTracks()
+        clearLiveSession()
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
@@ -528,6 +563,7 @@ class CameraViewModel @Inject constructor(
 }
 
 private const val LIVE_TRACK_TTL_FRAMES = 5
+private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 
 private data class LiveTextTrack(
     val id: Int,
@@ -538,6 +574,11 @@ private data class LiveTextTrack(
 private fun centerX(rect: Rect): Float = (rect.left + rect.right) / 2f
 
 private fun centerY(rect: Rect): Float = (rect.top + rect.bottom) / 2f
+
+private fun liveTranslationCacheKey(sourceCode: String, targetCode: String, text: String): String {
+    val normalizedText = text.trim().replace(Regex("\\s+"), " ")
+    return "$sourceCode>$targetCode:$normalizedText"
+}
 
 /**
  * Exponential Moving Average filter for Rect coordinates.
