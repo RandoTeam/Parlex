@@ -8,6 +8,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.model.Language
 import com.translive.app.engine.CameraTranslateEngine
+import com.translive.app.engine.OcrLine
+import com.translive.app.engine.OcrResult
 import com.translive.app.engine.OcrEngine
 import com.translive.app.engine.TranslationEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -35,12 +37,15 @@ private data class PaintLine(
 
 enum class CameraMode { LIVE, CAPTURE }
 
+enum class CaptureStatus { IDLE, PROCESSING, READY, EMPTY, ERROR }
+
 data class CameraUiState(
     val mode: CameraMode = CameraMode.LIVE,
     val sourceLanguage: Language = Language.ENGLISH,
     val targetLanguage: Language = Language.RUSSIAN,
-    val blocks: List<TranslatedBlock> = emptyList(),
-    val isProcessing: Boolean = false,
+    val liveBlocks: List<TranslatedBlock> = emptyList(),
+    val captureStatus: CaptureStatus = CaptureStatus.IDLE,
+    val captureMessage: String? = null,
     val capturedBitmap: Bitmap? = null,
     /** Bitmap with translations painted on top */
     val paintedBitmap: Bitmap? = null,
@@ -53,7 +58,9 @@ data class CameraUiState(
     val isNmtReady: Boolean = false,
     val isNmtDownloading: Boolean = false,
     val nmtError: String? = null
-)
+) {
+    val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
+}
 
 @HiltViewModel
 class CameraViewModel @Inject constructor(
@@ -104,11 +111,13 @@ class CameraViewModel @Inject constructor(
 
     fun setSourceLanguage(lang: Language) {
         _uiState.update { it.copy(sourceLanguage = lang) }
+        resetModeVisuals()
         prepareNmt()
     }
 
     fun setTargetLanguage(lang: Language) {
         _uiState.update { it.copy(targetLanguage = lang) }
+        resetModeVisuals()
         prepareNmt()
     }
 
@@ -116,7 +125,26 @@ class CameraViewModel @Inject constructor(
         _uiState.update {
             it.copy(sourceLanguage = it.targetLanguage, targetLanguage = it.sourceLanguage)
         }
+        resetModeVisuals()
         prepareNmt()
+    }
+
+    private fun resetModeVisuals() {
+        translateJob?.cancel()
+        smoothedBoxes.clear()
+        _uiState.update {
+            it.copy(
+                mode = CameraMode.LIVE,
+                liveBlocks = emptyList(),
+                capturedBitmap = null,
+                paintedBitmap = null,
+                captureStatus = CaptureStatus.IDLE,
+                captureMessage = null,
+                imageWidth = 0,
+                imageHeight = 0,
+                transformMatrix = null
+            )
+        }
     }
 
     private fun prepareNmt() {
@@ -148,17 +176,12 @@ class CameraViewModel @Inject constructor(
             try {
                 val state = _uiState.value
                 val ocrResult = ocrEngine.recognize(imageProxy, state.sourceLanguage.code)
-
-                val rawLines = ocrResult.blocks.flatMap { block ->
-                    block.lines
-                        .filter { it.boundingBox.width() > 30 && it.boundingBox.height() > 10 }
-                        .map { line -> line }
-                }
+                val rawLines = extractLiveLines(ocrResult)
 
                 if (rawLines.isEmpty()) {
                     _uiState.update {
                         it.copy(
-                            blocks = emptyList(),
+                            liveBlocks = emptyList(),
                             imageWidth = ocrResult.imageWidth,
                             imageHeight = ocrResult.imageHeight
                         )
@@ -166,40 +189,12 @@ class CameraViewModel @Inject constructor(
                     return@launch
                 }
 
-                // Apply EMA smoothing to bounding boxes
-                val smoothedLines = rawLines.mapIndexed { idx, line ->
-                    val key = idx
-                    val smoothed = smoothedBoxes.getOrPut(key) { SmoothedRect(line.boundingBox) }
-                    smoothed.update(line.boundingBox)
-                    line.copy(boundingBox = smoothed.get())
-                }
-                // Clean up stale entries
-                if (smoothedBoxes.size > rawLines.size + 5) {
-                    val keysToRemove = smoothedBoxes.keys.filter { it >= rawLines.size + 5 }
-                    keysToRemove.forEach { smoothedBoxes.remove(it) }
-                }
-
-                // Translate using ML Kit (fast ~20ms per line)
-                val translatedBlocks = if (cameraTranslateEngine.isReady.value) {
-                    val texts = smoothedLines.map { it.text }
-                    val translations = cameraTranslateEngine.translateLines(texts)
-                    smoothedLines.mapIndexed { i, line ->
-                        TranslatedBlock(
-                            originalText = line.text,
-                            translatedText = translations.getOrElse(i) { line.text },
-                            boundingBox = line.boundingBox
-                        )
-                    }
-                } else {
-                    // NMT not ready yet — show OCR boxes only
-                    smoothedLines.map { line ->
-                        TranslatedBlock(line.text, "", line.boundingBox)
-                    }
-                }
+                val smoothedLines = smoothLiveLines(rawLines)
+                val translatedBlocks = translateLiveLines(smoothedLines)
 
                 _uiState.update {
                     it.copy(
-                        blocks = translatedBlocks,
+                        liveBlocks = translatedBlocks,
                         imageWidth = ocrResult.imageWidth,
                         imageHeight = ocrResult.imageHeight,
                         transformMatrix = transformMatrix
@@ -213,79 +208,171 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    private fun extractLiveLines(ocrResult: OcrResult): List<OcrLine> =
+        ocrResult.blocks.flatMap { block ->
+            block.lines.filter { it.boundingBox.width() > 30 && it.boundingBox.height() > 10 }
+        }
+
+    private fun smoothLiveLines(lines: List<OcrLine>): List<OcrLine> {
+        val smoothedLines = lines.mapIndexed { idx, line ->
+            val smoothed = smoothedBoxes.getOrPut(idx) { SmoothedRect(line.boundingBox) }
+            smoothed.update(line.boundingBox)
+            line.copy(boundingBox = smoothed.get())
+        }
+        if (smoothedBoxes.size > lines.size + 5) {
+            smoothedBoxes.keys.filter { it >= lines.size + 5 }.forEach { smoothedBoxes.remove(it) }
+        }
+        return smoothedLines
+    }
+
+    private suspend fun translateLiveLines(lines: List<OcrLine>): List<TranslatedBlock> {
+        if (!cameraTranslateEngine.isReady.value) {
+            return lines.map { line ->
+                TranslatedBlock(line.text, "", line.boundingBox)
+            }
+        }
+
+        val translations = cameraTranslateEngine.translateLines(lines.map { it.text })
+        return lines.mapIndexed { i, line ->
+            TranslatedBlock(
+                originalText = line.text,
+                translatedText = translations.getOrElse(i) { line.text },
+                boundingBox = line.boundingBox
+            )
+        }
+    }
+
     /**
      * Capture: freeze bitmap → OCR → HY-MT quality translate → paint on bitmap.
      */
-    fun capture(bitmap: Bitmap) {
+    fun capturePreview(bitmap: Bitmap?) {
+        if (bitmap == null) {
+            _uiState.update { it.copy(captureMessage = "Кадр камеры пока недоступен") }
+            return
+        }
+
+        val workBitmap = prepareCaptureBitmap(bitmap)
+        val state = _uiState.value
+        enterCaptureMode(workBitmap)
+
+        translateJob = viewModelScope.launch(Dispatchers.IO) {
+            processCaptureBitmap(
+                bitmap = workBitmap,
+                sourceLanguage = state.sourceLanguage,
+                targetLanguage = state.targetLanguage
+            )
+        }
+    }
+
+    private fun prepareCaptureBitmap(bitmap: Bitmap): Bitmap {
         val maxSize = 1920
         val longest = max(bitmap.width, bitmap.height)
-        val workBitmap = if (longest > maxSize) {
-            val s = maxSize.toFloat() / longest
-            Bitmap.createScaledBitmap(bitmap, (bitmap.width * s).toInt(), (bitmap.height * s).toInt(), true)
-        } else bitmap
+        if (longest <= maxSize) return bitmap
 
+        val scale = maxSize.toFloat() / longest
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).toInt(),
+            (bitmap.height * scale).toInt(),
+            true
+        )
+    }
+
+    private fun enterCaptureMode(workBitmap: Bitmap) {
+        translateJob?.cancel()
+        smoothedBoxes.clear()
         _uiState.update {
             it.copy(
                 mode = CameraMode.CAPTURE,
                 capturedBitmap = workBitmap,
                 paintedBitmap = workBitmap,
-                blocks = emptyList(),
-                isProcessing = true
+                liveBlocks = emptyList(),
+                captureStatus = CaptureStatus.PROCESSING,
+                captureMessage = "Ищу текст на снимке"
             )
         }
+    }
 
-        translateJob = viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val state = _uiState.value
-                val ocrResult = ocrEngine.recognize(workBitmap, state.sourceLanguage.code)
+    private suspend fun processCaptureBitmap(
+        bitmap: Bitmap,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ) {
+        try {
+            val ocrResult = ocrEngine.recognize(bitmap, sourceLanguage.code)
 
-                if (ocrResult.blocks.isEmpty()) {
-                    _uiState.update { it.copy(isProcessing = false) }
-                    return@launch
-                }
-
-                val allLines = ocrResult.blocks.flatMap { block ->
-                    block.lines
-                        .filter { it.boundingBox.width() > 20 && it.boundingBox.height() > 8 }
-                        .map { PaintLine(it.text, it.boundingBox) }
-                }
-
-                if (allLines.isEmpty()) {
-                    _uiState.update { it.copy(isProcessing = false) }
-                    return@launch
-                }
-
-                // Capture mode: try HY-MT for quality, fallback to ML Kit
-                val translatedParts = if (translationEngine.isLoaded) {
-                    // Batch with HY-MT (quality)
-                    val separator = "\n---\n"
-                    val allText = allLines.joinToString(separator) { it.text }
-                    try {
-                        val translated = translationEngine.translateSafe(
-                            allText, state.sourceLanguage, state.targetLanguage
-                        )
-                        translated.split("---").map { it.trim() }
-                    } catch (e: Exception) {
-                        Log.e("CameraVM", "HY-MT failed, falling back to ML Kit: ${e.message}")
-                        // Fallback to ML Kit
-                        if (cameraTranslateEngine.isReady.value) {
-                            cameraTranslateEngine.translateLines(allLines.map { it.text })
-                        } else emptyList()
-                    }
-                } else if (cameraTranslateEngine.isReady.value) {
-                    // ML Kit fallback
-                    cameraTranslateEngine.translateLines(allLines.map { it.text })
-                } else emptyList()
-
-                val painted = paintOnBitmap(workBitmap, allLines, translatedParts)
-
+            if (ocrResult.blocks.isEmpty()) {
                 _uiState.update {
-                    it.copy(paintedBitmap = painted, isProcessing = false)
+                    it.copy(
+                        captureStatus = CaptureStatus.EMPTY,
+                        captureMessage = "Текст не найден"
+                    )
                 }
-            } catch (e: Exception) {
-                Log.e("CameraVM", "Capture error: ${e.message}", e)
-                _uiState.update { it.copy(isProcessing = false) }
+                return
             }
+
+            val allLines = extractCaptureLines(ocrResult)
+
+            if (allLines.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        captureStatus = CaptureStatus.EMPTY,
+                        captureMessage = "Подходящие строки не найдены"
+                    )
+                }
+                return
+            }
+
+            _uiState.update { it.copy(captureMessage = "Перевожу найденные строки") }
+
+            val translatedParts = translateCaptureLines(allLines, sourceLanguage, targetLanguage)
+            val painted = paintOnBitmap(bitmap, allLines, translatedParts)
+
+            _uiState.update {
+                it.copy(
+                    paintedBitmap = painted,
+                    captureStatus = CaptureStatus.READY,
+                    captureMessage = null
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("CameraVM", "Capture error: ${e.message}", e)
+            _uiState.update {
+                it.copy(
+                    captureStatus = CaptureStatus.ERROR,
+                    captureMessage = "Ошибка обработки снимка"
+                )
+            }
+        }
+    }
+
+    private fun extractCaptureLines(ocrResult: OcrResult): List<PaintLine> =
+        ocrResult.blocks.flatMap { block ->
+            block.lines
+                .filter { it.boundingBox.width() > 20 && it.boundingBox.height() > 8 }
+                .map { PaintLine(it.text, it.boundingBox) }
+        }
+
+    private suspend fun translateCaptureLines(
+        lines: List<PaintLine>,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): List<String> {
+        val texts = lines.map { it.text }
+        return if (translationEngine.isLoaded) {
+            val separator = "\n---\n"
+            val allText = texts.joinToString(separator)
+            try {
+                val translated = translationEngine.translateSafe(allText, sourceLanguage, targetLanguage)
+                translated.split("---").map { it.trim() }
+            } catch (e: Exception) {
+                Log.e("CameraVM", "HY-MT failed, falling back to ML Kit: ${e.message}")
+                if (cameraTranslateEngine.isReady.value) cameraTranslateEngine.translateLines(texts) else emptyList()
+            }
+        } else if (cameraTranslateEngine.isReady.value) {
+            cameraTranslateEngine.translateLines(texts)
+        } else {
+            emptyList()
         }
     }
 
@@ -386,13 +473,15 @@ class CameraViewModel @Inject constructor(
 
     fun backToLive() {
         translateJob?.cancel()
+        smoothedBoxes.clear()
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
                 capturedBitmap = null,
                 paintedBitmap = null,
-                blocks = emptyList(),
-                isProcessing = false
+                liveBlocks = emptyList(),
+                captureStatus = CaptureStatus.IDLE,
+                captureMessage = null
             )
         }
     }

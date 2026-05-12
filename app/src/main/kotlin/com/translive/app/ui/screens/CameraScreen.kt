@@ -50,6 +50,7 @@ import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.CameraMode
 import com.translive.app.ui.viewmodel.CameraViewModel
+import com.translive.app.ui.viewmodel.CaptureStatus
 import com.translive.app.ui.viewmodel.TranslatedBlock
 import java.util.concurrent.Executors
 
@@ -128,9 +129,9 @@ fun CameraScreen(
                         CameraBetaBadge()
 
                         // Live translation overlay
-                        if (uiState.blocks.isNotEmpty()) {
+                        if (uiState.liveBlocks.isNotEmpty()) {
                             TranslationOverlay(
-                                blocks = uiState.blocks,
+                                blocks = uiState.liveBlocks,
                                 transformMatrix = uiState.transformMatrix,
                                 imageWidth = uiState.imageWidth,
                                 imageHeight = uiState.imageHeight
@@ -184,6 +185,10 @@ fun CameraScreen(
                         CaptureImageView(
                             bitmap = uiState.paintedBitmap
                         )
+                        CameraCaptureStatusBadge(
+                            status = uiState.captureStatus,
+                            message = uiState.captureMessage
+                        )
                     }
                 }
 
@@ -198,7 +203,7 @@ fun CameraScreen(
                         if (uiState.mode == CameraMode.LIVE) {
                             IconButton(
                                 onClick = {
-                                    previewViewRef?.bitmap?.let { viewModel.capture(it) }
+                                    viewModel.capturePreview(previewViewRef?.bitmap)
                                 },
                                 modifier = Modifier
                                     .size(72.dp)
@@ -247,7 +252,7 @@ fun CameraScreen(
                     }
                 }
 
-                if (uiState.isProcessing) {
+                if (uiState.isCaptureProcessing) {
                     LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
                 }
             }
@@ -287,6 +292,47 @@ private fun BoxScope.CameraBetaBadge() {
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelSmall
         )
+    }
+}
+
+@Composable
+private fun BoxScope.CameraCaptureStatusBadge(
+    status: CaptureStatus,
+    message: String?
+) {
+    if (status == CaptureStatus.IDLE || (status == CaptureStatus.READY && message == null)) return
+
+    val color = when (status) {
+        CaptureStatus.ERROR -> Color(0xCCCC3333)
+        CaptureStatus.EMPTY -> Color(0xCC6B5B1A)
+        else -> Color.Black.copy(alpha = 0.62f)
+    }
+
+    Surface(
+        modifier = Modifier
+            .align(Alignment.TopCenter)
+            .padding(top = 12.dp, start = 12.dp, end = 12.dp),
+        color = color,
+        contentColor = Color.White,
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (status == CaptureStatus.PROCESSING) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(14.dp),
+                    strokeWidth = 2.dp,
+                    color = Color.White
+                )
+                Spacer(Modifier.width(8.dp))
+            }
+            Text(
+                text = message ?: "",
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
     }
 }
 
