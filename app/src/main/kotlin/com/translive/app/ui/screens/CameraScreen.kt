@@ -59,6 +59,7 @@ import com.translive.app.ui.viewmodel.CaptureStatus
 import com.translive.app.ui.viewmodel.TranslatedBlock
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.camera.core.ExperimentalGetImage
@@ -90,6 +91,14 @@ fun CameraScreen(
     }
 
     var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var focusPoint by remember { mutableStateOf<Offset?>(null) }
+
+    LaunchedEffect(focusPoint) {
+        if (focusPoint != null) {
+            delay(850)
+            focusPoint = null
+        }
+    }
 
     Scaffold(
         containerColor = Color.Black,
@@ -129,7 +138,8 @@ fun CameraScreen(
                     CameraMode.LIVE -> {
                         LiveCameraView(
                             viewModel = viewModel,
-                            onPreviewView = { previewViewRef = it }
+                            onPreviewView = { previewViewRef = it },
+                            onFocusPoint = { focusPoint = it }
                         )
 
                         CameraBetaBadge()
@@ -142,6 +152,8 @@ fun CameraScreen(
                                 imageHeight = uiState.imageHeight
                             )
                         }
+
+                        FocusReticle(focusPoint)
 
                         // NMT status badge
                         if (uiState.isNmtDownloading) {
@@ -341,12 +353,53 @@ private fun BoxScope.CameraCaptureStatusBadge(
     }
 }
 
+@Composable
+private fun BoxScope.FocusReticle(focusPoint: Offset?) {
+    if (focusPoint == null) return
+
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val color = Color.White.copy(alpha = 0.88f)
+        val radius = 28f
+        drawCircle(
+            color = color,
+            radius = radius,
+            center = focusPoint,
+            style = Stroke(width = 2.5f)
+        )
+        drawLine(
+            color = color,
+            start = Offset(focusPoint.x - radius - 10f, focusPoint.y),
+            end = Offset(focusPoint.x - radius + 6f, focusPoint.y),
+            strokeWidth = 2.5f
+        )
+        drawLine(
+            color = color,
+            start = Offset(focusPoint.x + radius - 6f, focusPoint.y),
+            end = Offset(focusPoint.x + radius + 10f, focusPoint.y),
+            strokeWidth = 2.5f
+        )
+        drawLine(
+            color = color,
+            start = Offset(focusPoint.x, focusPoint.y - radius - 10f),
+            end = Offset(focusPoint.x, focusPoint.y - radius + 6f),
+            strokeWidth = 2.5f
+        )
+        drawLine(
+            color = color,
+            start = Offset(focusPoint.x, focusPoint.y + radius - 6f),
+            end = Offset(focusPoint.x, focusPoint.y + radius + 10f),
+            strokeWidth = 2.5f
+        )
+    }
+}
+
 /** Live camera preview with OCR frame analysis. */
 @androidx.camera.core.ExperimentalGetImage
 @Composable
 private fun LiveCameraView(
     viewModel: CameraViewModel,
-    onPreviewView: (PreviewView) -> Unit
+    onPreviewView: (PreviewView) -> Unit,
+    onFocusPoint: (Offset) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -396,6 +449,7 @@ private fun LiveCameraView(
                             .build()
                         camera.cameraControl.startFocusAndMetering(action)
                     }
+                    onFocusPoint(Offset(event.x, event.y))
                     view.performClick()
                     true
                 }
