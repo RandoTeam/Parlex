@@ -42,8 +42,15 @@ data class TranslatedBlock(
 
 /** A single OCR line ready for painting. */
 private data class PaintLine(
+    val id: String,
     val text: String,
     val box: Rect
+)
+
+/** OCR block translated as one context unit, while keeping per-line boxes for painting. */
+private data class PaintBlock(
+    val id: String,
+    val lines: List<PaintLine>
 )
 
 private data class CaptureOcrPass(
@@ -71,6 +78,7 @@ private data class CaptureOcrScore(
 )
 
 private data class CaptureDebugLine(
+    val id: String,
     val index: Int,
     val sourceText: String,
     val translatedText: String,
@@ -518,7 +526,8 @@ class CameraViewModel @Inject constructor(
                 return
             }
 
-            val allLines = extractCaptureLines(ocrResult, effectiveSourceLanguage)
+            val captureBlocks = extractCaptureBlocks(ocrResult, effectiveSourceLanguage)
+            val allLines = captureBlocks.flatMap { it.lines }
 
             if (allLines.isEmpty()) {
                 rememberCaptureDebugSnapshot(
@@ -541,7 +550,7 @@ class CameraViewModel @Inject constructor(
 
             _uiState.update { it.copy(captureMessage = "Перевожу найденные строки") }
 
-            val translatedParts = translateCaptureLines(allLines, effectiveSourceLanguage, targetLanguage)
+            val translatedParts = translateCaptureBlocks(captureBlocks, effectiveSourceLanguage, targetLanguage)
             rememberCaptureDebugSnapshot(
                 sourceLanguage,
                 effectiveSourceLanguage,
@@ -692,22 +701,37 @@ class CameraViewModel @Inject constructor(
     }
 
     private fun extractRawCaptureLines(ocrResult: OcrResult): List<PaintLine> =
-        ocrResult.blocks.flatMap { block ->
-            block.lines
-                .filter { it.boundingBox.width() > 20 && it.boundingBox.height() > 8 }
-                .map { PaintLine(it.text, it.boundingBox) }
+        ocrResult.blocks.flatMapIndexed { blockIndex, block ->
+            block.lines.mapIndexedNotNull { lineIndex, line ->
+                if (line.boundingBox.width() <= 20 || line.boundingBox.height() <= 8) {
+                    null
+                } else {
+                    PaintLine("b$blockIndex:l$lineIndex", line.text, line.boundingBox)
+                }
+            }
         }
 
-    private fun extractCaptureLines(
+    private fun extractCaptureBlocks(
         ocrResult: OcrResult,
         sourceLanguage: Language
-    ): List<PaintLine> {
-        val rawLines = extractRawCaptureLines(ocrResult)
+    ): List<PaintBlock> {
         val expectedScript = expectedScriptForLanguage(sourceLanguage.code)
-        if (expectedScript == OcrTextScript.OTHER) return rawLines
-
-        val preferredLines = rawLines.filter { isPreferredCaptureLine(it.text, expectedScript) }
-        return if (preferredLines.isNotEmpty()) preferredLines else rawLines
+        return ocrResult.blocks.mapIndexedNotNull { blockIndex, block ->
+            val rawLines = block.lines.mapIndexedNotNull { lineIndex, line ->
+                if (line.boundingBox.width() <= 20 || line.boundingBox.height() <= 8) {
+                    null
+                } else {
+                    PaintLine("b$blockIndex:l$lineIndex", line.text, line.boundingBox)
+                }
+            }
+            val lines = if (expectedScript == OcrTextScript.OTHER) {
+                rawLines
+            } else {
+                rawLines.filter { isPreferredCaptureLine(it.text, expectedScript) }
+                    .ifEmpty { rawLines }
+            }
+            if (lines.isEmpty()) null else PaintBlock("b$blockIndex", lines)
+        }
     }
 
     private fun isPreferredCaptureLine(text: String, expectedScript: OcrTextScript): Boolean {
@@ -770,24 +794,31 @@ class CameraViewModel @Inject constructor(
             expectedScript != OcrTextScript.OTHER &&
             actualScript != expectedScript
 
-    private suspend fun translateCaptureLines(
-        lines: List<PaintLine>,
+    private suspend fun translateCaptureBlocks(
+        blocks: List<PaintBlock>,
         sourceLanguage: Language,
         targetLanguage: Language
     ): List<String> {
-        val texts = lines.map { it.text }
+        val texts = blocks.flatMap { block -> block.lines.map { it.text } }
         if (sourceLanguage.code == targetLanguage.code) return texts
 
         return if (translationEngine.isLoaded) {
-            val translatedLines = mutableListOf<String>()
             try {
-                for (text in texts) {
-                    val translated = translationEngine.translateSafe(text, sourceLanguage, targetLanguage)
-                    translatedLines.add(translated.trim().ifBlank { text })
+                val translatedLines = mutableListOf<String>()
+                for (block in blocks) {
+                    translatedLines += translateCaptureBlockWithStructure(
+                        block = block,
+                        sourceLanguage = sourceLanguage,
+                        targetLanguage = targetLanguage
+                    ) ?: translateCaptureLinesWithMainModel(
+                        lines = block.lines,
+                        sourceLanguage = sourceLanguage,
+                        targetLanguage = targetLanguage
+                    )
                 }
                 translatedLines
             } catch (e: Exception) {
-                Log.e("CameraVM", "HY-MT failed, falling back to ML Kit: ${e.message}")
+                Log.e("CameraVM", "Structured HY-MT failed, falling back to ML Kit: ${e.message}")
                 if (cameraTranslateEngine.isReady.value) cameraTranslateEngine.translateLines(texts) else texts
             }
         } else if (cameraTranslateEngine.isReady.value) {
@@ -796,6 +827,87 @@ class CameraViewModel @Inject constructor(
             texts
         }
     }
+
+    private suspend fun translateCaptureBlockWithStructure(
+        block: PaintBlock,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): List<String>? {
+        if (block.lines.size < 2) return null
+
+        val ids = block.lines.mapIndexed { index, _ -> "L${index + 1}" }
+        val sourceText = block.lines.mapIndexed { index, line ->
+            "[${ids[index]}] ${line.text}"
+        }.joinToString("\n")
+        val maxTokens = (sourceText.length * 3).coerceIn(256, 2048)
+        val translated = translationEngine.translateStructuredSafe(
+            sourceText = sourceText,
+            source = sourceLanguage,
+            target = targetLanguage,
+            maxTokens = maxTokens
+        )
+
+        val parsed = parseStructuredTranslations(translated, ids)
+        if (parsed == null) {
+            Log.w("CameraVM", "Structured translation did not preserve lines for ${block.id}")
+            return null
+        }
+
+        return parsed.mapIndexed { index, text ->
+            text.trim().ifBlank { block.lines[index].text }
+        }
+    }
+
+    private suspend fun translateCaptureLinesWithMainModel(
+        lines: List<PaintLine>,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): List<String> {
+        val translatedLines = mutableListOf<String>()
+        for (line in lines) {
+            val translated = translationEngine.translateSafe(line.text, sourceLanguage, targetLanguage)
+            translatedLines.add(translated.trim().ifBlank { line.text })
+        }
+        return translatedLines
+    }
+
+    private fun parseStructuredTranslations(
+        translated: String,
+        ids: List<String>
+    ): List<String>? {
+        val byMarker = parseStructuredTranslationsByMarker(translated, ids)
+        if (byMarker != null) return byMarker
+
+        val lines = translated.lines()
+            .map { stripStructuredLineId(it).trim() }
+            .filter { it.isNotBlank() }
+        return if (lines.size == ids.size) lines else null
+    }
+
+    private fun parseStructuredTranslationsByMarker(
+        translated: String,
+        ids: List<String>
+    ): List<String>? {
+        val markerRegex = Regex("""\[(L\d+)]""")
+        val matches = markerRegex.findAll(translated).toList()
+        if (matches.size < ids.size) return null
+
+        val valuesById = mutableMapOf<String, String>()
+        for (index in matches.indices) {
+            val id = matches[index].groupValues[1]
+            if (id !in ids || id in valuesById) continue
+
+            val valueStart = matches[index].range.last + 1
+            val valueEnd = matches.getOrNull(index + 1)?.range?.first ?: translated.length
+            valuesById[id] = translated.substring(valueStart, valueEnd).trim()
+        }
+
+        if (!ids.all { valuesById[it]?.isNotBlank() == true }) return null
+        return ids.map { valuesById.getValue(it) }
+    }
+
+    private fun stripStructuredLineId(text: String): String =
+        text.replace(Regex("""^\s*\[?L\d+]?\s*[:.)\-]?\s*"""), "")
 
     private fun rememberCaptureDebugSnapshot(
         requestedSourceLanguage: Language,
@@ -831,6 +943,7 @@ class CameraViewModel @Inject constructor(
             },
             lines = lines.mapIndexed { index, line ->
                 CaptureDebugLine(
+                    id = line.id,
                     index = index,
                     sourceText = line.text,
                     translatedText = translations.getOrNull(index).orEmpty(),
@@ -1016,6 +1129,7 @@ class CameraViewModel @Inject constructor(
                     lines.forEach { line ->
                         array.put(
                             JSONObject()
+                                .put("id", line.id)
                                 .put("index", line.index)
                                 .put("sourceText", line.sourceText)
                                 .put("translatedText", line.translatedText)

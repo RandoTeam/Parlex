@@ -123,6 +123,33 @@ class TranslationEngine {
     }
 
     /**
+     * Translate OCR lines while asking the model to preserve stable line IDs.
+     * Callers must still validate the returned structure and fall back if IDs are not preserved.
+     */
+    fun translateStructured(
+        sourceText: String,
+        source: Language,
+        target: Language,
+        maxTokens: Int = 2048
+    ): String {
+        if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
+        val style = getActivePromptStyle()
+        val prompt = buildStructuredPrompt(sourceText, source, target, style)
+        val useChatTemplate = true
+        return nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+    }
+
+    /** Thread-safe structured translate for use from coroutines. */
+    suspend fun translateStructuredSafe(
+        sourceText: String,
+        source: Language,
+        target: Language,
+        maxTokens: Int = 2048
+    ): String = inferenceMutex.withLock {
+        translateStructured(sourceText, source, target, maxTokens)
+    }
+
+    /**
      * Streaming translation: emits each token as it's generated.
      * Collect the Flow to build up the translated text in real-time.
      * Returns StreamResult with accurate token counts after completion.
@@ -164,6 +191,24 @@ class TranslationEngine {
         return when (style) {
             PromptStyle.HY_MT -> buildHyMtPrompt(text, source, target)
             PromptStyle.TRANSLATE_GEMMA -> buildTranslateGemmaPrompt(text, source, target)
+        }
+    }
+
+    private fun buildStructuredPrompt(
+        text: String,
+        source: Language,
+        target: Language,
+        style: PromptStyle
+    ): String {
+        return when (style) {
+            PromptStyle.HY_MT,
+            PromptStyle.TRANSLATE_GEMMA -> """
+                Translate the OCR lines from ${source.displayName} to ${target.displayName}.
+                Preserve every line ID exactly, for example [L1].
+                Return one translated line for each input line.
+                Do not add explanations or extra lines.
+                $text
+            """.trimIndent()
         }
     }
 
