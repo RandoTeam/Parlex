@@ -59,6 +59,7 @@ private data class PaintBlock(
 private data class CaptureOcrPass(
     val result: OcrResult,
     val sourceLanguage: Language,
+    val ocrLanguage: Language,
     val attempts: List<CaptureOcrAttempt>
 )
 
@@ -66,6 +67,12 @@ private data class CaptureOcrAttempt(
     val language: Language,
     val result: OcrResult,
     val score: CaptureOcrScore
+)
+
+private data class LiveOcrPass(
+    val result: OcrResult,
+    val sourceLanguage: Language,
+    val ocrLanguage: Language
 )
 
 private data class CaptureOcrScore(
@@ -102,8 +109,10 @@ private data class CaptureDebugAttempt(
 
 private data class CaptureDebugSnapshot(
     val createdAtMs: Long,
+    val requestedSourceAuto: Boolean,
     val requestedSourceLanguage: Language,
     val effectiveSourceLanguage: Language,
+    val selectedOcrLanguage: Language,
     val targetLanguage: Language,
     val ocrBackend: String,
     val ocrLanguage: String,
@@ -133,6 +142,8 @@ enum class CameraQualityWarning {
 data class CameraUiState(
     val mode: CameraMode = CameraMode.LIVE,
     val sourceLanguage: Language = Language.RUSSIAN,
+    val isSourceAuto: Boolean = false,
+    val detectedSourceLanguage: Language? = null,
     val targetLanguage: Language = Language.ENGLISH,
     val liveBlocks: List<TranslatedBlock> = emptyList(),
     val captureStatus: CaptureStatus = CaptureStatus.IDLE,
@@ -184,6 +195,7 @@ class CameraViewModel @Inject constructor(
     }
     private var frameCounter = 0
     private var lastLiveFrameStartedAtMs = 0L
+    private var lastAutoLiveSourceLanguage: Language? = null
 
     init {
         // Observe ML Kit translation readiness
@@ -214,7 +226,26 @@ class CameraViewModel @Inject constructor(
     }
 
     fun setSourceLanguage(lang: Language) {
-        _uiState.update { it.copy(sourceLanguage = lang) }
+        _uiState.update {
+            it.copy(
+                sourceLanguage = lang,
+                isSourceAuto = false,
+                detectedSourceLanguage = null
+            )
+        }
+        resetModeVisuals()
+        prepareNmt()
+    }
+
+    fun setSourceAuto() {
+        _uiState.update {
+            it.copy(
+                isSourceAuto = true,
+                detectedSourceLanguage = null,
+                isNmtReady = false,
+                nmtError = null
+            )
+        }
         resetModeVisuals()
         prepareNmt()
     }
@@ -226,6 +257,8 @@ class CameraViewModel @Inject constructor(
     }
 
     fun swapLanguages() {
+        if (_uiState.value.isSourceAuto) return
+
         _uiState.update {
             it.copy(sourceLanguage = it.targetLanguage, targetLanguage = it.sourceLanguage)
         }
@@ -247,6 +280,7 @@ class CameraViewModel @Inject constructor(
                 captureMessage = null,
                 imageWidth = 0,
                 imageHeight = 0,
+                detectedSourceLanguage = null,
                 qualityWarnings = emptyList()
             )
         }
@@ -255,6 +289,10 @@ class CameraViewModel @Inject constructor(
     private fun prepareNmt() {
         viewModelScope.launch(Dispatchers.IO) {
             val state = _uiState.value
+            if (state.isSourceAuto) {
+                _uiState.update { it.copy(isNmtReady = false, nmtError = null) }
+                return@launch
+            }
             val ok = cameraTranslateEngine.prepare(state.sourceLanguage.code, state.targetLanguage.code)
             if (!ok) {
                 _uiState.update { it.copy(nmtError = "Модель перевода не скачана") }
@@ -329,15 +367,17 @@ class CameraViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val state = _uiState.value
-                val ocrResult = ocrEngine.recognize(imageProxy, state.sourceLanguage.code)
+                val liveOcr = recognizeLiveFrame(imageProxy, state)
+                val ocrResult = liveOcr.result
                 val rawLines = extractLiveLines(ocrResult)
+                requestCameraTranslateModel(liveOcr.sourceLanguage, state.targetLanguage)
                 val qualityWarnings = buildQualityWarnings(
                     ocrResult = ocrResult,
                     lineTexts = rawLines.map { it.text },
                     lineBoxes = rawLines.map { it.boundingBox },
-                    sourceLanguage = state.sourceLanguage,
-                    canTranslate = state.sourceLanguage.code == state.targetLanguage.code ||
-                        cameraTranslateEngine.isReady.value
+                    sourceLanguage = liveOcr.sourceLanguage,
+                    canTranslate = liveOcr.sourceLanguage.code == state.targetLanguage.code ||
+                        cameraTranslateEngine.isReadyFor(liveOcr.sourceLanguage.code, state.targetLanguage.code)
                 )
 
                 if (rawLines.isEmpty()) {
@@ -346,6 +386,11 @@ class CameraViewModel @Inject constructor(
                             liveBlocks = emptyList(),
                             imageWidth = ocrResult.imageWidth,
                             imageHeight = ocrResult.imageHeight,
+                            detectedSourceLanguage = if (state.isSourceAuto) {
+                                it.detectedSourceLanguage
+                            } else {
+                                null
+                            },
                             qualityWarnings = qualityWarnings
                         )
                     }
@@ -353,13 +398,18 @@ class CameraViewModel @Inject constructor(
                 }
 
                 val smoothedLines = smoothLiveLines(rawLines)
-                val translatedBlocks = translateLiveLines(smoothedLines)
+                val translatedBlocks = translateLiveLines(
+                    lines = smoothedLines,
+                    sourceLanguage = liveOcr.sourceLanguage,
+                    targetLanguage = state.targetLanguage
+                )
 
                 _uiState.update {
                     it.copy(
                         liveBlocks = translatedBlocks,
                         imageWidth = ocrResult.imageWidth,
                         imageHeight = ocrResult.imageHeight,
+                        detectedSourceLanguage = if (state.isSourceAuto) liveOcr.sourceLanguage else null,
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -369,6 +419,60 @@ class CameraViewModel @Inject constructor(
                 isLiveProcessing = false
             }
         }
+    }
+
+    private suspend fun recognizeLiveFrame(
+        imageProxy: androidx.camera.core.ImageProxy,
+        state: CameraUiState
+    ): LiveOcrPass {
+        if (!state.isSourceAuto) {
+            return LiveOcrPass(
+                result = ocrEngine.recognize(imageProxy, state.sourceLanguage.code),
+                sourceLanguage = state.sourceLanguage,
+                ocrLanguage = state.sourceLanguage
+            )
+        }
+
+        val bitmap = try {
+            ocrEngine.imageProxyToUprightBitmap(imageProxy)
+        } finally {
+            imageProxy.close()
+        } ?: return LiveOcrPass(
+            result = OcrResult(emptyList(), 0, 0),
+            sourceLanguage = lastAutoLiveSourceLanguage ?: Language.ENGLISH,
+            ocrLanguage = lastAutoLiveSourceLanguage ?: Language.ENGLISH
+        )
+
+        return recognizeAutoLiveBitmap(bitmap)
+    }
+
+    private suspend fun recognizeAutoLiveBitmap(bitmap: Bitmap): LiveOcrPass {
+        val primaryLanguage = lastAutoLiveSourceLanguage ?: Language.ENGLISH
+        val attempts = mutableListOf(recognizeCaptureAttempt(bitmap, primaryLanguage))
+        val primaryScore = attempts.first().score
+        val fallbackLanguage = when {
+            primaryScore.isStrongForExpectedScript -> null
+            expectedScriptForLanguage(primaryLanguage.code) == OcrTextScript.LATIN -> Language.RUSSIAN
+            primaryLanguage == Language.RUSSIAN -> Language.ENGLISH
+            else -> Language.ENGLISH
+        }
+
+        if (fallbackLanguage != null && fallbackLanguage != primaryLanguage) {
+            attempts += recognizeCaptureAttempt(bitmap, fallbackLanguage)
+        }
+
+        val selectedAttempt = selectAutoOcrAttempt(attempts)
+        val detectedLanguage = detectSourceLanguageFromText(
+            selectedAttempt.result,
+            selectedAttempt.language
+        )
+        lastAutoLiveSourceLanguage = detectedLanguage
+
+        return LiveOcrPass(
+            result = selectedAttempt.result,
+            sourceLanguage = detectedLanguage,
+            ocrLanguage = selectedAttempt.language
+        )
     }
 
     private fun extractLiveLines(ocrResult: OcrResult): List<OcrLine> =
@@ -426,18 +530,60 @@ class CameraViewModel @Inject constructor(
         liveTranslationCache.clear()
         nextLiveTrackId = 0
         lastLiveFrameStartedAtMs = 0L
+        lastAutoLiveSourceLanguage = null
     }
 
-    private suspend fun translateLiveLines(lines: List<OcrLine>): List<TranslatedBlock> {
-        if (!cameraTranslateEngine.isReady.value) {
+    private fun requestCameraTranslateModel(sourceLanguage: Language, targetLanguage: Language) {
+        if (sourceLanguage.code == targetLanguage.code) return
+        if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
+        if (cameraTranslateEngine.isPreparingFor(sourceLanguage.code, targetLanguage.code)) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = cameraTranslateEngine.prepare(sourceLanguage.code, targetLanguage.code)
+            _uiState.update {
+                if (ok) {
+                    it.copy(nmtError = null)
+                } else {
+                    it.copy(nmtError = "Модель перевода не скачана")
+                }
+            }
+        }
+    }
+
+    private suspend fun prepareCaptureTranslateModel(sourceLanguage: Language, targetLanguage: Language) {
+        if (sourceLanguage.code == targetLanguage.code) return
+        if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
+        if (cameraTranslateEngine.isPreparingFor(sourceLanguage.code, targetLanguage.code)) return
+
+        val ok = cameraTranslateEngine.prepare(sourceLanguage.code, targetLanguage.code)
+        _uiState.update {
+            if (ok) {
+                it.copy(nmtError = null)
+            } else {
+                it.copy(nmtError = "Модель перевода не скачана")
+            }
+        }
+    }
+
+    private suspend fun translateLiveLines(
+        lines: List<OcrLine>,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): List<TranslatedBlock> {
+        if (sourceLanguage.code == targetLanguage.code) {
+            return lines.map { line ->
+                TranslatedBlock(line.text, line.text, line.boundingBox)
+            }
+        }
+
+        if (!cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
             return lines.map { line ->
                 TranslatedBlock(line.text, "", line.boundingBox)
             }
         }
 
-        val state = _uiState.value
         val cacheKeys = lines.map {
-            liveTranslationCacheKey(state.sourceLanguage.code, state.targetLanguage.code, it.text)
+            liveTranslationCacheKey(sourceLanguage.code, targetLanguage.code, it.text)
         }
         val translationsByKey = mutableMapOf<String, String>()
         val missingTexts = mutableListOf<String>()
@@ -488,6 +634,7 @@ class CameraViewModel @Inject constructor(
             processCaptureBitmap(
                 bitmap = workBitmap,
                 sourceLanguage = state.sourceLanguage,
+                sourceAuto = state.isSourceAuto,
                 targetLanguage = state.targetLanguage
             )
         }
@@ -527,10 +674,11 @@ class CameraViewModel @Inject constructor(
     private suspend fun processCaptureBitmap(
         bitmap: Bitmap,
         sourceLanguage: Language,
+        sourceAuto: Boolean,
         targetLanguage: Language
     ) {
         try {
-            val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage)
+            val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage, sourceAuto)
             val ocrResult = captureOcr.result
             val effectiveSourceLanguage = captureOcr.sourceLanguage
             val rawCaptureLines = extractRawCaptureLines(ocrResult)
@@ -541,13 +689,15 @@ class CameraViewModel @Inject constructor(
                 sourceLanguage = effectiveSourceLanguage,
                 canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
                     translationEngine.isLoaded ||
-                    cameraTranslateEngine.isReady.value
+                    cameraTranslateEngine.isReadyFor(effectiveSourceLanguage.code, targetLanguage.code)
             )
 
             if (ocrResult.blocks.isEmpty()) {
                 rememberCaptureDebugSnapshot(
                     sourceLanguage,
+                    sourceAuto,
                     effectiveSourceLanguage,
+                    captureOcr.ocrLanguage,
                     targetLanguage,
                     ocrResult,
                     captureOcr.attempts,
@@ -558,6 +708,7 @@ class CameraViewModel @Inject constructor(
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = "Текст не найден",
+                        detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -570,7 +721,9 @@ class CameraViewModel @Inject constructor(
             if (allLines.isEmpty()) {
                 rememberCaptureDebugSnapshot(
                     sourceLanguage,
+                    sourceAuto,
                     effectiveSourceLanguage,
+                    captureOcr.ocrLanguage,
                     targetLanguage,
                     ocrResult,
                     captureOcr.attempts,
@@ -581,6 +734,7 @@ class CameraViewModel @Inject constructor(
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = "Подходящие строки не найдены",
+                        detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -589,10 +743,24 @@ class CameraViewModel @Inject constructor(
 
             _uiState.update { it.copy(captureMessage = "Перевожу найденные строки") }
 
+            if (!translationEngine.isLoaded) {
+                prepareCaptureTranslateModel(effectiveSourceLanguage, targetLanguage)
+            }
+            val finalQualityWarnings = buildQualityWarnings(
+                ocrResult = ocrResult,
+                lineTexts = rawCaptureLines.map { it.text },
+                lineBoxes = rawCaptureLines.map { it.box },
+                sourceLanguage = effectiveSourceLanguage,
+                canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
+                    translationEngine.isLoaded ||
+                    cameraTranslateEngine.isReadyFor(effectiveSourceLanguage.code, targetLanguage.code)
+            )
             val translatedParts = translateCaptureBlocks(captureBlocks, effectiveSourceLanguage, targetLanguage)
             rememberCaptureDebugSnapshot(
                 sourceLanguage,
+                sourceAuto,
                 effectiveSourceLanguage,
+                captureOcr.ocrLanguage,
                 targetLanguage,
                 ocrResult,
                 captureOcr.attempts,
@@ -606,7 +774,8 @@ class CameraViewModel @Inject constructor(
                     paintedBitmap = painted,
                     captureStatus = CaptureStatus.READY,
                     captureMessage = null,
-                    qualityWarnings = qualityWarnings
+                    detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
+                    qualityWarnings = finalQualityWarnings
                 )
             }
         } catch (e: Exception) {
@@ -623,8 +792,13 @@ class CameraViewModel @Inject constructor(
 
     private suspend fun recognizeCaptureBitmap(
         bitmap: Bitmap,
-        sourceLanguage: Language
+        sourceLanguage: Language,
+        sourceAuto: Boolean
     ): CaptureOcrPass {
+        if (sourceAuto) {
+            return recognizeAutoCaptureBitmap(bitmap)
+        }
+
         val attempts = mutableListOf(recognizeCaptureAttempt(bitmap, sourceLanguage))
         val triedCodes = mutableSetOf(sourceLanguage.code)
         for (fallbackCode in captureOcrFallbackCodes(sourceLanguage, attempts.first().score)) {
@@ -642,7 +816,35 @@ class CameraViewModel @Inject constructor(
                     "score=${selectedAttempt.score.selectionScore}, lines=${selectedAttempt.score.lineCount}"
             )
         }
-        return CaptureOcrPass(selectedAttempt.result, selectedAttempt.language, attempts)
+        return CaptureOcrPass(
+            result = selectedAttempt.result,
+            sourceLanguage = selectedAttempt.language,
+            ocrLanguage = selectedAttempt.language,
+            attempts = attempts
+        )
+    }
+
+    private suspend fun recognizeAutoCaptureBitmap(bitmap: Bitmap): CaptureOcrPass {
+        val attempts = AUTO_CAPTURE_OCR_LANGUAGES.map { language ->
+            recognizeCaptureAttempt(bitmap, language)
+        }
+        val selectedAttempt = selectAutoOcrAttempt(attempts)
+        val detectedLanguage = detectSourceLanguageFromText(
+            selectedAttempt.result,
+            selectedAttempt.language
+        )
+        Log.i(
+            "CameraVM",
+            "Auto capture OCR selected ${selectedAttempt.language.code}, source=${detectedLanguage.code}, " +
+                "score=${selectedAttempt.score.selectionScore}, lines=${selectedAttempt.score.lineCount}"
+        )
+
+        return CaptureOcrPass(
+            result = selectedAttempt.result,
+            sourceLanguage = detectedLanguage,
+            ocrLanguage = selectedAttempt.language,
+            attempts = attempts
+        )
     }
 
     private suspend fun recognizeCaptureAttempt(
@@ -687,6 +889,68 @@ class CameraViewModel @Inject constructor(
             score
         } ?: attempts.first()
     }
+
+    private fun selectAutoOcrAttempt(attempts: List<CaptureOcrAttempt>): CaptureOcrAttempt =
+        attempts.maxByOrNull { attempt ->
+            var score = attempt.score.selectionScore
+            if (attempt.score.isStrongForExpectedScript) score += 18f else score -= 10f
+            if (attempt.language == Language.ENGLISH) score += 6f
+            score
+        } ?: attempts.first()
+
+    private fun detectSourceLanguageFromText(
+        result: OcrResult,
+        ocrLanguage: Language
+    ): Language {
+        val text = extractRawCaptureLines(result).joinToString(" ") { it.text }
+        return when (expectedScriptForLanguage(ocrLanguage.code)) {
+            OcrTextScript.LATIN -> guessLatinLanguage(text)
+            OcrTextScript.CJK -> guessCjkLanguage(text)
+            OcrTextScript.CYRILLIC -> guessCyrillicLanguage(text)
+            else -> ocrLanguage
+        }
+    }
+
+    private fun guessLatinLanguage(text: String): Language {
+        if (text.isBlank()) return Language.ENGLISH
+
+        val lowerText = text.lowercase(Locale.ROOT)
+        val scores = linkedMapOf(
+            Language.ENGLISH to languageHeuristicScore(lowerText, ENGLISH_HINTS, ENGLISH_CHARS),
+            Language.FRENCH to languageHeuristicScore(lowerText, FRENCH_HINTS, FRENCH_CHARS),
+            Language.GERMAN to languageHeuristicScore(lowerText, GERMAN_HINTS, GERMAN_CHARS),
+            Language.CZECH to languageHeuristicScore(lowerText, CZECH_HINTS, CZECH_CHARS),
+            Language.SPANISH to languageHeuristicScore(lowerText, SPANISH_HINTS, SPANISH_CHARS),
+            Language.PORTUGUESE to languageHeuristicScore(lowerText, PORTUGUESE_HINTS, PORTUGUESE_CHARS),
+            Language.POLISH to languageHeuristicScore(lowerText, POLISH_HINTS, POLISH_CHARS),
+            Language.TURKISH to languageHeuristicScore(lowerText, TURKISH_HINTS, TURKISH_CHARS),
+            Language.VIETNAMESE to languageHeuristicScore(lowerText, VIETNAMESE_HINTS, VIETNAMESE_CHARS)
+        )
+
+        return scores.maxByOrNull { it.value }?.takeIf { it.value > 0 }?.key ?: Language.ENGLISH
+    }
+
+    private fun languageHeuristicScore(
+        lowerText: String,
+        hints: Set<String>,
+        distinctiveChars: Set<Char>
+    ): Int {
+        val words = lowerText.split(Regex("""[^a-z\u00c0-\u024f\u1e00-\u1eff]+"""))
+            .filter { it.isNotBlank() }
+        val hintScore = words.count { it in hints } * 3
+        val charScore = lowerText.count { it in distinctiveChars } * 4
+        return hintScore + charScore
+    }
+
+    private fun guessCjkLanguage(text: String): Language =
+        when {
+            text.any { it in '\uAC00'..'\uD7AF' } -> Language.KOREAN
+            text.any { it in '\u3040'..'\u30FF' } -> Language.JAPANESE
+            else -> Language.CHINESE_SIMPLIFIED
+        }
+
+    private fun guessCyrillicLanguage(text: String): Language =
+        if (text.any { it in UKRAINIAN_CHARS }) Language.UKRAINIAN else Language.RUSSIAN
 
     private fun scoreCaptureOcrResult(result: OcrResult, languageCode: String): CaptureOcrScore {
         val expectedScript = expectedScriptForLanguage(languageCode)
@@ -930,9 +1194,13 @@ class CameraViewModel @Inject constructor(
                 translatedLines
             } catch (e: Exception) {
                 Log.e("CameraVM", "Structured HY-MT failed, falling back to ML Kit: ${e.message}")
-                if (cameraTranslateEngine.isReady.value) cameraTranslateEngine.translateLines(texts) else texts
+                if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+                    cameraTranslateEngine.translateLines(texts)
+                } else {
+                    texts
+                }
             }
-        } else if (cameraTranslateEngine.isReady.value) {
+        } else if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
             cameraTranslateEngine.translateLines(texts)
         } else {
             texts
@@ -1022,7 +1290,9 @@ class CameraViewModel @Inject constructor(
 
     private fun rememberCaptureDebugSnapshot(
         requestedSourceLanguage: Language,
+        requestedSourceAuto: Boolean,
         effectiveSourceLanguage: Language,
+        selectedOcrLanguage: Language,
         targetLanguage: Language,
         ocrResult: OcrResult,
         attempts: List<CaptureOcrAttempt>,
@@ -1031,11 +1301,13 @@ class CameraViewModel @Inject constructor(
     ) {
         lastCaptureDebugSnapshot = CaptureDebugSnapshot(
             createdAtMs = System.currentTimeMillis(),
+            requestedSourceAuto = requestedSourceAuto,
             requestedSourceLanguage = requestedSourceLanguage,
             effectiveSourceLanguage = effectiveSourceLanguage,
+            selectedOcrLanguage = selectedOcrLanguage,
             targetLanguage = targetLanguage,
-            ocrBackend = ocrEngine.backendNameFor(effectiveSourceLanguage.code),
-            ocrLanguage = ocrEngine.engineLanguageFor(effectiveSourceLanguage.code),
+            ocrBackend = ocrEngine.backendNameFor(selectedOcrLanguage.code),
+            ocrLanguage = ocrEngine.engineLanguageFor(selectedOcrLanguage.code),
             imageWidth = ocrResult.imageWidth,
             imageHeight = ocrResult.imageHeight,
             blocks = ocrResult.blocks,
@@ -1049,7 +1321,7 @@ class CameraViewModel @Inject constructor(
                     textLength = attempt.score.textLength,
                     expectedScriptRatio = attempt.score.expectedScriptRatio,
                     selectionScore = attempt.score.selectionScore,
-                    selected = attempt.language.code == effectiveSourceLanguage.code
+                    selected = attempt.language.code == selectedOcrLanguage.code
                 )
             },
             lines = lines.mapIndexed { index, line ->
@@ -1186,8 +1458,9 @@ class CameraViewModel @Inject constructor(
             .put(
                 "languages",
                 JSONObject()
-                    .put("requestedSource", requestedSourceLanguage.code)
+                    .put("requestedSource", if (requestedSourceAuto) "auto" else requestedSourceLanguage.code)
                     .put("effectiveSource", effectiveSourceLanguage.code)
+                    .put("selectedOcrSource", selectedOcrLanguage.code)
                     .put("target", targetLanguage.code)
             )
             .put(
@@ -1448,6 +1721,7 @@ class CameraViewModel @Inject constructor(
                 liveBlocks = emptyList(),
                 captureStatus = CaptureStatus.IDLE,
                 captureMessage = null,
+                detectedSourceLanguage = null,
                 qualityWarnings = emptyList()
             )
         }
@@ -1468,6 +1742,34 @@ private const val SCRIPT_MISMATCH_RATIO_THRESHOLD = 0.55f
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 450L
+
+private val AUTO_CAPTURE_OCR_LANGUAGES = listOf(
+    Language.ENGLISH,
+    Language.RUSSIAN,
+    Language.CHINESE_SIMPLIFIED,
+    Language.HINDI
+)
+
+private val ENGLISH_HINTS = setOf("the", "and", "of", "to", "in", "is", "for", "on", "with", "exit", "entry")
+private val FRENCH_HINTS = setOf("le", "la", "les", "des", "du", "et", "un", "une", "est", "pour", "avec", "sortie")
+private val GERMAN_HINTS = setOf("der", "die", "das", "und", "ist", "zu", "ein", "eine", "mit", "fur", "ausgang")
+private val CZECH_HINTS = setOf("je", "se", "na", "pro", "ze", "do", "nebo", "jako", "vstup")
+private val SPANISH_HINTS = setOf("el", "la", "los", "las", "de", "es", "para", "con", "una", "salida")
+private val PORTUGUESE_HINTS = setOf("os", "as", "de", "para", "com", "uma", "saida")
+private val POLISH_HINTS = setOf("na", "do", "jest", "dla", "oraz", "nie", "wejscie")
+private val TURKISH_HINTS = setOf("ve", "bir", "icin", "ile", "bu", "da", "de")
+private val VIETNAMESE_HINTS = setOf("va", "la", "cua", "cho", "mot", "voi", "khong")
+
+private val ENGLISH_CHARS = emptySet<Char>()
+private val FRENCH_CHARS = setOf('\u00e0', '\u00e2', '\u00e7', '\u00e8', '\u00e9', '\u00ea', '\u00eb', '\u00ee', '\u00ef', '\u00f4', '\u00f9', '\u00fb', '\u0153', '\u00e6')
+private val GERMAN_CHARS = setOf('\u00e4', '\u00f6', '\u00fc', '\u00df')
+private val CZECH_CHARS = setOf('\u00e1', '\u010d', '\u010f', '\u00e9', '\u011b', '\u00ed', '\u0148', '\u00f3', '\u0159', '\u0161', '\u0165', '\u00fa', '\u016f', '\u00fd', '\u017e')
+private val SPANISH_CHARS = setOf('\u00e1', '\u00e9', '\u00ed', '\u00f1', '\u00f3', '\u00fa', '\u00fc')
+private val PORTUGUESE_CHARS = setOf('\u00e1', '\u00e2', '\u00e3', '\u00e0', '\u00e7', '\u00e9', '\u00ea', '\u00ed', '\u00f3', '\u00f4', '\u00f5', '\u00fa')
+private val POLISH_CHARS = setOf('\u0105', '\u0107', '\u0119', '\u0142', '\u0144', '\u00f3', '\u015b', '\u017a', '\u017c')
+private val TURKISH_CHARS = setOf('\u00e7', '\u011f', '\u0131', '\u00f6', '\u015f', '\u00fc')
+private val VIETNAMESE_CHARS = setOf('\u0103', '\u00e2', '\u00ea', '\u00f4', '\u01a1', '\u01b0', '\u0111')
+private val UKRAINIAN_CHARS = setOf('\u0456', '\u0457', '\u0454', '\u0491', '\u0406', '\u0407', '\u0404', '\u0490')
 
 private data class LiveTextTrack(
     val id: Int,

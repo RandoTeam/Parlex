@@ -20,12 +20,16 @@ import com.translive.app.data.model.Language
 fun LanguagePickerSheet(
     selectedLanguage: Language,
     excludeLanguage: Language? = null,
+    autoOptionLabel: String? = null,
+    autoOptionDescription: String? = null,
+    isAutoSelected: Boolean = false,
+    onAutoSelected: (() -> Unit)? = null,
     onLanguageSelected: (Language) -> Unit,
     onDismiss: () -> Unit
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    val filteredLanguages = remember(searchQuery) {
+    val filteredLanguages = remember(searchQuery, excludeLanguage) {
         val all = Language.allLanguages.filter { it != excludeLanguage }
         if (searchQuery.isBlank()) {
             all
@@ -40,7 +44,7 @@ fun LanguagePickerSheet(
     }
 
     // Group: popular first, then rest
-    val popular = remember {
+    val popular = remember(excludeLanguage) {
         listOf(
             Language.ENGLISH, Language.RUSSIAN, Language.CHINESE_SIMPLIFIED,
             Language.JAPANESE, Language.KOREAN, Language.GERMAN,
@@ -77,6 +81,17 @@ fun LanguagePickerSheet(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
             ) {
+                if (searchQuery.isBlank() && autoOptionLabel != null && onAutoSelected != null) {
+                    item(key = "auto_language") {
+                        AutoLanguageItem(
+                            label = autoOptionLabel,
+                            description = autoOptionDescription,
+                            isSelected = isAutoSelected,
+                            onClick = onAutoSelected
+                        )
+                    }
+                }
+
                 // Popular section (only when no search)
                 if (searchQuery.isBlank()) {
                     item {
@@ -115,6 +130,49 @@ fun LanguagePickerSheet(
             }
         }
     }
+}
+
+@Composable
+private fun AutoLanguageItem(
+    label: String,
+    description: String?,
+    isSelected: Boolean,
+    onClick: () -> Unit
+) {
+    ListItem(
+        headlineContent = {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge
+            )
+        },
+        supportingContent = {
+            if (description != null) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        trailingContent = {
+            if (isSelected) {
+                Icon(
+                    Icons.Filled.Check,
+                    contentDescription = "Selected",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 4.dp),
+        colors = ListItemDefaults.colors(
+            containerColor = if (isSelected)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            else MaterialTheme.colorScheme.surface
+        )
+    )
 }
 
 @Composable

@@ -93,6 +93,9 @@ class CameraTranslateEngine @Inject constructor() {
         if (sourceCode == currentSourceLang && targetCode == currentTargetLang && _isReady.value) {
             return true
         }
+        if (sourceCode == currentSourceLang && targetCode == currentTargetLang && _isDownloading.value) {
+            return false
+        }
 
         val srcLang = toMlKitLang(sourceCode)
         val tgtLang = toMlKitLang(targetCode)
@@ -139,6 +142,17 @@ class CameraTranslateEngine @Inject constructor() {
                 }
         }
     }
+
+    fun isReadyFor(sourceCode: String, targetCode: String): Boolean =
+        sourceCode == currentSourceLang &&
+            targetCode == currentTargetLang &&
+            _isReady.value &&
+            currentTranslator != null
+
+    fun isPreparingFor(sourceCode: String, targetCode: String): Boolean =
+        sourceCode == currentSourceLang &&
+            targetCode == currentTargetLang &&
+            _isDownloading.value
 
     /**
      * Translate text. Fast — ~20ms for a sentence.

@@ -330,6 +330,11 @@ fun CameraScreen(
         runCatching { CaptureFlashMode.valueOf(flashModeName) }
             .getOrDefault(CaptureFlashMode.OFF)
     }
+    val sourceChipLabel = if (uiState.isSourceAuto) {
+        uiState.detectedSourceLanguage?.let { "Auto • ${it.flag} ${it.nativeName}" } ?: "Auto"
+    } else {
+        "${uiState.sourceLanguage.flag} ${uiState.sourceLanguage.nativeName}"
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -599,11 +604,20 @@ fun CameraScreen(
                     ) {
                         AssistChip(
                             onClick = { showSourcePicker = true },
-                            label = { Text("${uiState.sourceLanguage.flag} ${uiState.sourceLanguage.nativeName}") },
+                            label = {
+                                Text(
+                                    sourceChipLabel,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
                         )
-                        IconButton(onClick = { viewModel.swapLanguages() }) {
+                        IconButton(
+                            onClick = { viewModel.swapLanguages() },
+                            enabled = !uiState.isSourceAuto
+                        ) {
                             Icon(Icons.Filled.SwapHoriz, "Swap")
                         }
                         AssistChip(
@@ -626,6 +640,10 @@ fun CameraScreen(
         LanguagePickerSheet(
             selectedLanguage = uiState.sourceLanguage,
             excludeLanguage = uiState.targetLanguage,
+            autoOptionLabel = "Auto",
+            autoOptionDescription = "Определять язык по кадру",
+            isAutoSelected = uiState.isSourceAuto,
+            onAutoSelected = { viewModel.setSourceAuto(); showSourcePicker = false },
             onLanguageSelected = { viewModel.setSourceLanguage(it); showSourcePicker = false },
             onDismiss = { showSourcePicker = false }
         )
@@ -633,7 +651,7 @@ fun CameraScreen(
     if (showTargetPicker) {
         LanguagePickerSheet(
             selectedLanguage = uiState.targetLanguage,
-            excludeLanguage = uiState.sourceLanguage,
+            excludeLanguage = if (uiState.isSourceAuto) null else uiState.sourceLanguage,
             onLanguageSelected = { viewModel.setTargetLanguage(it); showTargetPicker = false },
             onDismiss = { showTargetPicker = false }
         )
