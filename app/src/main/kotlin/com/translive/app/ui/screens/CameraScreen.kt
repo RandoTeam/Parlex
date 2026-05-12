@@ -1,12 +1,16 @@
 package com.translive.app.ui.screens
 
 import android.Manifest
+import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.Surface as AndroidSurface
+import androidx.camera.camera2.interop.Camera2CameraInfo
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
+import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
@@ -23,13 +27,16 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,6 +48,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
@@ -65,6 +73,210 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
 
+private const val CAMERA_PREFS = "parlex_camera"
+private const val PREF_SELECTED_CAMERA_ID = "selected_camera_id"
+
+private data class CameraLensOption(
+    val id: String,
+    val selector: CameraSelector,
+    val lensFacing: Int,
+    val shortLabel: String,
+    val contentDescription: String,
+    val hasFlash: Boolean
+)
+
+private enum class CaptureFlashMode {
+    OFF, AUTO, ON
+}
+
+private data class CameraLensCandidate(
+    val id: String,
+    val selector: CameraSelector,
+    val lensFacing: Int,
+    val focalLengthMm: Float?,
+    val hasFlash: Boolean
+)
+
+private fun CaptureFlashMode.next(): CaptureFlashMode = when (this) {
+    CaptureFlashMode.OFF -> CaptureFlashMode.AUTO
+    CaptureFlashMode.AUTO -> CaptureFlashMode.ON
+    CaptureFlashMode.ON -> CaptureFlashMode.OFF
+}
+
+private fun CaptureFlashMode.toImageCaptureFlashMode(): Int = when (this) {
+    CaptureFlashMode.OFF -> ImageCapture.FLASH_MODE_OFF
+    CaptureFlashMode.AUTO -> ImageCapture.FLASH_MODE_AUTO
+    CaptureFlashMode.ON -> ImageCapture.FLASH_MODE_ON
+}
+
+private fun CaptureFlashMode.icon(): ImageVector = when (this) {
+    CaptureFlashMode.OFF -> Icons.Filled.FlashOff
+    CaptureFlashMode.AUTO -> Icons.Filled.FlashAuto
+    CaptureFlashMode.ON -> Icons.Filled.FlashOn
+}
+
+private fun CaptureFlashMode.contentDescription(): String = when (this) {
+    CaptureFlashMode.OFF -> "Flash off"
+    CaptureFlashMode.AUTO -> "Flash auto"
+    CaptureFlashMode.ON -> "Flash on"
+}
+
+private fun buildCameraLensOptions(cameraInfos: List<CameraInfo>): List<CameraLensOption> {
+    val candidates = cameraInfos
+        .flatMap { it.toCameraLensCandidates() }
+        .distinctBy { it.id }
+        .sortedWith(
+            compareBy<CameraLensCandidate> { cameraLensSortOrder(it.lensFacing) }
+                .thenBy { it.focalLengthMm ?: Float.MAX_VALUE }
+                .thenBy { it.id }
+        )
+
+    if (candidates.isEmpty()) return emptyList()
+
+    val backMainFocal = candidates
+        .filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+        .mapNotNull { it.focalLengthMm }
+        .minByOrNull { kotlin.math.abs(it - MAIN_CAMERA_FOCAL_LENGTH_MM) }
+
+    val labelCounts = mutableMapOf<String, Int>()
+    return candidates.mapIndexed { index, candidate ->
+        val baseLabel = candidate.toCameraLabel(backMainFocal, index)
+        val seen = labelCounts.getOrDefault(baseLabel, 0)
+        labelCounts[baseLabel] = seen + 1
+        val label = if (seen == 0) baseLabel else "$baseLabel ${seen + 1}"
+        CameraLensOption(
+            id = candidate.id,
+            selector = candidate.selector,
+            lensFacing = candidate.lensFacing,
+            shortLabel = label,
+            contentDescription = candidate.toCameraContentDescription(label),
+            hasFlash = candidate.hasFlash
+        )
+    }
+}
+
+private fun preferredCameraOption(
+    options: List<CameraLensOption>,
+    selectedCameraId: String?
+): CameraLensOption? =
+    options.firstOrNull { it.id == selectedCameraId }
+        ?: options.firstOrNull {
+            it.lensFacing == CameraSelector.LENS_FACING_BACK && it.shortLabel == "1x"
+        }
+        ?: options.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+        ?: options.firstOrNull()
+
+private fun CameraInfo.toCameraLensCandidates(): List<CameraLensCandidate> {
+    val camera2Info = runCatching { Camera2CameraInfo.from(this) }.getOrNull() ?: return emptyList()
+    val cameraId = runCatching { camera2Info.cameraId }.getOrNull() ?: return emptyList()
+    val lensFacing = runCatching { this.lensFacing }.getOrDefault(CameraSelector.LENS_FACING_UNKNOWN)
+    val hasFlash = runCatching { hasFlashUnit() }.getOrDefault(false)
+    val logicalCandidate = CameraLensCandidate(
+        id = "logical:$cameraId",
+        selector = cameraSelectorForCameraId(cameraId),
+        lensFacing = lensFacing,
+        focalLengthMm = camera2Info.focalLengthMm(),
+        hasFlash = hasFlash
+    )
+    val physicalCandidates = runCatching { physicalCameraInfos }
+        .getOrDefault(emptySet())
+        .takeIf { it.size > 1 }
+        ?.mapNotNull { physicalInfo ->
+            val physicalCamera2Info = runCatching { Camera2CameraInfo.from(physicalInfo) }
+                .getOrNull()
+                ?: return@mapNotNull null
+            val physicalCameraId = runCatching { physicalCamera2Info.cameraId }
+                .getOrNull()
+                ?: return@mapNotNull null
+            CameraLensCandidate(
+                id = "physical:$cameraId:$physicalCameraId",
+                selector = cameraSelectorForPhysicalCameraId(cameraId, physicalCameraId),
+                lensFacing = lensFacing,
+                focalLengthMm = physicalCamera2Info.focalLengthMm(),
+                hasFlash = hasFlash
+            )
+        }
+        .orEmpty()
+
+    return physicalCandidates.ifEmpty { listOf(logicalCandidate) }
+}
+
+private fun cameraSelectorForCameraId(cameraId: String): CameraSelector =
+    CameraSelector.Builder()
+        .addCameraFilter { cameraInfos ->
+            cameraInfos.filter { cameraInfo ->
+                runCatching { Camera2CameraInfo.from(cameraInfo).cameraId == cameraId }
+                    .getOrDefault(false)
+            }
+        }
+        .build()
+
+private fun cameraSelectorForPhysicalCameraId(
+    logicalCameraId: String,
+    physicalCameraId: String
+): CameraSelector =
+    CameraSelector.Builder()
+        .addCameraFilter { cameraInfos ->
+            cameraInfos.filter { cameraInfo ->
+                runCatching { Camera2CameraInfo.from(cameraInfo).cameraId == logicalCameraId }
+                    .getOrDefault(false)
+            }
+        }
+        .setPhysicalCameraId(physicalCameraId)
+        .build()
+
+private fun Camera2CameraInfo.focalLengthMm(): Float? =
+    getCameraCharacteristic(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+        ?.filter { it > 0f }
+        ?.minOrNull()
+
+private fun cameraLensSortOrder(lensFacing: Int): Int = when (lensFacing) {
+    CameraSelector.LENS_FACING_BACK -> 0
+    CameraSelector.LENS_FACING_FRONT -> 1
+    else -> 2
+}
+
+private fun CameraLensCandidate.toCameraLabel(backMainFocal: Float?, index: Int): String =
+    when (lensFacing) {
+        CameraSelector.LENS_FACING_BACK -> {
+            val ratio = if (focalLengthMm != null && backMainFocal != null && backMainFocal > 0f) {
+                focalLengthMm / backMainFocal
+            } else {
+                null
+            }
+            when {
+                ratio == null -> "Back ${index + 1}"
+                ratio < 0.72f -> "0.5x"
+                ratio < 0.9f -> "0.8x"
+                ratio < 1.35f -> "1x"
+                ratio < 1.75f -> "1.5x"
+                ratio < 2.5f -> "2x"
+                ratio < 3.5f -> "3x"
+                else -> "${formatZoomRatio(ratio)}x"
+            }
+        }
+        CameraSelector.LENS_FACING_FRONT -> "Front"
+        else -> "Cam ${index + 1}"
+    }
+
+private fun CameraLensCandidate.toCameraContentDescription(label: String): String =
+    when (lensFacing) {
+        CameraSelector.LENS_FACING_BACK -> "Use back camera $label"
+        CameraSelector.LENS_FACING_FRONT -> "Use front camera"
+        else -> "Use camera $label"
+    }
+
+private fun formatZoomRatio(value: Float): String {
+    val rounded = kotlin.math.round(value * 10f) / 10f
+    return if (rounded % 1f == 0f) {
+        rounded.toInt().toString()
+    } else {
+        rounded.toString()
+    }
+}
+
+private const val MAIN_CAMERA_FOCAL_LENGTH_MM = 4.2f
+
 @OptIn(ExperimentalMaterial3Api::class)
 @androidx.camera.core.ExperimentalGetImage
 @Composable
@@ -78,9 +290,22 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    val cameraPrefs = remember(context) {
+        context.getSharedPreferences(CAMERA_PREFS, Context.MODE_PRIVATE)
+    }
 
     var showSourcePicker by remember { mutableStateOf(false) }
     var showTargetPicker by remember { mutableStateOf(false) }
+    var cameraOptions by remember { mutableStateOf<List<CameraLensOption>>(emptyList()) }
+    var selectedCameraId by rememberSaveable {
+        mutableStateOf(cameraPrefs.getString(PREF_SELECTED_CAMERA_ID, null))
+    }
+    var torchEnabled by rememberSaveable { mutableStateOf(false) }
+    var flashModeName by rememberSaveable { mutableStateOf(CaptureFlashMode.OFF.name) }
+    val captureFlashMode = remember(flashModeName) {
+        runCatching { CaptureFlashMode.valueOf(flashModeName) }
+            .getOrDefault(CaptureFlashMode.OFF)
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -96,6 +321,14 @@ fun CameraScreen(
 
     var captureRequest by remember { mutableStateOf<(() -> Unit)?>(null) }
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
+
+    LaunchedEffect(cameraOptions, selectedCameraId) {
+        val selectedOption = cameraOptions.firstOrNull { it.id == selectedCameraId }
+        if (selectedOption != null && !selectedOption.hasFlash) {
+            torchEnabled = false
+            flashModeName = CaptureFlashMode.OFF.name
+        }
+    }
 
     LaunchedEffect(focusPoint) {
         if (focusPoint != null) {
@@ -142,11 +375,39 @@ fun CameraScreen(
                     CameraMode.LIVE -> {
                         LiveCameraView(
                             viewModel = viewModel,
+                            selectedCameraId = selectedCameraId,
+                            torchEnabled = torchEnabled,
+                            captureFlashMode = captureFlashMode,
                             onCaptureReady = { captureRequest = it },
+                            onCameraOptionsChanged = { options, resolvedCameraId ->
+                                cameraOptions = options
+                                if (resolvedCameraId != null && resolvedCameraId != selectedCameraId) {
+                                    selectedCameraId = resolvedCameraId
+                                    cameraPrefs.edit()
+                                        .putString(PREF_SELECTED_CAMERA_ID, resolvedCameraId)
+                                        .apply()
+                                }
+                            },
                             onFocusPoint = { focusPoint = it }
                         )
 
                         CameraBetaBadge()
+                        CameraHardwareControls(
+                            cameraOptions = cameraOptions,
+                            selectedCameraId = selectedCameraId,
+                            torchEnabled = torchEnabled,
+                            captureFlashMode = captureFlashMode,
+                            enabled = !uiState.isCaptureProcessing,
+                            onCameraSelected = { cameraId ->
+                                selectedCameraId = cameraId
+                                torchEnabled = false
+                                cameraPrefs.edit()
+                                    .putString(PREF_SELECTED_CAMERA_ID, cameraId)
+                                    .apply()
+                            },
+                            onTorchToggle = { torchEnabled = !torchEnabled },
+                            onFlashModeChange = { flashModeName = it.name }
+                        )
 
                         // Live translation overlay
                         if (uiState.liveBlocks.isNotEmpty()) {
@@ -319,6 +580,87 @@ private fun BoxScope.CameraBetaBadge() {
 }
 
 @Composable
+private fun BoxScope.CameraHardwareControls(
+    cameraOptions: List<CameraLensOption>,
+    selectedCameraId: String?,
+    torchEnabled: Boolean,
+    captureFlashMode: CaptureFlashMode,
+    enabled: Boolean,
+    onCameraSelected: (String) -> Unit,
+    onTorchToggle: () -> Unit,
+    onFlashModeChange: (CaptureFlashMode) -> Unit
+) {
+    val selectedCamera = cameraOptions.firstOrNull { it.id == selectedCameraId }
+    val hasFlash = selectedCamera?.hasFlash == true
+
+    Surface(
+        modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(12.dp),
+        color = Color.Black.copy(alpha = 0.56f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (cameraOptions.size > 1) {
+                cameraOptions.forEach { option ->
+                    FilterChip(
+                        selected = option.id == selectedCameraId,
+                        onClick = { onCameraSelected(option.id) },
+                        label = { Text(option.shortLabel) },
+                        enabled = enabled,
+                        modifier = Modifier.height(34.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            containerColor = Color.Transparent,
+                            labelColor = Color.White,
+                            selectedContainerColor = Color.White.copy(alpha = 0.22f),
+                            selectedLabelColor = Color.White,
+                            disabledContainerColor = Color.Transparent,
+                            disabledLabelColor = Color.White.copy(alpha = 0.38f)
+                        )
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onTorchToggle,
+                enabled = enabled && hasFlash,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = if (torchEnabled) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                    contentDescription = if (torchEnabled) "Выключить фонарь" else "Включить фонарь",
+                    tint = if (torchEnabled && hasFlash) Color(0xFFFFD54F) else Color.White
+                )
+            }
+
+            IconButton(
+                onClick = { onFlashModeChange(captureFlashMode.next()) },
+                enabled = enabled && hasFlash,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = captureFlashMode.icon(),
+                    contentDescription = captureFlashMode.contentDescription(),
+                    tint = if (captureFlashMode != CaptureFlashMode.OFF && hasFlash) {
+                        Color(0xFFFFD54F)
+                    } else {
+                        Color.White
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun BoxScope.CameraCaptureStatusBadge(
     status: CaptureStatus,
     message: String?
@@ -404,7 +746,11 @@ private fun BoxScope.FocusReticle(focusPoint: Offset?) {
 @Composable
 private fun LiveCameraView(
     viewModel: CameraViewModel,
+    selectedCameraId: String?,
+    torchEnabled: Boolean,
+    captureFlashMode: CaptureFlashMode,
     onCaptureReady: ((() -> Unit)?) -> Unit,
+    onCameraOptionsChanged: (List<CameraLensOption>, String?) -> Unit,
     onFocusPoint: (Offset) -> Unit
 ) {
     val context = LocalContext.current
@@ -413,6 +759,7 @@ private fun LiveCameraView(
     val boundCamera = remember { AtomicReference<Camera?>(null) }
     val imageCaptureRef = remember { AtomicReference<ImageCapture?>(null) }
     val isTakingPicture = remember { AtomicBoolean(false) }
+    var currentCamera by remember { mutableStateOf<Camera?>(null) }
     val analysisResolutionSelector = remember {
         ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
@@ -437,13 +784,14 @@ private fun LiveCameraView(
 
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
 
-    DisposableEffect(previewView) {
+    DisposableEffect(previewView, captureFlashMode) {
         val capture: () -> Unit = {
             val imageCapture = imageCaptureRef.get()
             if (imageCapture == null) {
                 viewModel.failFullResolutionCapture("Камера еще не готова")
             } else if (isTakingPicture.compareAndSet(false, true)) {
                 viewModel.startFullResolutionCapture()
+                imageCapture.setFlashMode(captureFlashMode.toImageCaptureFlashMode())
                 imageCapture.takePicture(
                     executor,
                     object : ImageCapture.OnImageCapturedCallback() {
@@ -470,6 +818,15 @@ private fun LiveCameraView(
         onDispose {
             isTakingPicture.set(false)
             onCaptureReady(null)
+        }
+    }
+
+    LaunchedEffect(torchEnabled, currentCamera) {
+        val camera = currentCamera
+        if (camera != null) {
+            runCatching {
+                camera.cameraControl.enableTorch(torchEnabled && camera.cameraInfo.hasFlashUnit())
+            }
         }
     }
 
@@ -508,7 +865,7 @@ private fun LiveCameraView(
         }
     }
 
-    DisposableEffect(lifecycleOwner, previewSize) {
+    DisposableEffect(lifecycleOwner, previewSize, selectedCameraId) {
         if (previewSize == IntSize.Zero) {
             onDispose {}
         } else {
@@ -518,6 +875,10 @@ private fun LiveCameraView(
                 if (isDisposed) return@addListener
                 try {
                     val provider = cameraProviderFuture.get()
+                    val options = buildCameraLensOptions(provider.availableCameraInfos)
+                    val selectedOption = preferredCameraOption(options, selectedCameraId)
+                    onCameraOptionsChanged(options, selectedOption?.id)
+
                     val rotation = previewView.display?.rotation ?: AndroidSurface.ROTATION_0
                     val preview = Preview.Builder()
                         .setTargetRotation(rotation)
@@ -538,39 +899,71 @@ private fun LiveCameraView(
                     val imageCapture = ImageCapture.Builder()
                         .setTargetRotation(rotation)
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setFlashMode(captureFlashMode.toImageCaptureFlashMode())
                         .setJpegQuality(95)
                         .build()
 
                     provider.unbindAll()
                     boundCamera.set(null)
                     imageCaptureRef.set(null)
+                    currentCamera = null
 
                     val viewPort = previewView.viewPort
-                    if (viewPort != null) {
-                        val useCaseGroup = UseCaseGroup.Builder()
-                            .setViewPort(viewPort)
-                            .addUseCase(preview)
-                            .addUseCase(imageAnalysis)
-                            .addUseCase(imageCapture)
-                            .build()
-                        val camera = provider.bindToLifecycle(
-                            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, useCaseGroup
-                        )
-                        imageCaptureRef.set(imageCapture)
-                        boundCamera.set(camera)
-                        android.util.Log.i(
-                            "CameraScreen",
-                            "Camera bound with ViewPort ${previewSize.width}x${previewSize.height}"
-                        )
-                    } else {
-                        android.util.Log.w("CameraScreen", "PreviewView ViewPort unavailable, binding fallback")
-                        val camera = provider.bindToLifecycle(
-                            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
-                            preview, imageAnalysis, imageCapture
-                        )
-                        imageCaptureRef.set(imageCapture)
-                        boundCamera.set(camera)
+                    fun bindCamera(option: CameraLensOption?): Camera {
+                        val selector = option?.selector ?: CameraSelector.DEFAULT_BACK_CAMERA
+                        return if (viewPort != null) {
+                            val useCaseGroup = UseCaseGroup.Builder()
+                                .setViewPort(viewPort)
+                                .addUseCase(preview)
+                                .addUseCase(imageAnalysis)
+                                .addUseCase(imageCapture)
+                                .build()
+                            provider.bindToLifecycle(lifecycleOwner, selector, useCaseGroup)
+                        } else {
+                            android.util.Log.w(
+                                "CameraScreen",
+                                "PreviewView ViewPort unavailable, binding fallback"
+                            )
+                            provider.bindToLifecycle(
+                                lifecycleOwner, selector, preview, imageAnalysis, imageCapture
+                            )
+                        }
                     }
+
+                    val fallbackOption = options.firstOrNull {
+                        it.lensFacing == CameraSelector.LENS_FACING_BACK && it.shortLabel == "1x"
+                    } ?: options.firstOrNull { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+                        ?: options.firstOrNull()
+
+                    var resolvedOption = selectedOption
+                    val camera = try {
+                        bindCamera(selectedOption)
+                    } catch (selectedError: Exception) {
+                        if (fallbackOption != null && fallbackOption.id != selectedOption?.id) {
+                            android.util.Log.w(
+                                "CameraScreen",
+                                "Selected camera bind failed, falling back to ${fallbackOption.shortLabel}: ${selectedError.message}",
+                                selectedError
+                            )
+                            provider.unbindAll()
+                            onCameraOptionsChanged(options, fallbackOption.id)
+                            resolvedOption = fallbackOption
+                            bindCamera(fallbackOption)
+                        } else {
+                            throw selectedError
+                        }
+                    }
+
+                    imageCaptureRef.set(imageCapture)
+                    boundCamera.set(camera)
+                    currentCamera = camera
+                    camera.cameraControl.enableTorch(
+                        torchEnabled && camera.cameraInfo.hasFlashUnit()
+                    )
+                    android.util.Log.i(
+                        "CameraScreen",
+                        "Camera bound ${resolvedOption?.shortLabel ?: "default"} with ViewPort ${previewSize.width}x${previewSize.height}"
+                    )
                 } catch (e: Exception) {
                     android.util.Log.e("CameraScreen", "Camera bind failed: ${e.message}", e)
                 }
@@ -580,6 +973,7 @@ private fun LiveCameraView(
                 isDisposed = true
                 boundCamera.set(null)
                 imageCaptureRef.set(null)
+                currentCamera = null
                 try {
                     val provider = ProcessCameraProvider.getInstance(context).get()
                     provider.unbindAll()
