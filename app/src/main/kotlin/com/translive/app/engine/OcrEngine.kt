@@ -3,6 +3,7 @@ package com.translive.app.engine
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
@@ -346,8 +347,32 @@ class OcrEngine @Inject constructor(
         (Color.red(pixel) * 299 + Color.green(pixel) * 587 + Color.blue(pixel) * 114) / 1000
 
     @androidx.camera.core.ExperimentalGetImage
-    private fun imageProxyToUprightBitmap(imageProxy: androidx.camera.core.ImageProxy): Bitmap? {
+    fun imageProxyToUprightBitmap(imageProxy: androidx.camera.core.ImageProxy): Bitmap? {
         val image = imageProxy.image ?: return null
+        val bitmap = when (image.format) {
+            ImageFormat.JPEG -> jpegImageToBitmap(image)
+            ImageFormat.YUV_420_888 -> yuv420ImageToBitmap(image)
+            else -> {
+                Log.w(TAG, "Unsupported image format for OCR: ${image.format}")
+                null
+            }
+        } ?: return null
+
+        return cropAndRotateBitmap(
+            bitmap = bitmap,
+            crop = imageProxy.cropRect,
+            rotationDegrees = imageProxy.imageInfo.rotationDegrees
+        )
+    }
+
+    private fun jpegImageToBitmap(image: android.media.Image): Bitmap? {
+        val buffer = image.planes.firstOrNull()?.buffer ?: return null
+        val bytes = ByteArray(buffer.remaining())
+        buffer.get(bytes)
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
+
+    private fun yuv420ImageToBitmap(image: android.media.Image): Bitmap? {
         val width = image.width
         val height = image.height
 
@@ -394,10 +419,10 @@ class OcrEngine @Inject constructor(
         val out = java.io.ByteArrayOutputStream()
         yuvImage.compressToJpeg(Rect(0, 0, width, height), 95, out)
         val bytes = out.toByteArray()
-        val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            ?: return null
+        return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+    }
 
-        val crop = imageProxy.cropRect
+    private fun cropAndRotateBitmap(bitmap: Bitmap, crop: Rect, rotationDegrees: Int): Bitmap {
         val cropLeft = crop.left.coerceIn(0, bitmap.width - 1)
         val cropTop = crop.top.coerceIn(0, bitmap.height - 1)
         val cropRight = crop.right.coerceIn(cropLeft + 1, bitmap.width)
@@ -411,10 +436,9 @@ class OcrEngine @Inject constructor(
             Bitmap.createBitmap(bitmap, cropLeft, cropTop, cropRight - cropLeft, cropBottom - cropTop)
         }
 
-        val rotation = imageProxy.imageInfo.rotationDegrees
-        return if (rotation != 0) {
+        return if (rotationDegrees != 0) {
             val matrix = android.graphics.Matrix()
-            matrix.postRotate(rotation.toFloat())
+            matrix.postRotate(rotationDegrees.toFloat())
             Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, matrix, true)
         } else cropped
     }

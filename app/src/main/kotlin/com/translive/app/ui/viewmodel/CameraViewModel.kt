@@ -173,6 +173,45 @@ class CameraViewModel @Inject constructor(
         }
     }
 
+    fun startFullResolutionCapture() {
+        _uiState.update {
+            it.copy(
+                captureStatus = CaptureStatus.PROCESSING,
+                captureMessage = "Снимаю кадр"
+            )
+        }
+    }
+
+    fun failFullResolutionCapture(message: String = "Не удалось снять кадр") {
+        _uiState.update {
+            it.copy(
+                captureStatus = CaptureStatus.ERROR,
+                captureMessage = message
+            )
+        }
+    }
+
+    @androidx.camera.core.ExperimentalGetImage
+    fun captureImage(imageProxy: androidx.camera.core.ImageProxy) {
+        if (_uiState.value.mode != CameraMode.LIVE) {
+            imageProxy.close()
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val bitmap = try {
+                ocrEngine.imageProxyToUprightBitmap(imageProxy)
+            } catch (e: Exception) {
+                Log.e("CameraVM", "ImageCapture conversion failed: ${e.message}", e)
+                null
+            } finally {
+                imageProxy.close()
+            }
+
+            captureBitmap(bitmap)
+        }
+    }
+
     /**
      * Live mode: OCR + ML Kit translate → show translated overlays.
      */
@@ -330,11 +369,11 @@ class CameraViewModel @Inject constructor(
     }
 
     /**
-     * Capture: freeze bitmap → OCR → HY-MT quality translate → paint on bitmap.
+     * Capture: full-resolution bitmap -> OCR -> HY-MT quality translate -> paint on bitmap.
      */
-    fun capturePreview(bitmap: Bitmap?) {
+    private fun captureBitmap(bitmap: Bitmap?) {
         if (bitmap == null) {
-            _uiState.update { it.copy(captureMessage = "Кадр камеры пока недоступен") }
+            failFullResolutionCapture("Кадр камеры пока недоступен")
             return
         }
 

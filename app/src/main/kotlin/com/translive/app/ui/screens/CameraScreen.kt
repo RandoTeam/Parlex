@@ -10,6 +10,8 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
@@ -57,6 +59,8 @@ import com.translive.app.ui.viewmodel.CameraMode
 import com.translive.app.ui.viewmodel.CameraViewModel
 import com.translive.app.ui.viewmodel.CaptureStatus
 import com.translive.app.ui.viewmodel.TranslatedBlock
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.delay
@@ -90,7 +94,7 @@ fun CameraScreen(
         else permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    var previewViewRef by remember { mutableStateOf<PreviewView?>(null) }
+    var captureRequest by remember { mutableStateOf<(() -> Unit)?>(null) }
     var focusPoint by remember { mutableStateOf<Offset?>(null) }
 
     LaunchedEffect(focusPoint) {
@@ -138,7 +142,7 @@ fun CameraScreen(
                     CameraMode.LIVE -> {
                         LiveCameraView(
                             viewModel = viewModel,
-                            onPreviewView = { previewViewRef = it },
+                            onCaptureReady = { captureRequest = it },
                             onFocusPoint = { focusPoint = it }
                         )
 
@@ -220,8 +224,10 @@ fun CameraScreen(
                         if (uiState.mode == CameraMode.LIVE) {
                             IconButton(
                                 onClick = {
-                                    viewModel.capturePreview(previewViewRef?.bitmap)
+                                    captureRequest?.invoke()
+                                        ?: viewModel.failFullResolutionCapture("Камера еще не готова")
                                 },
+                                enabled = !uiState.isCaptureProcessing,
                                 modifier = Modifier
                                     .size(72.dp)
                                     .clip(CircleShape)
@@ -398,13 +404,15 @@ private fun BoxScope.FocusReticle(focusPoint: Offset?) {
 @Composable
 private fun LiveCameraView(
     viewModel: CameraViewModel,
-    onPreviewView: (PreviewView) -> Unit,
+    onCaptureReady: ((() -> Unit)?) -> Unit,
     onFocusPoint: (Offset) -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val executor = remember { Executors.newSingleThreadExecutor() }
-    val boundCamera = remember { java.util.concurrent.atomic.AtomicReference<Camera?>(null) }
+    val boundCamera = remember { AtomicReference<Camera?>(null) }
+    val imageCaptureRef = remember { AtomicReference<ImageCapture?>(null) }
+    val isTakingPicture = remember { AtomicBoolean(false) }
     val analysisResolutionSelector = remember {
         ResolutionSelector.Builder()
             .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
@@ -429,8 +437,40 @@ private fun LiveCameraView(
 
     var previewSize by remember { mutableStateOf(IntSize.Zero) }
 
-    LaunchedEffect(previewView) {
-        onPreviewView(previewView)
+    DisposableEffect(previewView) {
+        val capture: () -> Unit = {
+            val imageCapture = imageCaptureRef.get()
+            if (imageCapture == null) {
+                viewModel.failFullResolutionCapture("Камера еще не готова")
+            } else if (isTakingPicture.compareAndSet(false, true)) {
+                viewModel.startFullResolutionCapture()
+                imageCapture.takePicture(
+                    executor,
+                    object : ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+                            isTakingPicture.set(false)
+                            viewModel.captureImage(image)
+                        }
+
+                        override fun onError(exception: ImageCaptureException) {
+                            isTakingPicture.set(false)
+                            android.util.Log.e(
+                                "CameraScreen",
+                                "ImageCapture failed: ${exception.message}",
+                                exception
+                            )
+                            viewModel.failFullResolutionCapture("Не удалось снять кадр")
+                        }
+                    }
+                )
+            }
+        }
+        onCaptureReady(capture)
+
+        onDispose {
+            isTakingPicture.set(false)
+            onCaptureReady(null)
+        }
     }
 
     DisposableEffect(previewView) {
@@ -495,9 +535,15 @@ private fun LiveCameraView(
                                 viewModel.processLiveFrame(imageProxy)
                             }
                         }
+                    val imageCapture = ImageCapture.Builder()
+                        .setTargetRotation(rotation)
+                        .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+                        .setJpegQuality(95)
+                        .build()
 
                     provider.unbindAll()
                     boundCamera.set(null)
+                    imageCaptureRef.set(null)
 
                     val viewPort = previewView.viewPort
                     if (viewPort != null) {
@@ -505,24 +551,25 @@ private fun LiveCameraView(
                             .setViewPort(viewPort)
                             .addUseCase(preview)
                             .addUseCase(imageAnalysis)
+                            .addUseCase(imageCapture)
                             .build()
-                        boundCamera.set(
-                            provider.bindToLifecycle(
-                                lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, useCaseGroup
-                            )
+                        val camera = provider.bindToLifecycle(
+                            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, useCaseGroup
                         )
+                        imageCaptureRef.set(imageCapture)
+                        boundCamera.set(camera)
                         android.util.Log.i(
                             "CameraScreen",
                             "Camera bound with ViewPort ${previewSize.width}x${previewSize.height}"
                         )
                     } else {
                         android.util.Log.w("CameraScreen", "PreviewView ViewPort unavailable, binding fallback")
-                        boundCamera.set(
-                            provider.bindToLifecycle(
-                                lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
-                                preview, imageAnalysis
-                            )
+                        val camera = provider.bindToLifecycle(
+                            lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview, imageAnalysis, imageCapture
                         )
+                        imageCaptureRef.set(imageCapture)
+                        boundCamera.set(camera)
                     }
                 } catch (e: Exception) {
                     android.util.Log.e("CameraScreen", "Camera bind failed: ${e.message}", e)
@@ -532,6 +579,7 @@ private fun LiveCameraView(
             onDispose {
                 isDisposed = true
                 boundCamera.set(null)
+                imageCaptureRef.set(null)
                 try {
                     val provider = ProcessCameraProvider.getInstance(context).get()
                     provider.unbindAll()
