@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+import kotlin.math.abs
 import kotlin.math.max
 
 data class TranslatedBlock(
@@ -74,8 +75,9 @@ class CameraViewModel @Inject constructor(
     @Volatile
     private var isLiveProcessing = false
 
-    /** Smoothed bounding boxes — EMA filter to prevent jitter */
-    private val smoothedBoxes = mutableMapOf<Int, SmoothedRect>()
+    /** Live OCR line tracks keep overlays attached to the same visual row between frames. */
+    private val liveTracks = mutableListOf<LiveTextTrack>()
+    private var nextLiveTrackId = 0
     private var frameCounter = 0
 
     init {
@@ -128,7 +130,7 @@ class CameraViewModel @Inject constructor(
 
     private fun resetModeVisuals() {
         translateJob?.cancel()
-        smoothedBoxes.clear()
+        clearLiveTracks()
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
@@ -206,18 +208,56 @@ class CameraViewModel @Inject constructor(
     private fun extractLiveLines(ocrResult: OcrResult): List<OcrLine> =
         ocrResult.blocks.flatMap { block ->
             block.lines.filter { it.boundingBox.width() > 30 && it.boundingBox.height() > 10 }
-        }
+        }.sortedWith(compareBy({ it.boundingBox.top }, { it.boundingBox.left }))
 
     private fun smoothLiveLines(lines: List<OcrLine>): List<OcrLine> {
-        val smoothedLines = lines.mapIndexed { idx, line ->
-            val smoothed = smoothedBoxes.getOrPut(idx) { SmoothedRect(line.boundingBox) }
-            smoothed.update(line.boundingBox)
-            line.copy(boundingBox = smoothed.get())
+        val currentFrame = frameCounter
+        val matchedTrackIds = mutableSetOf<Int>()
+        val smoothedLines = lines.map { line ->
+            val track = findLiveTrack(line.boundingBox, matchedTrackIds)
+                ?: LiveTextTrack(
+                    id = nextLiveTrackId++,
+                    box = SmoothedRect(line.boundingBox),
+                    lastSeenFrame = currentFrame
+                ).also { liveTracks.add(it) }
+
+            matchedTrackIds.add(track.id)
+            track.lastSeenFrame = currentFrame
+            track.box.update(line.boundingBox)
+            line.copy(boundingBox = track.box.get())
         }
-        if (smoothedBoxes.size > lines.size + 5) {
-            smoothedBoxes.keys.filter { it >= lines.size + 5 }.forEach { smoothedBoxes.remove(it) }
-        }
+
+        liveTracks.removeAll { currentFrame - it.lastSeenFrame > LIVE_TRACK_TTL_FRAMES }
         return smoothedLines
+    }
+
+    private fun findLiveTrack(box: Rect, matchedTrackIds: Set<Int>): LiveTextTrack? {
+        var bestTrack: LiveTextTrack? = null
+        var bestScore = Float.MAX_VALUE
+
+        for (track in liveTracks) {
+            if (track.id in matchedTrackIds) continue
+
+            val trackBox = track.box.get()
+            val dx = centerX(box) - centerX(trackBox)
+            val dy = centerY(box) - centerY(trackBox)
+            val maxDx = max(box.width(), trackBox.width()) * 1.15f + 24f
+            val maxDy = max(box.height(), trackBox.height()) * 1.8f + 18f
+            if (abs(dx) > maxDx || abs(dy) > maxDy) continue
+
+            val score = dx * dx + dy * dy * 2f
+            if (score < bestScore) {
+                bestScore = score
+                bestTrack = track
+            }
+        }
+
+        return bestTrack
+    }
+
+    private fun clearLiveTracks() {
+        liveTracks.clear()
+        nextLiveTrackId = 0
     }
 
     private suspend fun translateLiveLines(lines: List<OcrLine>): List<TranslatedBlock> {
@@ -275,7 +315,7 @@ class CameraViewModel @Inject constructor(
 
     private fun enterCaptureMode(workBitmap: Bitmap) {
         translateJob?.cancel()
-        smoothedBoxes.clear()
+        clearLiveTracks()
         _uiState.update {
             it.copy(
                 mode = CameraMode.CAPTURE,
@@ -468,7 +508,7 @@ class CameraViewModel @Inject constructor(
 
     fun backToLive() {
         translateJob?.cancel()
-        smoothedBoxes.clear()
+        clearLiveTracks()
         _uiState.update {
             it.copy(
                 mode = CameraMode.LIVE,
@@ -486,6 +526,18 @@ class CameraViewModel @Inject constructor(
         cameraTranslateEngine.release()
     }
 }
+
+private const val LIVE_TRACK_TTL_FRAMES = 5
+
+private data class LiveTextTrack(
+    val id: Int,
+    val box: SmoothedRect,
+    var lastSeenFrame: Int
+)
+
+private fun centerX(rect: Rect): Float = (rect.left + rect.right) / 2f
+
+private fun centerY(rect: Rect): Float = (rect.top + rect.bottom) / 2f
 
 /**
  * Exponential Moving Average filter for Rect coordinates.
