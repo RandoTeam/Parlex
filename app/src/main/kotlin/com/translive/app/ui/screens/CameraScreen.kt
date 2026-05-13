@@ -9,6 +9,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
 import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.view.MotionEvent
 import android.view.ViewGroup
 import android.view.Surface as AndroidSurface
@@ -145,7 +146,28 @@ private fun buildCameraLensOptions(cameraInfos: List<CameraInfo>): List<CameraLe
     }
 }
 
-private fun logCameraApiOptions(cameraInfos: List<CameraInfo>, options: List<CameraLensOption>) {
+private fun logCameraApiOptions(
+    context: Context,
+    cameraInfos: List<CameraInfo>,
+    options: List<CameraLensOption>
+) {
+    if ((context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) == 0) return
+
+    val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+    val cameraManagerSummary = runCatching {
+        cameraManager.cameraIdList.joinToString(separator = "; ") { cameraId ->
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val facing = characteristics.get(CameraCharacteristics.LENS_FACING)
+            val focal = characteristics.get(CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)
+                ?.filter { it > 0f }
+                ?.minOrNull()
+            val sensorWidth = characteristics.get(CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE)
+                ?.width
+            "id=$cameraId facing=$facing focal=$focal sensorW=$sensorWidth"
+        }
+    }.getOrElse { error ->
+        "error=${error.message}"
+    }
     val cameraInfoSummary = cameraInfos.joinToString(separator = "; ") { cameraInfo ->
         val camera2Info = runCatching { Camera2CameraInfo.from(cameraInfo) }.getOrNull()
         val cameraId = runCatching { camera2Info?.cameraId }.getOrNull() ?: "?"
@@ -157,6 +179,7 @@ private fun logCameraApiOptions(cameraInfos: List<CameraInfo>, options: List<Cam
     val optionSummary = options.joinToString(separator = "; ") { option ->
         "${option.shortLabel}:${option.id}:flash=${option.hasFlash}"
     }
+    android.util.Log.i("CameraScreen", "CameraManager ids: $cameraManagerSummary")
     android.util.Log.i("CameraScreen", "CameraX infos: $cameraInfoSummary")
     android.util.Log.i("CameraScreen", "Camera UI options: $optionSummary")
 }
@@ -1181,7 +1204,7 @@ private fun LiveCameraView(
                 try {
                     val provider = cameraProviderFuture.get()
                     val options = buildCameraLensOptions(provider.availableCameraInfos)
-                    logCameraApiOptions(provider.availableCameraInfos, options)
+                    logCameraApiOptions(context, provider.availableCameraInfos, options)
                     val selectedOption = preferredCameraOption(options, selectedCameraId)
                     onCameraOptionsChanged(options, selectedOption?.id)
 
