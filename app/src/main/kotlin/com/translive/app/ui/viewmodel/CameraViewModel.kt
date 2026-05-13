@@ -3,6 +3,8 @@ package com.translive.app.ui.viewmodel
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.*
+import android.media.ExifInterface
+import android.net.Uri
 import android.text.Layout
 import android.text.StaticLayout
 import android.os.SystemClock
@@ -347,6 +349,53 @@ class CameraViewModel @Inject constructor(
                 detectedSourceLanguage = null,
                 detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
+            )
+        }
+    }
+
+    fun captureGalleryImage(uri: Uri) {
+        val state = _uiState.value
+        translateJob?.cancel()
+        clearLiveSession()
+        lastCaptureDebugSnapshot = null
+        _uiState.update {
+            it.copy(
+                mode = CameraMode.CAPTURE,
+                capturedBitmap = null,
+                paintedBitmap = null,
+                liveBlocks = emptyList(),
+                captureStatus = CaptureStatus.PROCESSING,
+                captureMessage = "Открываю фото",
+                detectedSourceLanguage = null,
+                detectedSourceLanguages = emptyList(),
+                qualityWarnings = emptyList()
+            )
+        }
+
+        translateJob = viewModelScope.launch(Dispatchers.IO) {
+            val bitmap = decodeGalleryBitmap(uri)
+            if (bitmap == null) {
+                _uiState.update {
+                    it.copy(
+                        captureStatus = CaptureStatus.ERROR,
+                        captureMessage = "Не удалось открыть фото",
+                        qualityWarnings = emptyList()
+                    )
+                }
+                return@launch
+            }
+
+            val workBitmap = prepareCaptureBitmap(bitmap)
+            enterCaptureMode(
+                workBitmap = workBitmap,
+                message = "Ищу текст на фото",
+                cancelExistingJob = false
+            )
+            processCaptureBitmap(
+                bitmap = workBitmap,
+                sourceLanguage = state.sourceLanguage,
+                sourceAuto = state.isSourceAuto,
+                targetLanguage = state.targetLanguage
             )
         }
     }
@@ -706,8 +755,12 @@ class CameraViewModel @Inject constructor(
         )
     }
 
-    private fun enterCaptureMode(workBitmap: Bitmap) {
-        translateJob?.cancel()
+    private fun enterCaptureMode(
+        workBitmap: Bitmap,
+        message: String = "Ищу текст на снимке",
+        cancelExistingJob: Boolean = true
+    ) {
+        if (cancelExistingJob) translateJob?.cancel()
         clearLiveSession()
         lastCaptureDebugSnapshot = null
         _uiState.update {
@@ -717,12 +770,80 @@ class CameraViewModel @Inject constructor(
                 paintedBitmap = workBitmap,
                 liveBlocks = emptyList(),
                 captureStatus = CaptureStatus.PROCESSING,
-                captureMessage = "Ищу текст на снимке",
+                captureMessage = message,
                 detectedSourceLanguage = null,
                 detectedSourceLanguages = emptyList(),
                 qualityWarnings = emptyList()
             )
         }
+    }
+
+    private fun decodeGalleryBitmap(uri: Uri): Bitmap? {
+        val resolver = appContext.contentResolver
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, bounds)
+            }
+        }
+
+        val decodeOptions = BitmapFactory.Options().apply {
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+            inSampleSize = calculateBitmapSampleSize(
+                width = bounds.outWidth,
+                height = bounds.outHeight,
+                maxSize = GALLERY_DECODE_MAX_SIZE
+            )
+        }
+        val bitmap = runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                BitmapFactory.decodeStream(input, null, decodeOptions)
+            }
+        }.getOrNull() ?: return null
+
+        val orientation = runCatching {
+            resolver.openInputStream(uri)?.use { input ->
+                ExifInterface(input).getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+            } ?: ExifInterface.ORIENTATION_NORMAL
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+
+        return applyExifOrientation(bitmap, orientation)
+    }
+
+    private fun calculateBitmapSampleSize(width: Int, height: Int, maxSize: Int): Int {
+        if (width <= 0 || height <= 0) return 1
+
+        var sampleSize = 1
+        var longest = max(width, height)
+        while (longest / sampleSize > maxSize) {
+            sampleSize *= 2
+        }
+        return sampleSize
+    }
+
+    private fun applyExifOrientation(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                matrix.postRotate(90f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                matrix.postRotate(270f)
+                matrix.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            else -> return bitmap
+        }
+
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     private suspend fun processCaptureBitmap(
@@ -2073,6 +2194,7 @@ private const val SCRIPT_MISMATCH_RATIO_THRESHOLD = 0.55f
 private const val MIXED_LINE_MIN_SCORE = 18f
 private const val MIXED_LINE_OVERLAP_THRESHOLD = 0.55f
 private const val TABLE_ROW_MERGE_HEIGHT_FACTOR = 0.72f
+private const val GALLERY_DECODE_MAX_SIZE = 3072
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 450L

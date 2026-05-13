@@ -379,6 +379,14 @@ fun CameraScreen(
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> viewModel.setPermissionGranted(granted) }
+    val galleryLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) viewModel.captureGalleryImage(uri)
+    }
+    val openGallery = remember(galleryLauncher) {
+        { galleryLauncher.launch("image/*") }
+    }
 
     LaunchedEffect(Unit) {
         systemTts.initialize()
@@ -435,7 +443,7 @@ fun CameraScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            if (!uiState.hasCameraPermission) {
+            if (!uiState.hasCameraPermission && uiState.mode == CameraMode.LIVE) {
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally,
@@ -447,6 +455,12 @@ fun CameraScreen(
                     Spacer(Modifier.height(8.dp))
                     Button(onClick = { permissionLauncher.launch(Manifest.permission.CAMERA) }) {
                         Text("Разрешить")
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = openGallery) {
+                        Icon(Icons.Filled.PhotoLibrary, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Выбрать фото")
                     }
                 }
             } else {
@@ -603,6 +617,11 @@ fun CameraScreen(
                 ) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                         if (uiState.mode == CameraMode.LIVE) {
+                            GalleryPhotoButton(
+                                enabled = !uiState.isCaptureProcessing,
+                                onClick = openGallery
+                            )
+                            Spacer(Modifier.width(18.dp))
                             IconButton(
                                 onClick = {
                                     captureRequest?.invoke()
@@ -616,11 +635,22 @@ fun CameraScreen(
                             ) {
                                 Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White))
                             }
+                            Spacer(Modifier.width(18.dp))
+                            Box(Modifier.size(52.dp))
                         } else {
                             FilledTonalButton(onClick = { viewModel.backToLive() }) {
                                 Icon(Icons.Filled.CameraAlt, null)
                                 Spacer(Modifier.width(8.dp))
-                                Text("Назад к камере")
+                                Text("Камера")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            FilledTonalButton(
+                                onClick = openGallery,
+                                enabled = !uiState.isCaptureProcessing
+                            ) {
+                                Icon(Icons.Filled.PhotoLibrary, null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Фото")
                             }
                         }
                     }
@@ -708,6 +738,27 @@ private fun BoxScope.CameraBetaBadge() {
             text = "Beta",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+@Composable
+private fun GalleryPhotoButton(
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(Color.Black.copy(alpha = 0.5f))
+    ) {
+        Icon(
+            imageVector = Icons.Filled.PhotoLibrary,
+            contentDescription = "Выбрать фото из галереи",
+            tint = if (enabled) Color.White else Color.White.copy(alpha = 0.38f)
         )
     }
 }
