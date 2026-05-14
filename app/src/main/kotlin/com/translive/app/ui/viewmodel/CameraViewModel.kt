@@ -949,7 +949,26 @@ class CameraViewModel @Inject constructor(
                     translationEngine.isLoaded ||
                     canCameraTranslateAll(allLines, effectiveSourceLanguage, targetLanguage)
             )
-            val translatedParts = translateCaptureBlocks(captureBlocks, effectiveSourceLanguage, targetLanguage)
+            val useDocumentLayout = shouldUseDocumentCaptureLayout(
+                blocks = captureBlocks,
+                sourceAuto = sourceAuto,
+                detectedLanguages = captureOcr.detectedSourceLanguages
+            )
+            val translatedParts: List<String>
+            val painted: Bitmap
+            if (useDocumentLayout) {
+                _uiState.update { it.copy(captureMessage = "Перевожу текст страницы") }
+                val documentTranslation = translateCaptureDocument(
+                    lines = allLines,
+                    sourceLanguage = effectiveSourceLanguage,
+                    targetLanguage = targetLanguage
+                )
+                translatedParts = documentDebugTranslations(documentTranslation, allLines.size)
+                painted = paintDocumentOnBitmap(bitmap, allLines, documentTranslation)
+            } else {
+                translatedParts = translateCaptureBlocks(captureBlocks, effectiveSourceLanguage, targetLanguage)
+                painted = paintOnBitmap(bitmap, allLines, translatedParts)
+            }
             rememberCaptureDebugSnapshot(
                 sourceLanguage,
                 sourceAuto,
@@ -961,7 +980,6 @@ class CameraViewModel @Inject constructor(
                 allLines,
                 translatedParts
             )
-            val painted = paintOnBitmap(bitmap, allLines, translatedParts)
 
             _uiState.update {
                 it.copy(
@@ -1594,6 +1612,90 @@ class CameraViewModel @Inject constructor(
             conflictingLetterCount > expectedLetterCount * 2
     }
 
+    private fun shouldUseDocumentCaptureLayout(
+        blocks: List<PaintBlock>,
+        sourceAuto: Boolean,
+        detectedLanguages: List<Language>
+    ): Boolean {
+        if (sourceAuto && detectedLanguages.size > 1) return false
+
+        val lines = blocks.flatMap { it.lines }
+        if (lines.size < DOCUMENT_LAYOUT_MIN_LINES) return false
+        if (lines.any { it.rowIndex != null || it.columnIndex != null }) return false
+
+        val textLength = lines.sumOf { it.text.count { char -> !char.isWhitespace() } }
+        if (textLength < DOCUMENT_LAYOUT_MIN_CHARS) return false
+
+        val pageBox = unionPaintLineBox(lines) ?: return false
+        val medianHeight = lines.map { it.box.height() }.sorted().let { heights ->
+            heights[heights.size / 2].toFloat()
+        }
+        val tallTextArea = pageBox.height() > medianHeight * DOCUMENT_LAYOUT_MIN_HEIGHT_LINES
+        val wideTextArea = lines.count { it.box.width() > pageBox.width() * DOCUMENT_LAYOUT_WIDE_LINE_RATIO } >=
+            lines.size / 2
+
+        return tallTextArea && wideTextArea
+    }
+
+    private fun documentDebugTranslations(documentTranslation: String, lineCount: Int): List<String> =
+        if (lineCount <= 0) {
+            emptyList()
+        } else {
+            listOf(documentTranslation) + List(lineCount - 1) { "" }
+        }
+
+    private suspend fun translateCaptureDocument(
+        lines: List<PaintLine>,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): String {
+        val sourceText = buildCaptureDocumentText(lines)
+        if (sourceText.isBlank()) return ""
+        if (sourceLanguage.code == targetLanguage.code) return sourceText
+
+        if (translationEngine.isLoaded) {
+            runCatching {
+                val maxTokens = (sourceText.length * 2).coerceIn(512, 2048)
+                translationEngine.translateSafe(sourceText, sourceLanguage, targetLanguage, maxTokens)
+            }.onSuccess { translated ->
+                val normalized = translated.trim()
+                if (normalized.isNotBlank()) return normalized
+            }.onFailure { error ->
+                Log.e("CameraVM", "Document HY-MT failed for ${sourceLanguage.code}: ${error.message}")
+            }
+        }
+
+        prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
+        return if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+            cameraTranslateEngine.translateLines(listOf(sourceText))
+                .firstOrNull()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: sourceText
+        } else {
+            sourceText
+        }
+    }
+
+    private fun buildCaptureDocumentText(lines: List<PaintLine>): String {
+        val sortedLines = lines.sortedWith(compareBy<PaintLine>({ it.box.top }, { it.box.left }))
+        val builder = StringBuilder()
+        for (line in sortedLines) {
+            val text = line.text.replace(Regex("\\s+"), " ").trim()
+            if (text.isBlank()) continue
+
+            if (builder.isEmpty()) {
+                builder.append(text)
+            } else if (builder.endsWithHyphen()) {
+                builder.setLength(builder.length - 1)
+                builder.append(text)
+            } else {
+                builder.append(' ').append(text)
+            }
+        }
+        return builder.toString()
+    }
+
     private suspend fun translateCaptureBlocks(
         blocks: List<PaintBlock>,
         sourceLanguage: Language,
@@ -2036,6 +2138,71 @@ class CameraViewModel @Inject constructor(
             ""
         }
 
+    private fun paintDocumentOnBitmap(
+        original: Bitmap,
+        lines: List<PaintLine>,
+        translation: String
+    ): Bitmap {
+        if (translation.isBlank()) return original
+
+        val result = original.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(result)
+        val sourceBox = unionPaintLineBox(lines)
+            ?.let { expandedDocumentBox(it, result.width, result.height) }
+            ?: return result
+
+        val medianLineHeight = medianPaintLineHeight(lines, result.width, result.height)
+        val padding = (medianLineHeight * 0.58f).coerceIn(12f, 28f)
+        val maxTextWidth = (sourceBox.width() - padding * 2f).toInt().coerceAtLeast(1)
+        val maxTextHeight = (sourceBox.height() - padding * 2f).coerceAtLeast(1f)
+        val textPaint = TextPaint().apply {
+            isAntiAlias = true
+            isFakeBoldText = false
+            textSize = (medianLineHeight * 0.62f).coerceIn(16f, 30f)
+        }
+        val layout = buildBitmapTextLayout(
+            text = translation.replace(Regex("\\s+"), " ").trim(),
+            paint = textPaint,
+            width = maxTextWidth,
+            maxHeight = maxTextHeight,
+            maxLines = DOCUMENT_LAYOUT_MAX_LINES,
+            minTextSize = DOCUMENT_LAYOUT_MIN_TEXT_SIZE
+        )
+
+        val fittedBottom = (sourceBox.top + layout.height + padding * 2f)
+            .toInt()
+            .coerceIn(sourceBox.top + 1, sourceBox.bottom)
+        val textBox = Rect(sourceBox.left, sourceBox.top, sourceBox.right, fittedBottom)
+        val bgColor = sampleBackgroundColor(original, textBox)
+        textPaint.color = contrastColor(bgColor)
+        val bgPaint = Paint().apply {
+            style = Paint.Style.FILL
+            color = Color.argb(
+                238,
+                Color.red(bgColor),
+                Color.green(bgColor),
+                Color.blue(bgColor)
+            )
+        }
+        val radius = (textBox.height() * 0.012f).coerceIn(6f, 14f)
+        canvas.drawRoundRect(RectF(textBox), radius, radius, bgPaint)
+
+        val textLeft = textBox.left.toFloat() + padding
+        val textTop = textBox.top.toFloat() + padding
+        canvas.save()
+        canvas.clipRect(
+            textLeft,
+            textTop,
+            textLeft + maxTextWidth,
+            textBox.bottom.toFloat() - padding
+        )
+        canvas.translate(textLeft, textTop)
+        layout.draw(canvas)
+        canvas.restore()
+
+        return result
+    }
+
     /**
      * Paint translated text directly on bitmap.
      * Improved: blur original text area → paint semi-transparent bg → white text.
@@ -2161,6 +2328,35 @@ class CameraViewModel @Inject constructor(
         )
     }
 
+    private fun expandedDocumentBox(box: Rect, width: Int, height: Int): Rect {
+        val padX = (box.width() * 0.035f).toInt().coerceIn(12, 36)
+        val padY = (box.height() * 0.025f).toInt().coerceIn(14, 42)
+        return Rect(
+            (box.left - padX).coerceAtLeast(0),
+            (box.top - padY).coerceAtLeast(0),
+            (box.right + padX).coerceAtMost(width),
+            (box.bottom + padY).coerceAtMost(height)
+        )
+    }
+
+    private fun unionPaintLineBox(lines: List<PaintLine>): Rect? {
+        if (lines.isEmpty()) return null
+
+        var left = Int.MAX_VALUE
+        var top = Int.MAX_VALUE
+        var right = Int.MIN_VALUE
+        var bottom = Int.MIN_VALUE
+
+        for (line in lines) {
+            left = minOf(left, line.box.left)
+            top = minOf(top, line.box.top)
+            right = max(right, line.box.right)
+            bottom = max(bottom, line.box.bottom)
+        }
+
+        return if (right > left && bottom > top) Rect(left, top, right, bottom) else null
+    }
+
     private fun buildBitmapTextLayout(
         text: String,
         paint: TextPaint,
@@ -2274,6 +2470,12 @@ private const val TABLE_MIN_ROWS = 3
 private const val TABLE_MIN_MULTI_COLUMN_ROWS = 3
 private const val TABLE_MIN_MULTI_COLUMN_ROW_RATIO = 0.35f
 private const val TABLE_COLUMN_GAP_HEIGHT_FACTOR = 1.35f
+private const val DOCUMENT_LAYOUT_MIN_LINES = 8
+private const val DOCUMENT_LAYOUT_MIN_CHARS = 220
+private const val DOCUMENT_LAYOUT_MIN_HEIGHT_LINES = 6f
+private const val DOCUMENT_LAYOUT_WIDE_LINE_RATIO = 0.58f
+private const val DOCUMENT_LAYOUT_MAX_LINES = 34
+private const val DOCUMENT_LAYOUT_MIN_TEXT_SIZE = 12f
 private const val GALLERY_DECODE_MAX_SIZE = 3072
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
@@ -2320,6 +2522,11 @@ private fun centerY(rect: Rect): Float = (rect.top + rect.bottom) / 2f
 private fun liveTranslationCacheKey(sourceCode: String, targetCode: String, text: String): String {
     val normalizedText = text.trim().replace(Regex("\\s+"), " ")
     return "$sourceCode>$targetCode:$normalizedText"
+}
+
+private fun StringBuilder.endsWithHyphen(): Boolean {
+    if (isEmpty()) return false
+    return this[length - 1] == '-' || this[length - 1] == '\u2010' || this[length - 1] == '\u2011'
 }
 
 /**

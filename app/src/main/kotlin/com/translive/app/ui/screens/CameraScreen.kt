@@ -20,14 +20,10 @@ import androidx.camera.core.Camera
 import androidx.camera.core.CameraInfo
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
-import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
-import androidx.camera.core.resolutionselector.AspectRatioStrategy
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -62,11 +58,9 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -341,9 +335,6 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
-    val clipboardManager = LocalClipboardManager.current
-    val systemTts = viewModel.systemTts
-    val isSpeaking by systemTts.isSpeaking.collectAsState()
     val isDebugBuild = remember(context) {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
@@ -358,7 +349,6 @@ fun CameraScreen(
         mutableStateOf(cameraPrefs.getString(PREF_SELECTED_CAMERA_ID, null))
     }
     var torchEnabled by rememberSaveable { mutableStateOf(false) }
-    var selectedLiveBlock by remember { mutableStateOf<TranslatedBlock?>(null) }
     val sourceChipLabel = if (uiState.isSourceAuto) {
         when {
             uiState.detectedSourceLanguages.size > 1 -> "Auto: Mixed ${uiState.detectedSourceLanguages.size}"
@@ -389,7 +379,6 @@ fun CameraScreen(
     }
 
     LaunchedEffect(Unit) {
-        systemTts.initialize()
         val granted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.CAMERA
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -412,16 +401,6 @@ fun CameraScreen(
             delay(850)
             focusPoint = null
         }
-    }
-
-    LaunchedEffect(uiState.mode, uiState.liveBlocks) {
-        if (uiState.mode != CameraMode.LIVE) {
-            selectedLiveBlock = null
-            return@LaunchedEffect
-        }
-        val selected = selectedLiveBlock ?: return@LaunchedEffect
-        val stillVisible = uiState.liveBlocks.any { it.originalText == selected.originalText }
-        if (!stillVisible) selectedLiveBlock = null
     }
 
     Scaffold(
@@ -505,42 +484,7 @@ fun CameraScreen(
                                 .padding(top = 48.dp, start = 12.dp, end = 12.dp)
                         )
 
-                        // Live translation overlay
-                        if (uiState.liveBlocks.isNotEmpty()) {
-                            TranslationOverlay(
-                                blocks = uiState.liveBlocks,
-                                imageWidth = uiState.imageWidth,
-                                imageHeight = uiState.imageHeight
-                            )
-                            LiveTextHitTargets(
-                                blocks = uiState.liveBlocks,
-                                imageWidth = uiState.imageWidth,
-                                imageHeight = uiState.imageHeight,
-                                onBlockSelected = { selectedLiveBlock = it }
-                            )
-                        }
-
                         FocusReticle(focusPoint)
-
-                        selectedLiveBlock?.let { block ->
-                            LiveTextSelectionPanel(
-                                block = block,
-                                sourceLanguageCode = uiState.sourceLanguage.code,
-                                targetLanguageCode = uiState.targetLanguage.code,
-                                isSpeaking = isSpeaking,
-                                onCopy = { text ->
-                                    clipboardManager.setText(AnnotatedString(text))
-                                },
-                                onSpeak = { text, languageCode ->
-                                    if (isSpeaking) {
-                                        systemTts.stop()
-                                    } else {
-                                        systemTts.speak(text, languageCode)
-                                    }
-                                },
-                                onDismiss = { selectedLiveBlock = null }
-                            )
-                        }
 
                         // NMT status badge
                         if (uiState.isNmtDownloading) {
@@ -1140,17 +1084,6 @@ private fun LiveCameraView(
     val imageCaptureRef = remember { AtomicReference<ImageCapture?>(null) }
     val isTakingPicture = remember { AtomicBoolean(false) }
     var currentCamera by remember { mutableStateOf<Camera?>(null) }
-    val analysisResolutionSelector = remember {
-        ResolutionSelector.Builder()
-            .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
-            .setResolutionStrategy(
-                ResolutionStrategy(
-                    android.util.Size(1280, 720),
-                    ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
-                )
-            )
-            .build()
-    }
     val previewView = remember {
         PreviewView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
@@ -1266,16 +1199,6 @@ private fun LiveCameraView(
                         .also {
                             it.surfaceProvider = previewView.surfaceProvider
                         }
-                    val imageAnalysis = ImageAnalysis.Builder()
-                        .setTargetRotation(rotation)
-                        .setResolutionSelector(analysisResolutionSelector)
-                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                        .build()
-                        .also { analysis ->
-                            analysis.setAnalyzer(executor) { imageProxy ->
-                                viewModel.processLiveFrame(imageProxy)
-                            }
-                        }
                     val imageCapture = ImageCapture.Builder()
                         .setTargetRotation(rotation)
                         .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
@@ -1295,7 +1218,6 @@ private fun LiveCameraView(
                             val useCaseGroup = UseCaseGroup.Builder()
                                 .setViewPort(viewPort)
                                 .addUseCase(preview)
-                                .addUseCase(imageAnalysis)
                                 .addUseCase(imageCapture)
                                 .build()
                             provider.bindToLifecycle(lifecycleOwner, selector, useCaseGroup)
@@ -1305,7 +1227,7 @@ private fun LiveCameraView(
                                 "PreviewView ViewPort unavailable, binding fallback"
                             )
                             provider.bindToLifecycle(
-                                lifecycleOwner, selector, preview, imageAnalysis, imageCapture
+                                lifecycleOwner, selector, preview, imageCapture
                             )
                         }
                     }
