@@ -7,6 +7,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * JNI bridge to llama.cpp for GGUF model inference.
@@ -23,6 +25,9 @@ class TranslationEngine {
 
     /** Mutex to serialize all native calls — llama.cpp is not thread-safe. */
     val inferenceMutex = Mutex()
+
+    /** Also protects synchronous load/unload/isLoaded calls from racing inference. */
+    private val nativeLock = ReentrantLock()
 
     companion object {
         init {
@@ -68,14 +73,20 @@ class TranslationEngine {
 
     private var contextPtr: Long = 0L
 
-    val isLoaded: Boolean get() = contextPtr != 0L && nativeIsLoaded(contextPtr)
+    val isLoaded: Boolean
+        get() = nativeLock.withLock { isLoadedLocked() }
 
     fun loadModel(modelPath: String, nThreads: Int = 4): Boolean {
-        if (isLoaded) unloadModel()
-        val optimalThreads = getOptimalThreadCount(nThreads)
-        android.util.Log.i("TranslationEngine", "Loading model: threads=$optimalThreads (requested=$nThreads, cores=${Runtime.getRuntime().availableProcessors()})")
-        contextPtr = nativeLoadModel(modelPath, optimalThreads)
-        return isLoaded
+        return nativeLock.withLock {
+            if (isLoadedLocked()) {
+                nativeUnloadModel(contextPtr)
+                contextPtr = 0L
+            }
+            val optimalThreads = getOptimalThreadCount(nThreads)
+            android.util.Log.i("TranslationEngine", "Loading model: threads=$optimalThreads (requested=$nThreads, cores=${Runtime.getRuntime().availableProcessors()})")
+            contextPtr = nativeLoadModel(modelPath, optimalThreads)
+            isLoadedLocked()
+        }
     }
 
     /**
@@ -90,9 +101,11 @@ class TranslationEngine {
     }
 
     fun unloadModel() {
-        if (contextPtr != 0L) {
-            nativeUnloadModel(contextPtr)
-            contextPtr = 0L
+        nativeLock.withLock {
+            if (contextPtr != 0L) {
+                nativeUnloadModel(contextPtr)
+                contextPtr = 0L
+            }
         }
     }
 
@@ -105,11 +118,13 @@ class TranslationEngine {
         target: Language,
         maxTokens: Int = 2048
     ): String {
-        if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
-        val style = getActivePromptStyle()
-        val prompt = buildPrompt(sourceText, source, target, style)
-        val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
-        return nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+        return nativeLock.withLock {
+            if (!isLoadedLocked()) throw IllegalStateException("Модель перевода не загружена")
+            val style = getActivePromptStyle()
+            val prompt = buildPrompt(sourceText, source, target, style)
+            val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
+            nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+        }
     }
 
     /** Thread-safe translate for use from coroutines. */
@@ -132,11 +147,13 @@ class TranslationEngine {
         target: Language,
         maxTokens: Int = 2048
     ): String {
-        if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
-        val style = getActivePromptStyle()
-        val prompt = buildStructuredPrompt(sourceText, source, target, style)
-        val useChatTemplate = true
-        return nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+        return nativeLock.withLock {
+            if (!isLoadedLocked()) throw IllegalStateException("Модель перевода не загружена")
+            val style = getActivePromptStyle()
+            val prompt = buildStructuredPrompt(sourceText, source, target, style)
+            val useChatTemplate = true
+            nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+        }
     }
 
     /** Thread-safe structured translate for use from coroutines. */
@@ -161,28 +178,32 @@ class TranslationEngine {
         maxTokens: Int = 2048,
         onComplete: ((StreamResult) -> Unit)? = null
     ): Flow<String> = channelFlow {
-        if (!isLoaded) throw IllegalStateException("Модель перевода не загружена")
-        val style = getActivePromptStyle()
-        val prompt = buildPrompt(sourceText, source, target, style)
-        val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
+        val streamResult = nativeLock.withLock {
+            if (!isLoadedLocked()) throw IllegalStateException("Модель перевода не загружена")
+            val style = getActivePromptStyle()
+            val prompt = buildPrompt(sourceText, source, target, style)
+            val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
 
-        val callback = object : TokenCallback {
-            override fun onToken(token: String): Boolean {
-                return try {
-                    trySend(token).isSuccess
-                } catch (_: Exception) {
-                    false
+            val callback = object : TokenCallback {
+                override fun onToken(token: String): Boolean {
+                    return try {
+                        trySend(token).isSuccess
+                    } catch (_: Exception) {
+                        false
+                    }
                 }
             }
-        }
 
-        val counts = nativeTranslateStreaming(contextPtr, prompt, maxTokens, useChatTemplate, callback)
-        val streamResult = StreamResult(
-            promptTokens = counts.getOrElse(0) { 0 },
-            generatedTokens = counts.getOrElse(1) { 0 }
-        )
+            val counts = nativeTranslateStreaming(contextPtr, prompt, maxTokens, useChatTemplate, callback)
+            StreamResult(
+                promptTokens = counts.getOrElse(0) { 0 },
+                generatedTokens = counts.getOrElse(1) { 0 }
+            )
+        }
         onComplete?.invoke(streamResult)
     }
+
+    private fun isLoadedLocked(): Boolean = contextPtr != 0L && nativeIsLoaded(contextPtr)
 
     private fun getActivePromptStyle(): PromptStyle =
         modelRepository?.getActiveFamily()?.promptStyle ?: PromptStyle.HY_MT
