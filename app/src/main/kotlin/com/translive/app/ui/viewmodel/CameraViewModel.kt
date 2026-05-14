@@ -965,13 +965,13 @@ class CameraViewModel @Inject constructor(
             if (useDocumentLayout) {
                 _uiState.update { it.copy(captureMessage = "Перевожу страницу по абзацам") }
                 val regions = buildDocumentRegions(captureBlocks)
-                val documentTranslation = translateCaptureDocumentPage(
+                val regionTranslations = translateCaptureDocumentRegions(
                     regions = regions,
                     sourceLanguage = effectiveSourceLanguage,
                     targetLanguage = targetLanguage
                 )
-                translatedParts = documentDebugTranslations(documentTranslation, allLines.size)
-                painted = paintDocumentRegionsOnBitmap(bitmap, regions, listOf(documentTranslation))
+                translatedParts = documentDebugTranslations(regions, regionTranslations, allLines)
+                painted = paintDocumentRegionsOnBitmap(bitmap, regions, regionTranslations)
             } else {
                 translatedParts = translateCaptureBlocks(captureBlocks, effectiveSourceLanguage, targetLanguage)
                 painted = paintOnBitmap(bitmap, allLines, translatedParts)
@@ -1692,19 +1692,40 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    private fun documentDebugTranslations(documentTranslation: String, lineCount: Int): List<String> =
-        if (lineCount <= 0) {
-            emptyList()
-        } else {
-            listOf(documentTranslation) + List(lineCount - 1) { "" }
+    private fun documentDebugTranslations(
+        regions: List<DocumentRegion>,
+        translations: List<String>,
+        allLines: List<PaintLine>
+    ): List<String> {
+        val byLineId = mutableMapOf<String, String>()
+        regions.forEachIndexed { regionIndex, region ->
+            region.lines.forEachIndexed { lineIndex, line ->
+                byLineId[line.id] = if (lineIndex == 0) {
+                    translations.getOrNull(regionIndex).orEmpty()
+                } else {
+                    ""
+                }
+            }
         }
+        return allLines.map { line -> byLineId[line.id].orEmpty() }
+    }
 
-    private suspend fun translateCaptureDocumentPage(
+    private suspend fun translateCaptureDocumentRegions(
         regions: List<DocumentRegion>,
         sourceLanguage: Language,
         targetLanguage: Language
+    ): List<String> {
+        if (regions.isEmpty()) return emptyList()
+        return regions.map { region ->
+            translateCaptureDocumentRegion(region.sourceText, sourceLanguage, targetLanguage)
+        }
+    }
+
+    private suspend fun translateCaptureDocumentRegion(
+        sourceText: String,
+        sourceLanguage: Language,
+        targetLanguage: Language
     ): String {
-        val sourceText = regions.joinToString("\n\n") { it.sourceText }.trim()
         if (sourceText.isBlank()) return ""
         if (sourceLanguage.code == targetLanguage.code) return sourceText
 
@@ -2239,44 +2260,53 @@ class CameraViewModel @Inject constructor(
         }
         canvas.drawRect(pageBox, bgPaint)
 
-        val pageText = translations
-            .map { it.replace(Regex("\\s+"), " ").trim() }
-            .filter { it.isNotBlank() }
-            .joinToString("\n\n")
-        if (pageText.isBlank()) return result
-
-        val medianLineHeight = medianPaintLineHeight(allLines, result.width, result.height)
-        val paddingX = (medianLineHeight * 0.42f).coerceIn(10f, 24f)
-        val paddingY = (medianLineHeight * 0.28f).coerceIn(8f, 20f)
-        val maxTextWidth = (pageBox.width() - paddingX * 2f).toInt().coerceAtLeast(1)
-        val maxTextHeight = (pageBox.height() - paddingY * 2f).coerceAtLeast(1f)
         val textPaint = TextPaint().apply {
             isAntiAlias = true
             isFakeBoldText = false
             color = contrastColor(pageColor)
-            textSize = (medianLineHeight * 0.7f).coerceIn(15f, 34f)
         }
-        val layout = buildDocumentPageTextLayout(
-            text = pageText,
-            paint = textPaint,
-            width = maxTextWidth,
-            maxHeight = maxTextHeight,
-            minTextSize = DOCUMENT_PAGE_MIN_TEXT_SIZE,
-            maxTextSize = (medianLineHeight * 0.92f).coerceIn(18f, 42f)
-        )
 
-        val textLeft = pageBox.left.toFloat() + paddingX
-        val textTop = pageBox.top.toFloat() + paddingY
-        canvas.save()
-        canvas.clipRect(
-            textLeft,
-            textTop,
-            textLeft + maxTextWidth,
-            pageBox.bottom.toFloat() - paddingY
-        )
-        canvas.translate(textLeft, textTop)
-        layout.draw(canvas)
-        canvas.restore()
+        regions.forEachIndexed { index, region ->
+            val text = translations.getOrNull(index)
+                ?.replace(Regex("\\s+"), " ")
+                ?.trim()
+                .orEmpty()
+            if (text.isBlank()) return@forEachIndexed
+
+            val regionBox = unionPaintLineBox(region.lines)
+                ?.let { expandedDocumentRegionBox(it, result.width, result.height) }
+                ?: return@forEachIndexed
+            if (regionBox.width() <= 0 || regionBox.height() <= 0) return@forEachIndexed
+
+            val regionLineHeight = medianPaintLineHeight(region.lines, result.width, result.height)
+            val paddingX = (regionLineHeight * 0.18f).coerceIn(3f, 9f)
+            val paddingY = (regionLineHeight * 0.12f).coerceIn(2f, 7f)
+            val maxTextWidth = (regionBox.width() - paddingX * 2f).toInt().coerceAtLeast(1)
+            val maxTextHeight = (regionBox.height() - paddingY * 2f).coerceAtLeast(1f)
+
+            textPaint.textSize = (regionLineHeight * 0.66f).coerceIn(11f, 30f)
+            val layout = buildDocumentPageTextLayout(
+                text = text,
+                paint = textPaint,
+                width = maxTextWidth,
+                maxHeight = maxTextHeight,
+                minTextSize = DOCUMENT_REGION_MIN_TEXT_SIZE,
+                maxTextSize = (regionLineHeight * 0.9f).coerceIn(13f, 34f)
+            )
+
+            val textLeft = regionBox.left.toFloat() + paddingX
+            val textTop = regionBox.top.toFloat() + paddingY
+            canvas.save()
+            canvas.clipRect(
+                textLeft,
+                textTop,
+                textLeft + maxTextWidth,
+                regionBox.bottom.toFloat() - paddingY
+            )
+            canvas.translate(textLeft, textTop)
+            layout.draw(canvas)
+            canvas.restore()
+        }
 
         return result
     }
@@ -2409,6 +2439,17 @@ class CameraViewModel @Inject constructor(
     private fun expandedDocumentPageBox(box: Rect, width: Int, height: Int): Rect {
         val padX = (box.width() * 0.025f).toInt().coerceIn(8, 24)
         val padY = (box.height() * 0.02f).toInt().coerceIn(10, 28)
+        return Rect(
+            (box.left - padX).coerceAtLeast(0),
+            (box.top - padY).coerceAtLeast(0),
+            (box.right + padX).coerceAtMost(width),
+            (box.bottom + padY).coerceAtMost(height)
+        )
+    }
+
+    private fun expandedDocumentRegionBox(box: Rect, width: Int, height: Int): Rect {
+        val padX = (box.width() * 0.012f).toInt().coerceIn(2, 10)
+        val padY = (box.height() * 0.05f).toInt().coerceIn(2, 10)
         return Rect(
             (box.left - padX).coerceAtLeast(0),
             (box.top - padY).coerceAtLeast(0),
@@ -2622,7 +2663,7 @@ private const val DOCUMENT_LAYOUT_MIN_HEIGHT_LINES = 6f
 private const val DOCUMENT_LAYOUT_WIDE_LINE_RATIO = 0.58f
 private const val DOCUMENT_REGION_GAP_HEIGHT_FACTOR = 1.18f
 private const val DOCUMENT_REGION_MAX_LINES = 7
-private const val DOCUMENT_PAGE_MIN_TEXT_SIZE = 11f
+private const val DOCUMENT_REGION_MIN_TEXT_SIZE = 8.5f
 private const val DOCUMENT_PAGE_TARGET_FILL_RATIO = 0.76f
 private const val DOCUMENT_PAPER_MIN_LUMA = 160f
 private const val GALLERY_DECODE_MAX_SIZE = 3072
