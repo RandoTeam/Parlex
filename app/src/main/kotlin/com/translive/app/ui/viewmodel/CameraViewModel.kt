@@ -206,6 +206,9 @@ class CameraViewModel @Inject constructor(
     @Volatile
     private var isLiveProcessing = false
 
+    @Volatile
+    private var isCaptureStarting = false
+
     /** Live OCR line tracks keep overlays attached to the same visual row between frames. */
     private val liveTracks = mutableListOf<LiveTextTrack>()
     private var nextLiveTrackId = 0
@@ -402,11 +405,13 @@ class CameraViewModel @Inject constructor(
 
     @androidx.camera.core.ExperimentalGetImage
     fun captureImage(imageProxy: androidx.camera.core.ImageProxy) {
-        if (_uiState.value.mode != CameraMode.LIVE) {
+        if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) {
             imageProxy.close()
             return
         }
 
+        isCaptureStarting = true
+        clearLiveSession()
         viewModelScope.launch(Dispatchers.IO) {
             val bitmap = try {
                 ocrEngine.imageProxyToUprightBitmap(imageProxy)
@@ -426,7 +431,7 @@ class CameraViewModel @Inject constructor(
      */
     @androidx.camera.core.ExperimentalGetImage
     fun processLiveFrame(imageProxy: androidx.camera.core.ImageProxy) {
-        if (_uiState.value.mode != CameraMode.LIVE) {
+        if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) {
             imageProxy.close()
             return
         }
@@ -486,6 +491,8 @@ class CameraViewModel @Inject constructor(
                     sourceLanguage = liveOcr.sourceLanguage,
                     targetLanguage = state.targetLanguage
                 )
+
+                if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) return@launch
 
                 _uiState.update {
                     it.copy(
@@ -723,6 +730,7 @@ class CameraViewModel @Inject constructor(
      */
     private fun captureBitmap(bitmap: Bitmap?) {
         if (bitmap == null) {
+            isCaptureStarting = false
             failFullResolutionCapture("Кадр камеры пока недоступен")
             return
         }
@@ -760,6 +768,7 @@ class CameraViewModel @Inject constructor(
         message: String = "Ищу текст на снимке",
         cancelExistingJob: Boolean = true
     ) {
+        isCaptureStarting = false
         if (cancelExistingJob) translateJob?.cancel()
         clearLiveSession()
         lastCaptureDebugSnapshot = null
@@ -1359,8 +1368,32 @@ class CameraViewModel @Inject constructor(
         val allLines = blocks.flatMap { it.lines }
         if (allLines.size < 2) return blocks
 
+        val rows = buildCaptureRows(allLines)
+        if (!looksLikeCaptureTable(rows)) {
+            return sortCaptureBlocksNaturally(blocks)
+        }
+
+        val assignedById = rows
+            .sortedBy { it.centerY }
+            .flatMapIndexed { rowIndex, row ->
+                row.lines
+                    .sortedBy { it.box.left }
+                    .mapIndexed { columnIndex, line ->
+                        line.copy(rowIndex = rowIndex, columnIndex = columnIndex)
+                    }
+            }
+            .associateBy { it.id }
+
+        return sortCaptureBlocksNaturally(
+            blocks.map { block ->
+                block.copy(lines = block.lines.map { line -> assignedById[line.id] ?: line })
+            }
+        )
+    }
+
+    private fun buildCaptureRows(lines: List<PaintLine>): List<CaptureTableRow> {
         val rows = mutableListOf<CaptureTableRow>()
-        allLines
+        lines
             .sortedWith(compareBy<PaintLine>({ centerY(it.box) }, { it.box.left }))
             .forEach { line ->
                 val lineCenterY = centerY(line.box)
@@ -1383,21 +1416,35 @@ class CameraViewModel @Inject constructor(
                 }
             }
 
-        val assignedById = rows
-            .sortedBy { it.centerY }
-            .flatMapIndexed { rowIndex, row ->
-                row.lines
-                    .sortedBy { it.box.left }
-                    .mapIndexed { columnIndex, line ->
-                        line.copy(rowIndex = rowIndex, columnIndex = columnIndex)
-                    }
-            }
-            .associateBy { it.id }
+        return rows
+    }
 
-        return blocks.map { block ->
+    private fun looksLikeCaptureTable(rows: List<CaptureTableRow>): Boolean {
+        val usableRows = rows.filter { it.lines.isNotEmpty() }
+        if (usableRows.size < TABLE_MIN_ROWS) return false
+
+        val multiColumnRows = usableRows.filter { rowHasSeparatedColumns(it) }
+        val requiredMultiRows = max(
+            TABLE_MIN_MULTI_COLUMN_ROWS,
+            (usableRows.size * TABLE_MIN_MULTI_COLUMN_ROW_RATIO).toInt()
+        )
+        return multiColumnRows.size >= requiredMultiRows
+    }
+
+    private fun rowHasSeparatedColumns(row: CaptureTableRow): Boolean {
+        val ordered = row.lines.sortedBy { it.box.left }
+        if (ordered.size < 2) return false
+
+        val minGap = row.averageHeight * TABLE_COLUMN_GAP_HEIGHT_FACTOR
+        return ordered.zipWithNext().any { (left, right) ->
+            right.box.left - left.box.right >= minGap
+        }
+    }
+
+    private fun sortCaptureBlocksNaturally(blocks: List<PaintBlock>): List<PaintBlock> =
+        blocks.map { block ->
             block.copy(
                 lines = block.lines
-                    .map { line -> assignedById[line.id] ?: line }
                     .sortedWith(
                         compareBy<PaintLine>(
                             { it.rowIndex ?: Int.MAX_VALUE },
@@ -1407,8 +1454,14 @@ class CameraViewModel @Inject constructor(
                         )
                     )
             )
-        }
-    }
+        }.sortedWith(
+            compareBy<PaintBlock>(
+                { block -> block.lines.minOfOrNull { it.rowIndex ?: Int.MAX_VALUE } ?: Int.MAX_VALUE },
+                { block -> block.lines.minOfOrNull { it.columnIndex ?: Int.MAX_VALUE } ?: Int.MAX_VALUE },
+                { block -> block.lines.minOfOrNull { it.box.top } ?: Int.MAX_VALUE },
+                { block -> block.lines.minOfOrNull { it.box.left } ?: Int.MAX_VALUE }
+            )
+        )
 
     private fun isPreferredCaptureLine(text: String, expectedScript: OcrTextScript): Boolean {
         var letterCount = 0
@@ -2001,8 +2054,12 @@ class CameraViewModel @Inject constructor(
 
         val textPaint = TextPaint().apply {
             isAntiAlias = true
-            isFakeBoldText = true
+            isFakeBoldText = false
         }
+
+        val medianBoxHeight = medianPaintLineHeight(lines, result.width, result.height)
+        val stableMinTextSize = (medianBoxHeight * 0.44f).coerceIn(10f, 22f)
+        val stableMaxTextSize = (medianBoxHeight * 0.76f).coerceIn(14f, 34f)
 
         for (i in lines.indices) {
             val line = lines[i]
@@ -2031,8 +2088,12 @@ class CameraViewModel @Inject constructor(
             val padding = (boxH * 0.12f).coerceIn(3f, 10f)
             val maxTextWidth = (paintBox.width().toFloat() - padding * 2f).toInt().coerceAtLeast(1)
             val maxTextHeight = (boxH - padding * 2f).coerceAtLeast(1f)
-            val minTextSize = (boxH * 0.34f).coerceIn(9f, 18f)
-            textPaint.textSize = (boxH * 0.62f).coerceIn(12f, 42f)
+            val preferredTextSize = (boxH * 0.62f)
+                .coerceIn(stableMinTextSize, stableMaxTextSize)
+                .coerceAtMost(maxTextHeight * 0.92f)
+                .coerceAtLeast(9f)
+            val minTextSize = (preferredTextSize * 0.86f).coerceAtLeast(9f)
+            textPaint.textSize = preferredTextSize
             textPaint.color = textColor
             textPaint.setShadowLayer(
                 1.6f,
@@ -2073,6 +2134,20 @@ class CameraViewModel @Inject constructor(
         }
 
         return result
+    }
+
+    private fun medianPaintLineHeight(lines: List<PaintLine>, width: Int, height: Int): Float {
+        val heights = lines.mapNotNull { line ->
+            clippedBox(line.box, width, height).height().takeIf { it > 0 }
+        }.sorted()
+        if (heights.isEmpty()) return 24f
+
+        val middle = heights.size / 2
+        return if (heights.size % 2 == 0) {
+            (heights[middle - 1] + heights[middle]) / 2f
+        } else {
+            heights[middle].toFloat()
+        }
     }
 
     private fun expandedBox(box: Rect, width: Int, height: Int): Rect {
@@ -2161,6 +2236,7 @@ class CameraViewModel @Inject constructor(
     }
 
     fun backToLive() {
+        isCaptureStarting = false
         translateJob?.cancel()
         clearLiveSession()
         lastCaptureDebugSnapshot = null
@@ -2194,6 +2270,10 @@ private const val SCRIPT_MISMATCH_RATIO_THRESHOLD = 0.55f
 private const val MIXED_LINE_MIN_SCORE = 18f
 private const val MIXED_LINE_OVERLAP_THRESHOLD = 0.55f
 private const val TABLE_ROW_MERGE_HEIGHT_FACTOR = 0.72f
+private const val TABLE_MIN_ROWS = 3
+private const val TABLE_MIN_MULTI_COLUMN_ROWS = 3
+private const val TABLE_MIN_MULTI_COLUMN_ROW_RATIO = 0.35f
+private const val TABLE_COLUMN_GAP_HEIGHT_FACTOR = 1.35f
 private const val GALLERY_DECODE_MAX_SIZE = 3072
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160

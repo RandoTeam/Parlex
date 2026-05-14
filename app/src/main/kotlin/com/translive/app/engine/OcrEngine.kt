@@ -15,8 +15,10 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.googlecode.tesseract.android.TessBaseAPI
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.util.concurrent.locks.ReentrantLock
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.concurrent.withLock
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.math.abs
@@ -82,6 +84,7 @@ class OcrEngine @Inject constructor(
         TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
 
     // Tesseract — lazy init per language
+    private val tessLock = ReentrantLock()
     private var tessApi: TessBaseAPI? = null
     private var tessCurrentLang: String = ""
     private var tessDataPath: String? = null
@@ -260,71 +263,76 @@ class OcrEngine @Inject constructor(
     }
 
     private fun recognizeWithTesseract(bitmap: Bitmap, langCode: String): OcrResult {
-        if (!ensureTesseractReady(langCode)) {
-            return OcrResult(emptyList(), bitmap.width, bitmap.height)
-        }
-
-        val api = tessApi ?: return OcrResult(emptyList(), bitmap.width, bitmap.height)
-
         val ocrBitmap = preprocessForTesseract(bitmap)
         try {
-            api.setImage(ocrBitmap)
-            val recognizedText = api.getUTF8Text()
-            if (recognizedText.isNullOrBlank()) {
-                Log.d(TAG, "Tesseract $langCode returned no text")
-                return OcrResult(emptyList(), bitmap.width, bitmap.height)
-            }
+            return tessLock.withLock {
+                if (!ensureTesseractReady(langCode)) {
+                    return@withLock OcrResult(emptyList(), bitmap.width, bitmap.height)
+                }
 
-            val blocks = mutableListOf<OcrBlock>()
-            val iterator = api.resultIterator
+                val api = tessApi ?: return@withLock OcrResult(emptyList(), bitmap.width, bitmap.height)
 
-            if (iterator != null) {
-                val currentLines = mutableListOf<OcrLine>()
-                var blockText = StringBuilder()
-                var blockBox: Rect? = null
-
-                iterator.begin()
-                do {
-                    val lineText = iterator.getUTF8Text(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
-                    val lineRect = iterator.getBoundingRect(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
-
-                    if (!lineText.isNullOrBlank() && lineRect != null &&
-                        lineRect.width() > 20 && lineRect.height() > 8
-                    ) {
-                        currentLines.add(OcrLine(lineText.trim(), lineRect))
-                        blockText.append(lineText.trim()).append(" ")
-                        blockBox = if (blockBox == null) Rect(lineRect) else Rect(
-                            minOf(blockBox.left, lineRect.left),
-                            minOf(blockBox.top, lineRect.top),
-                            maxOf(blockBox.right, lineRect.right),
-                            maxOf(blockBox.bottom, lineRect.bottom)
-                        )
+                try {
+                    api.setImage(ocrBitmap)
+                    val recognizedText = api.getUTF8Text()
+                    if (recognizedText.isNullOrBlank()) {
+                        Log.d(TAG, "Tesseract $langCode returned no text")
+                        return@withLock OcrResult(emptyList(), bitmap.width, bitmap.height)
                     }
 
-                    if (iterator.isAtFinalElement(
-                            TessBaseAPI.PageIteratorLevel.RIL_BLOCK,
-                            TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE
-                        )
-                    ) {
+                    val blocks = mutableListOf<OcrBlock>()
+                    val iterator = api.resultIterator
+
+                    if (iterator != null) {
+                        val currentLines = mutableListOf<OcrLine>()
+                        var blockText = StringBuilder()
+                        var blockBox: Rect? = null
+
+                        iterator.begin()
+                        do {
+                            val lineText = iterator.getUTF8Text(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
+                            val lineRect = iterator.getBoundingRect(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE)
+
+                            if (!lineText.isNullOrBlank() && lineRect != null &&
+                                lineRect.width() > 20 && lineRect.height() > 8
+                            ) {
+                                currentLines.add(OcrLine(lineText.trim(), lineRect))
+                                blockText.append(lineText.trim()).append(" ")
+                                blockBox = if (blockBox == null) Rect(lineRect) else Rect(
+                                    minOf(blockBox.left, lineRect.left),
+                                    minOf(blockBox.top, lineRect.top),
+                                    maxOf(blockBox.right, lineRect.right),
+                                    maxOf(blockBox.bottom, lineRect.bottom)
+                                )
+                            }
+
+                            if (iterator.isAtFinalElement(
+                                    TessBaseAPI.PageIteratorLevel.RIL_BLOCK,
+                                    TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE
+                                )
+                            ) {
+                                if (currentLines.isNotEmpty() && blockBox != null) {
+                                    blocks.add(OcrBlock(blockText.toString().trim(), blockBox, currentLines.toList()))
+                                }
+                                currentLines.clear()
+                                blockText = StringBuilder()
+                                blockBox = null
+                            }
+                        } while (iterator.next(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE))
+
                         if (currentLines.isNotEmpty() && blockBox != null) {
                             blocks.add(OcrBlock(blockText.toString().trim(), blockBox, currentLines.toList()))
                         }
-                        currentLines.clear()
-                        blockText = StringBuilder()
-                        blockBox = null
+                        iterator.delete()
                     }
-                } while (iterator.next(TessBaseAPI.PageIteratorLevel.RIL_TEXTLINE))
 
-                if (currentLines.isNotEmpty() && blockBox != null) {
-                    blocks.add(OcrBlock(blockText.toString().trim(), blockBox!!, currentLines.toList()))
+                    Log.d(TAG, "Tesseract $langCode found ${blocks.sumOf { it.lines.size }} lines")
+                    OcrResult(blocks, bitmap.width, bitmap.height)
+                } finally {
+                    api.clear()
                 }
-                iterator.delete()
             }
-
-            Log.d(TAG, "Tesseract $langCode found ${blocks.sumOf { it.lines.size }} lines")
-            return OcrResult(blocks, bitmap.width, bitmap.height)
         } finally {
-            api.clear()
             if (ocrBitmap !== bitmap) {
                 ocrBitmap.recycle()
             }
@@ -515,7 +523,11 @@ class OcrEngine @Inject constructor(
         latinRecognizer.close()
         chineseRecognizer.close()
         devanagariRecognizer.close()
-        tessApi?.recycle()
-        tessApi = null
+        tessLock.withLock {
+            tessApi?.recycle()
+            tessApi = null
+            tessCurrentLang = ""
+            tessDataPath = null
+        }
     }
 }
