@@ -26,8 +26,13 @@ build_log*.txt
 
 # Models (downloaded at runtime)
 *.gguf
+*.litertlm
+*.tflite
+*.task
+*.safetensors
 *.bin
 /models/
+/diagnostics/
 
 # Native engines (cloned separately)
 app/src/main/cpp/llama.cpp/

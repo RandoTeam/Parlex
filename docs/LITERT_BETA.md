@@ -24,6 +24,18 @@ This spike is measurement-driven: LiteRT moves forward only if it beats the curr
 
 The important distinction: LiteRT is the low-level on-device runtime, while LiteRT-LM is the LLM path we need for text generation and streaming translation.
 
+## Candidate Artifact
+
+Initial smoke-test artifact:
+
+- Repository: `barakplasma/translategemma-4b-it-android-task-quantized`.
+- INT4 file: `artifacts/int4-generic/translategemma-4b-it-int4-generic.litertlm`, 2,011,201,536 bytes.
+- Dynamic INT8 file: `artifacts/dynamic_int8-generic/translategemma-4b-it-dynamic_int8-generic.litertlm`, 3,920,576,512 bytes.
+- Input format: `<src>en</src><dst>ru</dst><text>Hello world</text>`.
+- License note: model weights remain under Google Gemma Terms of Use; conversion scripts are Apache 2.0.
+
+Use `tools/litert-download-translategemma.ps1 -Quant int4` to download the first beta artifact into ignored local model storage.
+
 ## Why Snapdragon 8 Elite Matters
 
 Snapdragon 8 Elite class hardware is the correct target for this test because it gives us enough RAM and modern Qualcomm acceleration. The current connected physical device reported by `adb` during this spike was still `MI 8 / SDM845`, so benchmark runs must explicitly select the new phone serial before any performance decision.
