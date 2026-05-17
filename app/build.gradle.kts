@@ -107,13 +107,13 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.5")
 
     // Room (history & dialogue logs)
-    implementation("androidx.room:room-runtime:2.6.1")
-    implementation("androidx.room:room-ktx:2.6.1")
-    ksp("androidx.room:room-compiler:2.6.1")
+    implementation("androidx.room:room-runtime:2.8.4")
+    implementation("androidx.room:room-ktx:2.8.4")
+    ksp("androidx.room:room-compiler:2.8.4")
 
     // Hilt DI
-    implementation("com.google.dagger:hilt-android:2.53.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.53.1")
+    implementation("com.google.dagger:hilt-android:2.57.2")
+    ksp("com.google.dagger:hilt-android-compiler:2.57.2")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
 
     // Splash screen
@@ -145,6 +145,9 @@ dependencies {
 
     // ML Kit Translation (on-device NMT — fast, for camera realtime)
     implementation("com.google.mlkit:translate:17.0.3")
+
+    // LiteRT-LM beta runtime for TranslateGemma .litertlm experiments
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.11.0")
 
     // Tesseract4Android (Cyrillic/Arabic/Thai/etc. OCR — ML Kit doesn't support these scripts)
     implementation("com.github.adaptech-cz.Tesseract4Android:tesseract4android:4.9.0")

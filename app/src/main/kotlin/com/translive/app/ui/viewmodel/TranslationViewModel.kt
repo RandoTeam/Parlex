@@ -8,7 +8,9 @@ import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.db.TranslationDao
 import com.translive.app.data.model.Language
+import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.TranslationEntry
+import com.translive.app.engine.LiteRtTranslationEngine
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.engine.SystemTtsEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,6 +42,7 @@ data class TranslationUiState(
 class TranslationViewModel @Inject constructor(
     private val app: Application,
     private val engine: TranslationEngine,
+    private val liteRtEngine: LiteRtTranslationEngine,
     private val translationDao: TranslationDao,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
@@ -91,14 +94,30 @@ class TranslationViewModel @Inject constructor(
                     return@launch
                 }
 
+                val runtime = modelRepository.getActiveRuntime()
                 val threads = settings.threads
-                val loaded = engine.loadModel(modelPath, threads)
+                val loaded = if (runtime == ModelRuntime.LITERT_LM) {
+                    engine.unloadModel()
+                    liteRtEngine.loadModel(modelPath, settings.backend, threads)
+                } else {
+                    liteRtEngine.unloadModel()
+                    engine.loadModel(modelPath, threads)
+                }
 
                 _uiState.update {
                     it.copy(
                         isModelLoaded = loaded,
                         isModelLoading = false,
-                        activeModelName = if (loaded) activeVariant?.quantName else null,
+                        activeModelName = if (loaded) {
+                            activeVariant?.let { variant ->
+                                if (runtime == ModelRuntime.LITERT_LM) {
+                                    val backend = liteRtEngine.currentBackend ?: settings.backend
+                                    "${variant.quantName} Beta (${backend.uppercase()})"
+                                } else {
+                                    variant.quantName
+                                }
+                            }
+                        } else null,
                         error = if (!loaded) "Не удалось загрузить модель" else null
                     )
                 }
@@ -144,8 +163,11 @@ class TranslationViewModel @Inject constructor(
         val state = _uiState.value
         if (state.sourceText.isBlank() || state.isTranslating) return
 
+        val runtime = modelRepository.getActiveRuntime()
+        val loaded = if (runtime == ModelRuntime.LITERT_LM) liteRtEngine.isLoaded else engine.isLoaded
+
         // Auto-reload model if it was unloaded (idle timer, other VM, etc.)
-        if (!engine.isLoaded) {
+        if (!loaded) {
             _uiState.update { it.copy(isModelLoaded = false) }
             loadModel()  // will set isModelLoaded=true on success
             // Queue translation after load completes
@@ -167,21 +189,32 @@ class TranslationViewModel @Inject constructor(
                 val textBuilder = StringBuilder()
                 var streamResult: TranslationEngine.StreamResult? = null
 
-                // Acquire mutex to prevent concurrent native access (e.g. camera)
-                engine.inferenceMutex.lock()
-                try {
-                    engine.translateStreaming(
+                if (runtime == ModelRuntime.LITERT_LM) {
+                    liteRtEngine.translateStreaming(
                         sourceText = state.sourceText,
                         source = state.sourceLanguage,
-                        target = state.targetLanguage,
-                        onComplete = { streamResult = it }
+                        target = state.targetLanguage
                     ).collect { token ->
                         textBuilder.append(token)
-                        val currentText = textBuilder.toString().trim()
-                        _uiState.update { it.copy(translatedText = currentText) }
+                        _uiState.update { it.copy(translatedText = textBuilder.toString().trim()) }
                     }
-                } finally {
-                    engine.inferenceMutex.unlock()
+                } else {
+                    // Acquire mutex to prevent concurrent native access (e.g. camera)
+                    engine.inferenceMutex.lock()
+                    try {
+                        engine.translateStreaming(
+                            sourceText = state.sourceText,
+                            source = state.sourceLanguage,
+                            target = state.targetLanguage,
+                            onComplete = { streamResult = it }
+                        ).collect { token ->
+                            textBuilder.append(token)
+                            val currentText = textBuilder.toString().trim()
+                            _uiState.update { it.copy(translatedText = currentText) }
+                        }
+                    } finally {
+                        engine.inferenceMutex.unlock()
+                    }
                 }
 
                 val elapsed = System.currentTimeMillis() - startTime
@@ -233,7 +266,7 @@ class TranslationViewModel @Inject constructor(
 
         idleTimerJob = viewModelScope.launch {
             delay(timeoutMinutes * 60_000L)
-            if (engine.isLoaded) {
+            if (engine.isLoaded || liteRtEngine.isLoaded) {
                 // Update UI state FIRST to close the race window
                 _uiState.update {
                     it.copy(
@@ -243,6 +276,7 @@ class TranslationViewModel @Inject constructor(
                     )
                 }
                 engine.unloadModel()
+                liteRtEngine.unloadModel()
             }
         }
     }

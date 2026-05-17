@@ -7,6 +7,7 @@ import com.translive.app.data.ModelRepository
 import com.translive.app.data.db.DialogueDao
 import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.Language
+import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.SettingsRepository
 import com.translive.app.engine.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -50,6 +51,7 @@ data class DialogueUiState(
 class DialogueViewModel @Inject constructor(
     private val app: Application,
     private val engine: TranslationEngine,
+    private val liteRtEngine: LiteRtTranslationEngine,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
     private val systemTts: SystemTtsEngine,
@@ -63,6 +65,36 @@ class DialogueViewModel @Inject constructor(
     /** Current session ID in Room */
     private var currentSessionId: Long? = null
 
+    private fun isTranslationModelLoaded(): Boolean =
+        if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+            liteRtEngine.isLoaded
+        } else {
+            engine.isLoaded
+        }
+
+    private fun loadActiveTranslationModel(): Boolean {
+        val path = modelRepository.getActiveModelPath() ?: return false
+        val threads = settings.threads
+        return if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+            engine.unloadModel()
+            liteRtEngine.loadModel(path, settings.backend, threads)
+        } else {
+            liteRtEngine.unloadModel()
+            engine.loadModel(path, threads)
+        }
+    }
+
+    private suspend fun translateWithActiveRuntime(
+        sourceText: String,
+        source: Language,
+        target: Language
+    ): String =
+        if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+            liteRtEngine.translateSafe(sourceText, source, target)
+        } else {
+            engine.translateSafe(sourceText, source, target)
+        }
+
     init {
         // Initialize system TTS immediately — no download needed
         systemTts.initialize()
@@ -70,14 +102,9 @@ class DialogueViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val sttReady = speechEngine.areModelsDownloaded()
 
-            // Check if model is actually loaded in memory, not just selected
-            var modelReady = engine.isLoaded
-            if (!modelReady) {
-                val path = modelRepository.getActiveModelPath()
-                if (path != null) {
-                    val threads = settings.threads
-                    modelReady = engine.loadModel(path, threads)
-                }
+            var modelReady = isTranslationModelLoaded()
+            if (!modelReady && modelRepository.getActiveModelPath() != null) {
+                modelReady = loadActiveTranslationModel()
             }
 
             _uiState.update {
@@ -146,7 +173,7 @@ class DialogueViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 // 1. Ensure translation model is loaded
-                if (!engine.isLoaded) {
+                if (!isTranslationModelLoaded()) {
                     val path = modelRepository.getActiveModelPath()
                     if (path == null) {
                         _uiState.update {
@@ -158,8 +185,7 @@ class DialogueViewModel @Inject constructor(
                         }
                         return@launch
                     }
-                    val threads = settings.threads
-                    val loaded = engine.loadModel(path, threads)
+                    val loaded = loadActiveTranslationModel()
                     if (!loaded) {
                         _uiState.update {
                             it.copy(
@@ -266,7 +292,7 @@ class DialogueViewModel @Inject constructor(
                     toLang = state.targetLanguage
                 }
 
-                val translated = engine.translateSafe(
+                val translated = translateWithActiveRuntime(
                     sourceText = result.text,
                     source = fromLang,
                     target = toLang

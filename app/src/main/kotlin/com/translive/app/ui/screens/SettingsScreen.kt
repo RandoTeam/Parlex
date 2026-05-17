@@ -132,7 +132,7 @@ fun SettingsScreen(
                 Text("Бекенд вычислений", style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    "GPU и NPU требуют пересборки с Vulkan/NNAPI",
+                    "GPU/NPU используются только LiteRT Beta; при сбое будет откат на CPU",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -147,17 +147,17 @@ fun SettingsScreen(
                 )
                 BackendOption(
                     label = "GPU (Vulkan)",
-                    description = "Ускорение на поддерживаемых GPU • скоро",
+                    description = "LiteRT-LM backend с автоматическим откатом",
                     selected = backend == SettingsRepository.BACKEND_GPU,
-                    enabled = false,
-                    onClick = { }
+                    enabled = true,
+                    onClick = { viewModel.setBackend(SettingsRepository.BACKEND_GPU) }
                 )
                 BackendOption(
                     label = "NPU (NNAPI)",
-                    description = "Нейропроцессор • скоро",
+                    description = "Экспериментально, с откатом на CPU",
                     selected = backend == SettingsRepository.BACKEND_NPU,
-                    enabled = false,
-                    onClick = { }
+                    enabled = true,
+                    onClick = { viewModel.setBackend(SettingsRepository.BACKEND_NPU) }
                 )
             }
 

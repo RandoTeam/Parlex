@@ -46,14 +46,14 @@ fun ModelManagerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
 
-    // File picker for GGUF import
+    // File picker for GGUF / LiteRT-LM import
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { viewModel.importModelFromUri(it) }
     }
 
-    // SAF picker for GGUF export
+    // SAF picker for model export
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? ->
@@ -239,7 +239,7 @@ fun ModelManagerScreen(
                     ) {
                         Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Установить из файла (.gguf)")
+                        Text("Установить из файла (.gguf/.litertlm)")
                     }
                 }
             }

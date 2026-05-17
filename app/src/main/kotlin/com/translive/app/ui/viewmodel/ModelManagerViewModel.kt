@@ -9,9 +9,11 @@ import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.ModelCatalog
 import com.translive.app.data.model.ModelFamily
+import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
 import com.translive.app.engine.DownloadState
+import com.translive.app.engine.LiteRtTranslationEngine
 import com.translive.app.engine.ModelDownloadManager
 import com.translive.app.engine.SpeechEngine
 import com.translive.app.engine.TranslationEngine
@@ -75,6 +77,7 @@ class ModelManagerViewModel @Inject constructor(
     private val repo: ModelRepository,
     private val downloadManager: ModelDownloadManager,
     private val engine: TranslationEngine,
+    private val liteRtEngine: LiteRtTranslationEngine,
     private val speechEngine: SpeechEngine,
     private val settings: SettingsRepository
 ) : ViewModel() {
@@ -221,14 +224,19 @@ class ModelManagerViewModel @Inject constructor(
 
         _uiState.update { it.copy(isLoadingModel = true, error = null) }
 
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 engine.unloadModel()
+                liteRtEngine.unloadModel()
                 repo.setActiveModelId(variant.id)
                 val path = repo.getModelPath(variant) ?: return@launch
 
                 val threads = settings.threads
-                val loaded = engine.loadModel(path, threads)
+                val loaded = if (variant.runtime == ModelRuntime.LITERT_LM) {
+                    liteRtEngine.loadModel(path, settings.backend, threads)
+                } else {
+                    engine.loadModel(path, threads)
+                }
 
                 if (!loaded) {
                     _uiState.update { it.copy(error = "Не удалось загрузить модель ${variant.quantName}") }
@@ -245,6 +253,7 @@ class ModelManagerViewModel @Inject constructor(
     fun deleteModel(variant: ModelVariant) {
         if (repo.getActiveModelId() == variant.id) {
             engine.unloadModel()
+            liteRtEngine.unloadModel()
         }
         repo.deleteModel(variant)
         refreshModels()
@@ -321,7 +330,13 @@ class ModelManagerViewModel @Inject constructor(
                         val path = repo.getActiveModelPath()
                         if (path != null) {
                             val threads = settings.threads
-                            engine.loadModel(path, threads)
+                            if (repo.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+                                engine.unloadModel()
+                                liteRtEngine.loadModel(path, settings.backend, threads)
+                            } else {
+                                liteRtEngine.unloadModel()
+                                engine.loadModel(path, threads)
+                            }
                         }
                     }
                     _uiState.update {

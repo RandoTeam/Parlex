@@ -9,7 +9,8 @@ object ModelCatalog {
 
     val ALL_FAMILIES: List<ModelFamily> = listOf(
         hyMtFamily(),
-        translateGemmaFamily()
+        translateGemmaFamily(),
+        translateGemmaLiteRtFamily()
     )
 
     // ─── 1. HY-MT 1.5 1.8B (Tencent) ─────────────────────────────────
@@ -67,10 +68,51 @@ object ModelCatalog {
         )
     }
 
+    private fun translateGemmaLiteRtFamily(): ModelFamily {
+        val b = "https://huggingface.co/barakplasma/translategemma-4b-it-android-task-quantized/resolve/main"
+        return ModelFamily(
+            id = "translate_gemma_litert_beta",
+            name = "TranslateGemma LiteRT Beta",
+            developer = "Google / LiteRT",
+            description = "Beta runtime: LiteRT-LM .litertlm, CPU/GPU/NPU",
+            languageCount = 55,
+            parameterSize = "4B",
+            promptStyle = PromptStyle.TRANSLATE_GEMMA,
+            license = ModelLicense.GEMMA_TOU,
+            isSpecialized = true,
+            variants = listOf(
+                v(
+                    "translate_gemma_litert_beta:int4",
+                    "INT4 LiteRT Beta",
+                    "Beta",
+                    "LiteRT-LM INT4, ~2 GB, for CPU/GPU/NPU tests",
+                    2_011_201_536L,
+                    6_144,
+                    "$b/artifacts/int4-generic/translategemma-4b-it-int4-generic.litertlm?download=true",
+                    "translategemma-4b-it-int4-generic.litertlm",
+                    rec = true,
+                    runtime = ModelRuntime.LITERT_LM
+                ),
+                v(
+                    "translate_gemma_litert_beta:dynamic_int8",
+                    "INT8 LiteRT Beta",
+                    "Quality beta",
+                    "LiteRT-LM dynamic INT8, ~4 GB, better quality",
+                    3_920_576_512L,
+                    8_192,
+                    "$b/artifacts/dynamic_int8-generic/translategemma-4b-it-dynamic_int8-generic.litertlm?download=true",
+                    "translategemma-4b-it-dynamic_int8-generic.litertlm",
+                    runtime = ModelRuntime.LITERT_LM
+                )
+            )
+        )
+    }
+
     // ─── Helper ───────────────────────────────────────────────────────
 
     private fun v(
         id: String, quant: String, display: String, desc: String,
-        size: Long, ram: Int, url: String, file: String, rec: Boolean = false
-    ) = ModelVariant(id, quant, display, desc, size, ram, url, file, rec)
+        size: Long, ram: Int, url: String, file: String, rec: Boolean = false,
+        runtime: ModelRuntime = ModelRuntime.GGUF
+    ) = ModelVariant(id, quant, display, desc, size, ram, url, file, rec, runtime)
 }

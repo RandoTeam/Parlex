@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import com.translive.app.data.model.ModelCatalog
 import com.translive.app.data.model.ModelFamily
+import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.ModelVariant
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -57,6 +58,17 @@ class ModelRepository @Inject constructor(
     fun getActiveFamily(): ModelFamily? {
         val variant = getActiveVariant() ?: return null
         return ModelFamily.familyOf(variant)
+    }
+
+    fun getActiveRuntime(): ModelRuntime {
+        val variant = getActiveVariant()
+        if (variant != null) return variant.runtime
+
+        val id = getActiveModelId() ?: return ModelRuntime.GGUF
+        if (id.startsWith("custom:") && id.endsWith(".litertlm", ignoreCase = true)) {
+            return ModelRuntime.LITERT_LM
+        }
+        return ModelRuntime.GGUF
     }
 
     /** Get the active model variant */
@@ -137,8 +149,8 @@ class ModelRepository @Inject constructor(
     }
 
     /**
-     * Import a GGUF model from a SAF URI.
-     * Validates GGUF magic bytes, copies the file with progress reporting.
+     * Import a GGUF or LiteRT-LM model from a SAF URI.
+     * Validates known magic bytes, copies the file with progress reporting.
      * @return the filename of the imported model, or null on failure.
      */
     fun importModelFromUri(
@@ -147,23 +159,32 @@ class ModelRepository @Inject constructor(
     ): Result<String> {
         val resolver = context.contentResolver
 
-        // Get filename from URI
         val filename = resolveFilename(uri) ?: "imported_model.gguf"
-        if (!filename.endsWith(".gguf", ignoreCase = true)) {
-            return Result.failure(IllegalArgumentException("Файл должен иметь расширение .gguf"))
+        val isGguf = filename.endsWith(".gguf", ignoreCase = true)
+        val isLiteRtLm = filename.endsWith(".litertlm", ignoreCase = true)
+        if (!isGguf && !isLiteRtLm) {
+            return Result.failure(IllegalArgumentException("Файл должен иметь расширение .gguf или .litertlm"))
         }
 
         val inputStream = resolver.openInputStream(uri)
             ?: return Result.failure(IllegalStateException("Не удалось открыть файл"))
 
         return try {
-            // Read first 4 bytes to validate GGUF magic
-            val magic = ByteArray(4)
+            val magicSize = if (isLiteRtLm) 8 else 4
+            val magic = ByteArray(magicSize)
             val read = inputStream.read(magic)
-            if (read < 4 || magic[0] != 0x47.toByte() || magic[1] != 0x47.toByte() ||
-                magic[2] != 0x55.toByte() || magic[3] != 0x46.toByte()) {
+            val validGguf = isGguf &&
+                read >= 4 &&
+                magic[0] == 0x47.toByte() &&
+                magic[1] == 0x47.toByte() &&
+                magic[2] == 0x55.toByte() &&
+                magic[3] == 0x46.toByte()
+            val validLiteRtLm = isLiteRtLm &&
+                read >= 8 &&
+                magic.copyOfRange(0, 8).contentEquals("LITERTLM".toByteArray())
+            if (!validGguf && !validLiteRtLm) {
                 inputStream.close()
-                return Result.failure(IllegalArgumentException("Файл не является GGUF моделью"))
+                return Result.failure(IllegalArgumentException("Файл не является поддерживаемой моделью"))
             }
 
             // Get total size for progress
@@ -176,7 +197,7 @@ class ModelRepository @Inject constructor(
             destFile.outputStream().buffered().use { out ->
                 // Write the magic bytes we already read
                 out.write(magic)
-                var copied = 4L
+                var copied = magicSize.toLong()
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
                 while (inputStream.read(buffer).also { bytesRead = it } != -1) {

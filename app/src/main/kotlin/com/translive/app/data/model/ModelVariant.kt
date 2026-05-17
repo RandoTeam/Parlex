@@ -14,7 +14,8 @@ data class ModelVariant(
     val ramEstimateMb: Int,
     val downloadUrl: String,
     val filename: String,
-    val isRecommended: Boolean = false
+    val isRecommended: Boolean = false,
+    val runtime: ModelRuntime = ModelRuntime.GGUF
 ) {
     val sizeMb: Double get() = sizeBytes / (1024.0 * 1024.0)
     val sizeGb: Double get() = sizeBytes / (1024.0 * 1024.0 * 1024.0)

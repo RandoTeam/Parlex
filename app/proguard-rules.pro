@@ -17,6 +17,9 @@
 -keep class com.google.android.gms.internal.mlkit_vision_text.** { *; }
 -keep class com.google.android.gms.internal.mlkit_translate.** { *; }
 
+# LiteRT-LM beta runtime
+-keep class com.google.ai.edge.litertlm.** { *; }
+
 # OcrEngine + CameraTranslateEngine
 -keep class com.translive.app.engine.OcrEngine { *; }
 -keep class com.translive.app.engine.CameraTranslateEngine { *; }

@@ -18,9 +18,12 @@ This spike is measurement-driven: LiteRT moves forward only if it beats the curr
 
 - Model family: TranslateGemma.
 - Beta format: LiteRT-LM `.litertlm`, not a normal `.tflite` tensor model.
-- Android dependency candidate: `com.google.ai.edge.litertlm:litertlm-android:0.11.0`.
+- Android dependency in the app now: `com.google.ai.edge.litertlm:litertlm-android:0.11.0`.
+- LiteRT-LM `0.11.0` requires a newer Kotlin toolchain than the previous app baseline, so the app now uses Kotlin/KSP `2.2.21`.
+- Annotation processors were kept compatible with that toolchain: Room `2.8.4`, Hilt `2.57.2`. Hilt `2.59.2` requires AGP 9 and is not compatible with the current AGP `8.7.3` baseline.
 - Non-LLM LiteRT dependency candidate for plain `.tflite` experiments: `com.google.ai.edge.litert:litert:2.1.5`.
 - Backends to benchmark: CPU, GPU, NPU.
+- The in-app beta loader tries the selected LiteRT backend first and falls back to CPU if GPU/NPU is unavailable.
 
 The important distinction: LiteRT is the low-level on-device runtime, while LiteRT-LM is the LLM path we need for text generation and streaming translation.
 
@@ -38,7 +41,7 @@ Use `tools/litert-download-translategemma.ps1 -Quant int4` to download the first
 
 ## Why Snapdragon 8 Elite Matters
 
-Snapdragon 8 Elite class hardware is the correct target for this test because it gives us enough RAM and modern Qualcomm acceleration. The current connected physical device reported by `adb` during this spike was still `MI 8 / SDM845`, so benchmark runs must explicitly select the new phone serial before any performance decision.
+Snapdragon 8 Elite class hardware is the correct target for this test because it gives us enough RAM and modern Qualcomm acceleration. The current connected physical device for this spike is a Snapdragon 8 Elite class OnePlus device on Android 16, so benchmark runs must explicitly select that phone serial instead of the emulator.
 
 ## Spike Phases
 
@@ -78,6 +81,12 @@ Snapdragon 8 Elite class hardware is the correct target for this test because it
 - Backend actually used: CPU, GPU, or NPU.
 - Device temperature/thermal throttling notes.
 - Translation quality notes for fixed prompts.
+
+## Initial App Smoke Results
+
+- INT4 `.litertlm` loads on the Snapdragon 8 Elite class phone through the LiteRT-LM CPU backend in about 0.7 seconds after APK install and model placement.
+- GPU backend starts LiteRT GPU/OpenCL registration, but the current INT4 artifact fails on this device with a single ~1.34 GB allocation request over a 1 GB GPU allocation limit. The app now falls back to CPU instead of surfacing a hard load failure.
+- NPU remains unproven and must stay beta until a backend-specific smoke test produces stable output.
 
 ## Pass Criteria
 
