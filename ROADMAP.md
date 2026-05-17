@@ -103,6 +103,7 @@ Google/Yandex camera translate.
 
 - Оставить HY-MT и TranslateGemma GGUF как стабильные модели.
 - Добавить TranslateGemma LiteRT как отдельный beta runtime.
+- Вести технический spike по `docs/LITERT_BETA.md`, начиная с проверки реального устройства и отдельного benchmark-пути.
 - Сравнить на реальных телефонах:
   - размер модели;
   - время загрузки;
