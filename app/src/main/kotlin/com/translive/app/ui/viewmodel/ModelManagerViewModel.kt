@@ -2,7 +2,7 @@ package com.translive.app.ui.viewmodel
 
 import android.net.Uri
 
-import android.util.Log
+import com.translive.app.AppLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
@@ -439,7 +439,7 @@ class ModelManagerViewModel @Inject constructor(
                             it.copy(sttDownloading = false, sttDownloaded = true, sttProgress = 1f)
                         }
                     } catch (e: Exception) {
-                        Log.e(TAG, "STT extract error: ${e.message}", e)
+                        AppLog.e(TAG, "STT extract error: ${e.message}", e)
                         _uiState.update {
                             it.copy(sttDownloading = false, error = tr(R.string.error_prefix, "STT extract: ${e.message ?: ""}"))
                         }
@@ -459,7 +459,7 @@ class ModelManagerViewModel @Inject constructor(
     }
 
     private fun extractTarBz2(archive: File, destDir: File) {
-        Log.i(TAG, "Extracting ${archive.name} (${archive.length()} bytes) to ${destDir.absolutePath}")
+        AppLog.i(TAG, "Extracting ${archive.name} (${archive.length()} bytes) to ${destDir.absolutePath}")
         val fis = FileInputStream(archive)
         val bis = BufferedInputStream(fis)
         val bzis = BZip2CompressorInputStream(bis)
@@ -471,13 +471,13 @@ class ModelManagerViewModel @Inject constructor(
                 val outFile = File(destDir, entry.name)
                 if (entry.isDirectory) {
                     outFile.mkdirs()
-                    Log.d(TAG, "  DIR: ${entry.name}")
+                    AppLog.d(TAG, "  DIR: ${entry.name}")
                 } else {
                     outFile.parentFile?.mkdirs()
                     outFile.outputStream().use { out ->
                         tais.copyTo(out)
                     }
-                    Log.i(TAG, "  FILE: ${entry.name} -> ${outFile.length()} bytes")
+                    AppLog.i(TAG, "  FILE: ${entry.name} -> ${outFile.length()} bytes")
                 }
                 entry = tais.nextEntry
             }
@@ -487,6 +487,6 @@ class ModelManagerViewModel @Inject constructor(
             bis.close()
             fis.close()
         }
-        Log.i(TAG, "Extraction complete")
+        AppLog.i(TAG, "Extraction complete")
     }
 }

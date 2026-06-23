@@ -3,7 +3,7 @@ package com.translive.app.engine
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.util.Log
+import com.translive.app.AppLog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,9 +39,9 @@ class SystemTtsEngine @Inject constructor(
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 _isReady.value = true
-                Log.i(TAG, "System TTS initialized")
+                AppLog.i(TAG, "System TTS initialized")
             } else {
-                Log.e(TAG, "System TTS init failed: $status")
+                AppLog.e(TAG, "System TTS init failed: $status")
                 _isReady.value = false
             }
         }
@@ -58,7 +58,7 @@ class SystemTtsEngine @Inject constructor(
         val locale = Locale.forLanguageTag(languageCode)
         val result = engine.setLanguage(locale)
         if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-            Log.w(TAG, "Language $languageCode not supported by system TTS, trying default")
+            AppLog.w(TAG, "Language $languageCode not supported by system TTS, trying default")
         }
 
         val utteranceId = "dialogue_${System.currentTimeMillis()}"
@@ -81,7 +81,7 @@ class SystemTtsEngine @Inject constructor(
                 }
 
                 override fun onError(id: String?, errorCode: Int) {
-                    Log.e(TAG, "TTS error: $errorCode")
+                    AppLog.e(TAG, "TTS error: $errorCode")
                     _isSpeaking.value = false
                     if (cont.isActive) cont.resume(Unit)
                 }

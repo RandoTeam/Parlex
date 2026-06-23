@@ -1,6 +1,7 @@
 package com.translive.app.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -37,6 +38,7 @@ fun SettingsScreen(
     onNavigateToCamera: () -> Unit = {},
     onNavigateToHistory: () -> Unit,
     onNavigateToModels: () -> Unit,
+    onNavigateToLogViewer: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -44,6 +46,7 @@ fun SettingsScreen(
     val threads by viewModel.threads.collectAsState()
     val timeoutMinutes by viewModel.idleTimeout.collectAsState()
     val backend by viewModel.backend.collectAsState()
+    val fileLoggingEnabled by viewModel.fileLoggingEnabled.collectAsState()
 
     Scaffold(
         bottomBar = {
@@ -272,7 +275,49 @@ fun SettingsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            // --- Debug section ---
+            SectionHeader(icon = Icons.Outlined.BugReport, title = stringResource(R.string.settings_debug))
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.settings_file_logging), style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            stringResource(R.string.settings_file_logging_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = fileLoggingEnabled,
+                        onCheckedChange = { viewModel.setFileLoggingEnabled(it) }
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNavigateToLogViewer() }
+                        .padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        stringResource(R.string.settings_view_logs),
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Icon(
+                        Icons.Filled.ChevronRight,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
 
             // --- Info ---
             SectionHeader(icon = Icons.Outlined.Info, title = stringResource(R.string.settings_about))

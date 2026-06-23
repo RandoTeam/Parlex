@@ -1,5 +1,6 @@
 package com.translive.app.ui.viewmodel
 
+import com.translive.app.AppLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.db.DialogueDao
@@ -33,6 +34,10 @@ class HistoryViewModel @Inject constructor(
     private val translationDao: TranslationDao,
     private val dialogueDao: DialogueDao
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "HistoryVM"
+    }
 
     private val _tab = MutableStateFlow(HistoryTab.ALL)
     private val _searchQuery = MutableStateFlow("")
@@ -112,24 +117,28 @@ class HistoryViewModel @Inject constructor(
 
     fun toggleFavorite(entry: TranslationEntry) {
         viewModelScope.launch(Dispatchers.IO) {
+            AppLog.d(TAG, "Toggle favorite id=${entry.id}")
             translationDao.updateTranslation(entry.copy(isFavorite = !entry.isFavorite))
         }
     }
 
     fun toggleVoiceFavorite(message: DialogueMessage) {
         viewModelScope.launch(Dispatchers.IO) {
+            AppLog.d(TAG, "Toggle voice favorite id=${message.id}")
             dialogueDao.updateMessage(message.copy(isFavorite = !message.isFavorite))
         }
     }
 
     fun deleteTranslation(entry: TranslationEntry) {
         viewModelScope.launch(Dispatchers.IO) {
+            AppLog.d(TAG, "Delete translation id=${entry.id}")
             translationDao.deleteById(entry.id)
         }
     }
 
     fun deleteSession(session: DialogueSession) {
         viewModelScope.launch(Dispatchers.IO) {
+            AppLog.d(TAG, "Delete session id=${session.id}")
             dialogueDao.deleteMessagesForSession(session.id)
             dialogueDao.deleteSession(session)
         }
@@ -137,6 +146,7 @@ class HistoryViewModel @Inject constructor(
 
     fun clearHistory() {
         viewModelScope.launch(Dispatchers.IO) {
+            AppLog.d(TAG, "Clear non-favorite history")
             translationDao.clearNonFavoriteHistory()
         }
     }

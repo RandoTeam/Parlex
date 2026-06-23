@@ -1,7 +1,7 @@
 package com.translive.app.engine
 
 import android.content.Context
-import android.util.Log
+import com.translive.app.AppLog
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
@@ -58,7 +58,7 @@ class LiteRtTranslationEngine @Inject constructor(
             }
 
             if (requestedBackend != SettingsRepository.BACKEND_CPU) {
-                Log.w(TAG, "Falling back to CPU backend after $requestedBackend failed")
+                AppLog.w(TAG, "Falling back to CPU backend after $requestedBackend failed")
                 closeLocked()
                 return@withLock loadWithBackendLocked(
                     modelPath = modelPath,
@@ -171,10 +171,10 @@ class LiteRtTranslationEngine @Inject constructor(
             engine = nextEngine
             loadedModelPath = modelPath
             loadedBackend = backendName
-            Log.i(TAG, "Loaded LiteRT-LM model with $backendName backend in ${elapsed}ms")
+            AppLog.i(TAG, "Loaded LiteRT-LM model with $backendName backend in ${elapsed}ms")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load LiteRT-LM model with $backendName backend", e)
+            AppLog.e(TAG, "Failed to load LiteRT-LM model with $backendName backend", e)
             closeLocked()
             false
         }
@@ -187,14 +187,14 @@ class LiteRtTranslationEngine @Inject constructor(
         try {
             activeConversation?.close()
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to close LiteRT-LM conversation", e)
+            AppLog.w(TAG, "Failed to close LiteRT-LM conversation", e)
         }
         activeConversation = null
 
         try {
             engine?.close()
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to close LiteRT-LM engine", e)
+            AppLog.w(TAG, "Failed to close LiteRT-LM engine", e)
         }
         engine = null
         loadedModelPath = null

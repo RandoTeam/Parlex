@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
+import com.translive.app.AppLog
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.db.DialogueDao
 import com.translive.app.data.model.DialogueSession
@@ -61,6 +62,10 @@ class DialogueViewModel @Inject constructor(
     private val dialogueDao: DialogueDao,
     private val texts: LocalizedTextProvider
 ) : AndroidViewModel(app) {
+
+    companion object {
+        private const val TAG = "DialogueVM"
+    }
 
     private fun tr(id: Int, vararg args: Any): String =
         texts.text(id, *args)
@@ -178,6 +183,7 @@ class DialogueViewModel @Inject constructor(
             return
         }
 
+        AppLog.i(TAG, "Starting conversation: ${_uiState.value.sourceLanguage.code} ↔ ${_uiState.value.targetLanguage.code}")
         _uiState.update {
             it.copy(
                 isConversationActive = true,
@@ -203,6 +209,7 @@ class DialogueViewModel @Inject constructor(
                     }
                     val loaded = loadActiveTranslationModel()
                     if (!loaded) {
+                        AppLog.e(TAG, "Translation model load failed")
                         _uiState.update {
                             it.copy(
                                 isConversationActive = false,
@@ -228,6 +235,7 @@ class DialogueViewModel @Inject constructor(
                 }
                 val ok = speechEngine.initialize("")  // Auto-detect for bidirectional
                 if (!ok) {
+                    AppLog.e(TAG, "STT initialization failed")
                     _uiState.update {
                         it.copy(
                             isConversationActive = false,
@@ -252,6 +260,7 @@ class DialogueViewModel @Inject constructor(
                     onSpeechRecognized(result)
                 }
             } catch (e: Exception) {
+                AppLog.e(TAG, "startConversation failed", e)
                 _uiState.update {
                     it.copy(
                         isConversationActive = false,
@@ -264,6 +273,7 @@ class DialogueViewModel @Inject constructor(
     }
 
     fun stopConversation() {
+        AppLog.i(TAG, "Stopping conversation")
         speechEngine.stopListening()
         systemTts.stop()
 
@@ -287,6 +297,7 @@ class DialogueViewModel @Inject constructor(
     private fun onSpeechRecognized(result: SpeechResult) {
         if (!_uiState.value.isConversationActive) return
 
+        AppLog.d(TAG, "Speech recognized: lang=${result.language} text=${result.text.take(80)}")
         _uiState.update { it.copy(phase = DialoguePhase.TRANSLATING) }
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -313,6 +324,8 @@ class DialogueViewModel @Inject constructor(
                     source = fromLang,
                     target = toLang
                 ).trim()
+
+                AppLog.d(TAG, "Translation: ${fromLang.code}→${toLang.code} \"${result.text.take(40)}\" → \"${translated.take(40)}\"")
 
                 val uiMessage = DialogueUiMessage(
                     sourceText = result.text,
@@ -355,6 +368,7 @@ class DialogueViewModel @Inject constructor(
                     speechEngine.startListening { onSpeechRecognized(it) }
                 }
             } catch (e: Exception) {
+                AppLog.e(TAG, "onSpeechRecognized failed", e)
                 _uiState.update {
                     it.copy(phase = DialoguePhase.LISTENING, error = e.message)
                 }

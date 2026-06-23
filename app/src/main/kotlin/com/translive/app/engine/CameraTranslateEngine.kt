@@ -1,6 +1,6 @@
 package com.translive.app.engine
 
-import android.util.Log
+import com.translive.app.AppLog
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
@@ -101,7 +101,7 @@ class CameraTranslateEngine @Inject constructor() {
         val tgtLang = toMlKitLang(targetCode)
 
         if (srcLang == null || tgtLang == null) {
-            Log.w(TAG, "Unsupported language pair: $sourceCode -> $targetCode")
+            AppLog.w(TAG, "Unsupported language pair: $sourceCode -> $targetCode")
             _isReady.value = false
             return false
         }
@@ -129,13 +129,13 @@ class CameraTranslateEngine @Inject constructor() {
 
             translator.downloadModelIfNeeded(conditions)
                 .addOnSuccessListener {
-                    Log.i(TAG, "ML Kit model ready: $sourceCode -> $targetCode")
+                    AppLog.i(TAG, "ML Kit model ready: $sourceCode -> $targetCode")
                     _isReady.value = true
                     _isDownloading.value = false
                     if (cont.isActive) cont.resume(true)
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "Model download failed: ${e.message}", e)
+                    AppLog.e(TAG, "Model download failed: ${e.message}", e)
                     _isReady.value = false
                     _isDownloading.value = false
                     if (cont.isActive) cont.resume(false)
@@ -169,7 +169,7 @@ class CameraTranslateEngine @Inject constructor() {
                     if (cont.isActive) cont.resume(translated)
                 }
                 .addOnFailureListener { e ->
-                    Log.e(TAG, "Translation failed: ${e.message}")
+                    AppLog.e(TAG, "Translation failed: ${e.message}")
                     if (cont.isActive) cont.resume(text)
                 }
         }

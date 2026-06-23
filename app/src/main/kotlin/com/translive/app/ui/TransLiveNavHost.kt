@@ -76,8 +76,12 @@ fun TransLiveNavHost() {
                 onNavigateToDialogue = { navigateTo("dialogue") },
                 onNavigateToCamera = { navigateTo("camera") },
                 onNavigateToHistory = { navigateTo("history") },
-                onNavigateToModels = { navigateTo("models") }
+                onNavigateToModels = { navigateTo("models") },
+                onNavigateToLogViewer = { navigateTo("log_viewer") }
             )
+        }
+        composable("log_viewer") {
+            LogViewerScreen(onBack = { navController.popBackStack() })
         }
     }
 }

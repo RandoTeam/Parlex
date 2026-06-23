@@ -196,4 +196,14 @@
     <string name="model_variant_translate_gemma_litert_beta_dynamic_int8_desc">LiteRT-LM dynamic INT8，約 4 GB，品質更高</string>
     <string name="settings_tts_engine_value">Android System TTS</string>
     <string name="stt_combined_description">Silero VAD (2 MB) + Whisper Tiny (40 MB)</string>
+    <string name="settings_debug">除錯</string>
+    <string name="settings_file_logging">檔案日誌</string>
+    <string name="settings_file_logging_desc">將日誌寫入檔案，便於分享與除錯</string>
+    <string name="settings_view_logs">檢視日誌</string>
+    <string name="log_viewer_title">日誌</string>
+    <string name="log_viewer_clear_title">清除日誌？</string>
+    <string name="log_viewer_clear_confirm">清除</string>
+    <string name="log_viewer_search_hint">搜尋日誌…</string>
+    <string name="log_viewer_empty">暫無日誌</string>
+    <string name="log_viewer_share">分享日誌檔案</string>
 </resources>

@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import com.translive.app.AppLog
 import com.translive.app.R
 import com.translive.app.i18n.LocalizedTextProvider
 // Uses android system icons for notification
@@ -32,6 +33,7 @@ import javax.inject.Inject
 class DownloadService : Service() {
 
     companion object {
+        private const val TAG = "DownloadService"
         private const val CHANNEL_ID = "download_channel"
         private const val NOTIFICATION_ID = 42
         private const val ACTION_CANCEL = "com.translive.app.CANCEL_DOWNLOAD"
@@ -58,6 +60,7 @@ class DownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.i(TAG, "onCreate")
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification(texts.text(R.string.notification_download_preparing), 0))
 
@@ -85,6 +88,7 @@ class DownloadService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_CANCEL) {
+            AppLog.i(TAG, "Cancel action received")
             downloadManager.cancelAll()
             stopSelf()
         }
@@ -94,6 +98,7 @@ class DownloadService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        AppLog.i(TAG, "onDestroy")
         observeJob?.cancel()
         scope.cancel()
         super.onDestroy()

@@ -1,5 +1,6 @@
 package com.translive.app.ui.viewmodel
 
+import com.translive.app.AppLog
 import androidx.lifecycle.ViewModel
 import com.translive.app.data.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -13,6 +14,10 @@ class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository
 ) : ViewModel() {
 
+    companion object {
+        private const val TAG = "SettingsVM"
+    }
+
     private val _appLanguage = MutableStateFlow(settings.appLanguageCode)
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
@@ -25,23 +30,37 @@ class SettingsViewModel @Inject constructor(
     private val _backend = MutableStateFlow(settings.backend)
     val backend: StateFlow<String> = _backend.asStateFlow()
 
+    private val _fileLoggingEnabled = MutableStateFlow(settings.fileLoggingEnabled)
+    val fileLoggingEnabled: StateFlow<Boolean> = _fileLoggingEnabled.asStateFlow()
+
     fun setAppLanguage(value: String) {
+        AppLog.d(TAG, "setAppLanguage: $value")
         settings.appLanguageCode = value
         _appLanguage.value = value
     }
 
     fun setThreads(value: Int) {
+        AppLog.d(TAG, "setThreads: $value")
         settings.threads = value
         _threads.value = value
     }
 
     fun setIdleTimeout(minutes: Int) {
+        AppLog.d(TAG, "setIdleTimeout: $minutes")
         settings.idleTimeoutMinutes = minutes
         _idleTimeout.value = minutes
     }
 
     fun setBackend(value: String) {
+        AppLog.d(TAG, "setBackend: $value")
         settings.backend = value
         _backend.value = value
+    }
+
+    fun setFileLoggingEnabled(value: Boolean) {
+        AppLog.d(TAG, "setFileLoggingEnabled: $value")
+        settings.fileLoggingEnabled = value
+        _fileLoggingEnabled.value = value
+        AppLog.setFileLoggingEnabled(value)
     }
 }

@@ -1,5 +1,6 @@
 package com.translive.app.ui.screens
 
+import com.translive.app.AppLog
 import android.Manifest
 import android.content.Context
 import android.content.pm.ApplicationInfo
@@ -175,9 +176,9 @@ private fun logCameraApiOptions(
     val optionSummary = options.joinToString(separator = "; ") { option ->
         "${option.shortLabel}:${option.id}:flash=${option.hasFlash}"
     }
-    android.util.Log.i("CameraScreen", "CameraManager ids: $cameraManagerSummary")
-    android.util.Log.i("CameraScreen", "CameraX infos: $cameraInfoSummary")
-    android.util.Log.i("CameraScreen", "Camera UI options: $optionSummary")
+    AppLog.i("CameraScreen", "CameraManager ids: $cameraManagerSummary")
+    AppLog.i("CameraScreen", "CameraX infos: $cameraInfoSummary")
+    AppLog.i("CameraScreen", "Camera UI options: $optionSummary")
 }
 
 private fun preferredCameraOption(
@@ -1117,7 +1118,7 @@ private fun LiveCameraView(
 
                         override fun onError(exception: ImageCaptureException) {
                             isTakingPicture.set(false)
-                            android.util.Log.e(
+                            AppLog.e(
                                 "CameraScreen",
                                 "ImageCapture failed: ${exception.message}",
                                 exception
@@ -1225,7 +1226,7 @@ private fun LiveCameraView(
                                 .build()
                             provider.bindToLifecycle(lifecycleOwner, selector, useCaseGroup)
                         } else {
-                            android.util.Log.w(
+                            AppLog.w(
                                 "CameraScreen",
                                 "PreviewView ViewPort unavailable, binding fallback"
                             )
@@ -1245,7 +1246,7 @@ private fun LiveCameraView(
                         bindCamera(selectedOption)
                     } catch (selectedError: Exception) {
                         if (fallbackOption != null && fallbackOption.id != selectedOption?.id) {
-                            android.util.Log.w(
+                            AppLog.w(
                                 "CameraScreen",
                                 "Selected camera bind failed, falling back to ${fallbackOption.shortLabel}: ${selectedError.message}",
                                 selectedError
@@ -1265,12 +1266,12 @@ private fun LiveCameraView(
                     camera.cameraControl.enableTorch(
                         torchEnabled && camera.cameraInfo.hasFlashUnit()
                     )
-                    android.util.Log.i(
+                    AppLog.i(
                         "CameraScreen",
                         "Camera bound ${resolvedOption?.shortLabel ?: "default"} with ViewPort ${previewSize.width}x${previewSize.height}"
                     )
                 } catch (e: Exception) {
-                    android.util.Log.e("CameraScreen", "Camera bind failed: ${e.message}", e)
+                    AppLog.e("CameraScreen", "Camera bind failed: ${e.message}", e)
                 }
             }, ContextCompat.getMainExecutor(context))
 

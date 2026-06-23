@@ -196,4 +196,14 @@
     <string name="model_variant_translate_gemma_litert_beta_dynamic_int8_desc">LiteRT-LM dynamic INT8, около 4 ГБ, выше качество</string>
     <string name="settings_tts_engine_value">Android System TTS</string>
     <string name="stt_combined_description">Silero VAD (2 МБ) + Whisper Tiny (40 МБ)</string>
+    <string name="settings_debug">Отладка</string>
+    <string name="settings_file_logging">Логирование в файл</string>
+    <string name="settings_file_logging_desc">Записывать логи в файл для обмена и отладки</string>
+    <string name="settings_view_logs">Просмотр логов</string>
+    <string name="log_viewer_title">Логи</string>
+    <string name="log_viewer_clear_title">Очистить логи?</string>
+    <string name="log_viewer_clear_confirm">Очистить</string>
+    <string name="log_viewer_search_hint">Поиск логов…</string>
+    <string name="log_viewer_empty">Записей пока нет</string>
+    <string name="log_viewer_share">Поделиться файлом логов</string>
 </resources>

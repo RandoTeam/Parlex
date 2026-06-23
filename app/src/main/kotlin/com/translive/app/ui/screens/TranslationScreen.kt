@@ -150,6 +150,14 @@ fun TranslationScreen(
                         horizontalArrangement = Arrangement.End,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        val clipboardText = clipboardManager.getText()?.text
+                        if (!clipboardText.isNullOrBlank()) {
+                            IconButton(onClick = {
+                                viewModel.setSourceText(clipboardText)
+                            }) {
+                                Icon(Icons.Outlined.ContentPaste, stringResource(R.string.cd_paste), tint = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                         IconButton(onClick = {
                             viewModel.setSourceText("")
                         }) {

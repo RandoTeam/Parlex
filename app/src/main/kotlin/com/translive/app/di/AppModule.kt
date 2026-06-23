@@ -1,5 +1,6 @@
 package com.translive.app.di
 
+import com.translive.app.AppLog
 import android.content.Context
 import androidx.room.Room
 import com.translive.app.data.ModelRepository
@@ -21,6 +22,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): TransLiveDatabase {
+        AppLog.i("AppModule", "Creating TransLiveDatabase")
         return Room.databaseBuilder(
             context,
             TransLiveDatabase::class.java,
@@ -37,6 +39,7 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTranslationEngine(modelRepository: ModelRepository): TranslationEngine {
+        AppLog.i("AppModule", "Creating TranslationEngine")
         return TranslationEngine().also { it.modelRepository = modelRepository }
     }
 }

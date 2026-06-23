@@ -1,6 +1,6 @@
 package com.translive.app.engine
 
-import android.util.Log
+import com.translive.app.AppLog
 import com.google.mlkit.nl.languageid.LanguageIdentification
 import com.google.mlkit.nl.languageid.LanguageIdentificationOptions
 import com.translive.app.data.model.Language
@@ -76,7 +76,7 @@ class LanguageDetectionEngine @Inject constructor() {
                     }
                 }
                 .addOnFailureListener { error ->
-                    Log.w(TAG, "Language identification failed: ${error.message}")
+                    AppLog.w(TAG, "Language identification failed: ${error.message}")
                     if (cont.isActive) cont.resume(null)
                 }
         }

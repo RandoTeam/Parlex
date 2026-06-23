@@ -6,7 +6,7 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.util.Log
+import com.translive.app.AppLog
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.*
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -93,14 +93,14 @@ class SpeechEngine @Inject constructor(
                     val read = stream.read(header)
                     // ONNX protobuf starts with 0x08 (varint field 1 = ir_version)
                     if (read < 4 || header[0] != 0x08.toByte()) {
-                        Log.e(TAG, "Corrupt ONNX: ${f.name} header=${header.take(4).map { "%02x".format(it) }}")
+                        AppLog.e(TAG, "Corrupt ONNX: ${f.name} header=${header.take(4).map { "%02x".format(it) }}")
                         return false
                     }
                 }
             }
             true
         } catch (e: Exception) {
-            Log.e(TAG, "ONNX validation error: ${e.message}")
+            AppLog.e(TAG, "ONNX validation error: ${e.message}")
             false
         }
     }
@@ -108,13 +108,13 @@ class SpeechEngine @Inject constructor(
     /** Delete corrupt whisper model files to trigger redownload */
     private fun deleteWhisperModels() {
         whisperDir.deleteRecursively()
-        Log.i(TAG, "Deleted whisper models for redownload")
+        AppLog.i(TAG, "Deleted whisper models for redownload")
     }
 
     fun initialize(language: String = ""): Boolean {
         // If language changed, recreate recognizer
         if (recognizer != null && language != currentLanguage) {
-            Log.i(TAG, "Language changed: $currentLanguage → $language, recreating recognizer")
+            AppLog.i(TAG, "Language changed: $currentLanguage → $language, recreating recognizer")
             recognizer?.release()
             recognizer = null
             _isReady.value = false
@@ -126,7 +126,7 @@ class SpeechEngine @Inject constructor(
         // Validate ONNX file integrity before loading — sherpa-onnx fatally aborts (SIGABRT)
         // on corrupt files, which cannot be caught by try-catch
         if (!validateOnnxFiles()) {
-            Log.e(TAG, "ONNX files corrupt — deleting for redownload")
+            AppLog.e(TAG, "ONNX files corrupt — deleting for redownload")
             deleteWhisperModels()
             return false
         }
@@ -175,11 +175,11 @@ class SpeechEngine @Inject constructor(
 
             currentLanguage = language
             _isReady.value = true
-            Log.i(TAG, "SpeechEngine initialized (VAD + Whisper, lang=$whisperLang)")
+            AppLog.i(TAG, "SpeechEngine initialized (VAD + Whisper, lang=$whisperLang)")
             true
         } catch (e: Throwable) {
             // Catch Throwable to handle both Exception and Error (e.g. UnsatisfiedLinkError)
-            Log.e(TAG, "Failed to initialize: ${e.message}", e)
+            AppLog.e(TAG, "Failed to initialize: ${e.message}", e)
             _isReady.value = false
             false
         }

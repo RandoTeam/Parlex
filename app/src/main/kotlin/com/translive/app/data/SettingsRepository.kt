@@ -29,6 +29,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_DIALOGUE_SOURCE_LANGUAGE = "dialogue_source_language"
         private const val KEY_DIALOGUE_TARGET_LANGUAGE = "dialogue_target_language"
         private const val KEY_APP_LANGUAGE = "app_language"
+        private const val KEY_FILE_LOGGING = "enable_file_logging"
 
         const val BACKEND_CPU = "cpu"
         const val BACKEND_GPU = "gpu"
@@ -86,6 +87,10 @@ class SettingsRepository @Inject constructor(
     var dialogueTargetLanguage: Language
         get() = getLanguage(KEY_DIALOGUE_TARGET_LANGUAGE, Language.ENGLISH)
         set(value) = prefs.edit().putString(KEY_DIALOGUE_TARGET_LANGUAGE, value.code).apply()
+
+    var fileLoggingEnabled: Boolean
+        get() = prefs.getBoolean(KEY_FILE_LOGGING, false)
+        set(value) = prefs.edit().putBoolean(KEY_FILE_LOGGING, value).apply()
 
     private fun getLanguage(key: String, default: Language): Language {
         val code = prefs.getString(key, null) ?: return default

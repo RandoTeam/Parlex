@@ -66,6 +66,7 @@
     <string name="auto_detecting">Auto...</string>
     <string name="auto_detected">Auto: %1$s %2$s</string>
     <string name="translation_input_placeholder">Enter text to translate...</string>
+    <string name="cd_paste">Paste</string>
     <string name="cd_clear">Clear</string>
     <string name="cd_voice_input">Voice input</string>
     <string name="translation_in_progress">Translating...</string>
@@ -196,4 +197,14 @@
     <string name="model_variant_translate_gemma_litert_beta_dynamic_int8_desc">LiteRT-LM dynamic INT8, about 4 GB, better quality</string>
     <string name="settings_tts_engine_value">Android System TTS</string>
     <string name="stt_combined_description">Silero VAD (2 MB) + Whisper Tiny (40 MB)</string>
+    <string name="settings_debug">Debug</string>
+    <string name="settings_file_logging">File logging</string>
+    <string name="settings_file_logging_desc">Write logs to a file for sharing and debugging</string>
+    <string name="settings_view_logs">View logs</string>
+    <string name="log_viewer_title">Logs</string>
+    <string name="log_viewer_clear_title">Clear logs?</string>
+    <string name="log_viewer_clear_confirm">Clear</string>
+    <string name="log_viewer_search_hint">Search logs…</string>
+    <string name="log_viewer_empty">No log entries yet</string>
+    <string name="log_viewer_share">Share log file</string>
 </resources>

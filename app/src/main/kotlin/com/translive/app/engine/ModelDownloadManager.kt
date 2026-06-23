@@ -1,7 +1,7 @@
 package com.translive.app.engine
 
 import android.content.Context
-import android.util.Log
+import com.translive.app.AppLog
 import com.translive.app.data.model.ModelVariant
 import com.translive.app.service.DownloadService
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -77,14 +77,14 @@ class ModelDownloadManager @Inject constructor(
         onFinished: (suspend (DownloadState) -> Unit)? = null
     ) {
         if (activeJobs[variant.id]?.isActive == true) {
-            Log.w(TAG, "Download already active: ${variant.id}")
+            AppLog.w(TAG, "Download already active: ${variant.id}")
             return
         }
 
         onFinished?.let { completionCallbacks[variant.id] = it }
 
         try { DownloadService.start(context) } catch (e: Exception) {
-            Log.w(TAG, "Could not start DownloadService: ${e.message}")
+            AppLog.w(TAG, "Could not start DownloadService: ${e.message}")
         }
 
         activeJobs[variant.id] = managerScope.launch {
@@ -220,12 +220,12 @@ class ModelDownloadManager @Inject constructor(
 
             tempFile.renameTo(destFile)
             finishDownload(variant.id, DownloadState.Completed)
-            Log.i(TAG, "Download completed: ${variant.id}")
+            AppLog.i(TAG, "Download completed: ${variant.id}")
 
         } catch (e: CancellationException) {
             finishDownload(variant.id, DownloadState.Cancelled)
         } catch (e: Exception) {
-            Log.e(TAG, "Download failed ${variant.id}: ${e.message}", e)
+            AppLog.e(TAG, "Download failed ${variant.id}: ${e.message}", e)
             finishDownload(variant.id,
                 if (variant.id in cancelledIds) DownloadState.Cancelled
                 else DownloadState.Failed(e.message ?: "Unknown error"))

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import com.translive.app.AppLog
 import com.translive.app.R
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
@@ -58,6 +59,10 @@ class TranslationViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle
 ) : AndroidViewModel(app) {
 
+    companion object {
+        private const val TAG = "TranslationVM"
+    }
+
     private fun tr(id: Int, vararg args: Any): String =
         texts.text(id, *args)
 
@@ -90,6 +95,7 @@ class TranslationViewModel @Inject constructor(
 
     fun loadModel() {
         if (_uiState.value.isModelLoaded || _uiState.value.isModelLoading) return
+        AppLog.i(TAG, "Loading model...")
         _uiState.update { it.copy(isModelLoading = true, error = null) }
 
         viewModelScope.launch(Dispatchers.IO) {
@@ -117,6 +123,8 @@ class TranslationViewModel @Inject constructor(
                     engine.loadModel(modelPath, threads)
                 }
 
+                AppLog.i(TAG, "Model load result: $loaded, runtime=$runtime, path=${modelPath.takeLast(40)}")
+
                 _uiState.update {
                     it.copy(
                         isModelLoaded = loaded,
@@ -139,6 +147,7 @@ class TranslationViewModel @Inject constructor(
                     resetIdleTimer()
                 }
             } catch (e: Exception) {
+                AppLog.e(TAG, "loadModel failed", e)
                 _uiState.update {
                     it.copy(isModelLoading = false, error = tr(R.string.error_load_model_with_message, e.message ?: ""))
                 }
@@ -280,6 +289,8 @@ class TranslationViewModel @Inject constructor(
                     tokensPerSecond = tps
                 )
 
+                AppLog.i(TAG, "Translation done: ${effectiveSourceLanguage.code}→${state.targetLanguage.code} ${elapsed}ms ${String.format("%.1f", tps)} tok/s")
+
                 _uiState.update {
                     it.copy(translatedText = result, isTranslating = false, stats = stats)
                 }
@@ -298,6 +309,7 @@ class TranslationViewModel @Inject constructor(
                 // Reset idle timer after successful translation
                 resetIdleTimer()
             } catch (e: Exception) {
+                AppLog.e(TAG, "translate failed", e)
                 _uiState.update {
                     it.copy(isTranslating = false, error = "Translation error: ${e.message}")
                 }
@@ -323,6 +335,7 @@ class TranslationViewModel @Inject constructor(
             val detected = withContext(Dispatchers.Default) {
                 languageDetectionEngine.detect(normalized, _uiState.value.sourceLanguage)
             }
+            AppLog.d(TAG, "Language detected: $detected")
             _uiState.update {
                 if (it.isSourceAuto && it.sourceText.trim() == normalized) {
                     it.copy(
@@ -361,6 +374,7 @@ class TranslationViewModel @Inject constructor(
         idleTimerJob = viewModelScope.launch {
             delay(timeoutMinutes * 60_000L)
             if (engine.isLoaded || liteRtEngine.isLoaded) {
+                AppLog.i(TAG, "Idle timeout: unloading model after ${timeoutMinutes}min")
                 // Update UI state FIRST to close the race window
                 _uiState.update {
                     it.copy(

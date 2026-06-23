@@ -5,7 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.ImageFormat
 import android.graphics.Rect
-import android.util.Log
+import com.translive.app.AppLog
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
@@ -204,7 +204,7 @@ class OcrEngine @Inject constructor(
                 cont.resume(OcrResult(blocks, imageWidth, imageHeight))
             }
             .addOnFailureListener { e ->
-                Log.e(TAG, "ML Kit OCR failed: ${e.message}", e)
+                AppLog.e(TAG, "ML Kit OCR failed: ${e.message}", e)
                 onComplete?.invoke()
                 cont.resume(OcrResult(emptyList(), imageWidth, imageHeight))
             }
@@ -236,16 +236,16 @@ class OcrEngine @Inject constructor(
                             input.copyTo(output)
                         }
                     }
-                    Log.i(TAG, "Copied $assetName (${trainedDataFile.length()} bytes)")
+                    AppLog.i(TAG, "Copied $assetName (${trainedDataFile.length()} bytes)")
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to copy tessdata $assetName: ${e.message}", e)
+                    AppLog.e(TAG, "Failed to copy tessdata $assetName: ${e.message}", e)
                     return false
                 }
             }
 
             val api = TessBaseAPI()
             if (!api.init(dataDir.absolutePath, tessLang)) {
-                Log.e(TAG, "Tesseract init failed for $tessLang")
+                AppLog.e(TAG, "Tesseract init failed for $tessLang")
                 return false
             }
             api.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
@@ -254,10 +254,10 @@ class OcrEngine @Inject constructor(
             tessApi = api
             tessCurrentLang = tessLang
             tessDataPath = dataDir.absolutePath
-            Log.i(TAG, "Tesseract ready: $tessLang")
+            AppLog.i(TAG, "Tesseract ready: $tessLang")
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Tesseract setup error: ${e.message}", e)
+            AppLog.e(TAG, "Tesseract setup error: ${e.message}", e)
             return false
         }
     }
@@ -276,7 +276,7 @@ class OcrEngine @Inject constructor(
                     api.setImage(ocrBitmap)
                     val recognizedText = api.getUTF8Text()
                     if (recognizedText.isNullOrBlank()) {
-                        Log.d(TAG, "Tesseract $langCode returned no text")
+                        AppLog.d(TAG, "Tesseract $langCode returned no text")
                         return@withLock OcrResult(emptyList(), bitmap.width, bitmap.height)
                     }
 
@@ -326,7 +326,7 @@ class OcrEngine @Inject constructor(
                         iterator.delete()
                     }
 
-                    Log.d(TAG, "Tesseract $langCode found ${blocks.sumOf { it.lines.size }} lines")
+                    AppLog.d(TAG, "Tesseract $langCode found ${blocks.sumOf { it.lines.size }} lines")
                     OcrResult(blocks, bitmap.width, bitmap.height)
                 } finally {
                     api.clear()
@@ -429,7 +429,7 @@ class OcrEngine @Inject constructor(
             ImageFormat.JPEG -> jpegImageToBitmap(image)
             ImageFormat.YUV_420_888 -> yuv420ImageToBitmap(image)
             else -> {
-                Log.w(TAG, "Unsupported image format for OCR: ${image.format}")
+                AppLog.w(TAG, "Unsupported image format for OCR: ${image.format}")
                 null
             }
         } ?: return null

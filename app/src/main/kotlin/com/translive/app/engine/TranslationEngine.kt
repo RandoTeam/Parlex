@@ -1,5 +1,6 @@
 package com.translive.app.engine
 
+import com.translive.app.AppLog
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.PromptStyle
@@ -83,7 +84,7 @@ class TranslationEngine {
                 contextPtr = 0L
             }
             val optimalThreads = getOptimalThreadCount(nThreads)
-            android.util.Log.i("TranslationEngine", "Loading model: threads=$optimalThreads (requested=$nThreads, cores=${Runtime.getRuntime().availableProcessors()})")
+            AppLog.i("TranslationEngine", "Loading model: threads=$optimalThreads (requested=$nThreads, cores=${Runtime.getRuntime().availableProcessors()})")
             contextPtr = nativeLoadModel(modelPath, optimalThreads)
             isLoadedLocked()
         }

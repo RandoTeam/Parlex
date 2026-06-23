@@ -3,6 +3,7 @@ package com.translive.app.data
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import com.translive.app.AppLog
 import com.translive.app.data.model.ModelCatalog
 import com.translive.app.data.model.ModelFamily
 import com.translive.app.data.model.ModelRuntime
@@ -16,6 +17,11 @@ import javax.inject.Singleton
 class ModelRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+
+    companion object {
+        private const val TAG = "ModelRepo"
+    }
+
     private val prefs: SharedPreferences =
         context.getSharedPreferences("parlex_models", Context.MODE_PRIVATE)
 
@@ -43,6 +49,7 @@ class ModelRepository @Inject constructor(
         // Migrate legacy IDs: "q4_k_m" → "hy_mt:q4_k_m"
         if (!raw.contains(":") && !raw.startsWith("custom")) {
             val migrated = "hy_mt:$raw"
+            AppLog.d(TAG, "Migrating legacy model ID: $raw → $migrated")
             prefs.edit().putString("active_model_id", migrated).apply()
             return migrated
         }
@@ -93,9 +100,12 @@ class ModelRepository @Inject constructor(
     fun deleteModel(variant: ModelVariant): Boolean {
         val file = File(modelsDir, variant.filename)
         if (getActiveModelId() == variant.id) {
+            AppLog.i(TAG, "Deleting active model: ${variant.id}")
             prefs.edit().remove("active_model_id").apply()
         }
-        return file.delete()
+        val deleted = file.delete()
+        AppLog.i(TAG, "Delete model ${variant.id}: $deleted")
+        return deleted
     }
 
     /** Get total size of all downloaded models */
@@ -144,6 +154,7 @@ class ModelRepository @Inject constructor(
             }
             Result.success(Unit)
         } catch (e: Exception) {
+            AppLog.e(TAG, "exportModel failed for ${variant.filename}", e)
             Result.failure(e)
         }
     }
@@ -184,6 +195,7 @@ class ModelRepository @Inject constructor(
                 magic.copyOfRange(0, 8).contentEquals("LITERTLM".toByteArray())
             if (!validGguf && !validLiteRtLm) {
                 inputStream.close()
+                AppLog.w(TAG, "Invalid magic bytes for $filename")
                 return Result.failure(IllegalArgumentException("Файл не является поддерживаемой моделью"))
             }
 
@@ -210,9 +222,11 @@ class ModelRepository @Inject constructor(
             }
 
             inputStream.close()
+            AppLog.i(TAG, "Model imported: $filename")
             Result.success(filename)
         } catch (e: Exception) {
             inputStream.close()
+            AppLog.e(TAG, "importModel failed for $filename", e)
             Result.failure(e)
         }
     }

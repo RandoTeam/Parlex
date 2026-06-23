@@ -10,7 +10,7 @@ import android.text.StaticLayout
 import android.os.SystemClock
 import android.text.TextPaint
 import android.text.TextUtils
-import android.util.Log
+import com.translive.app.AppLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
@@ -450,7 +450,7 @@ class CameraViewModel @Inject constructor(
             val bitmap = try {
                 ocrEngine.imageProxyToUprightBitmap(imageProxy)
             } catch (e: Exception) {
-                Log.e("CameraVM", "ImageCapture conversion failed: ${e.message}", e)
+                AppLog.e("CameraVM", "ImageCapture conversion failed: ${e.message}", e)
                 null
             } finally {
                 imageProxy.close()
@@ -479,7 +479,7 @@ class CameraViewModel @Inject constructor(
         lastLiveFrameStartedAtMs = nowMs
         isLiveProcessing = true
         frameCounter++
-        Log.d("CameraVM", "processLiveFrame #$frameCounter, img=${imageProxy.width}x${imageProxy.height}")
+        AppLog.d("CameraVM", "processLiveFrame #$frameCounter, img=${imageProxy.width}x${imageProxy.height}")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -543,7 +543,7 @@ class CameraViewModel @Inject constructor(
                     )
                 }
             } catch (e: Exception) {
-                Log.e("CameraVM", "processLiveFrame error: ${e.message}", e)
+                AppLog.e("CameraVM", "processLiveFrame error: ${e.message}", e)
             } finally {
                 isLiveProcessing = false
             }
@@ -1027,7 +1027,7 @@ class CameraViewModel @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            Log.e("CameraVM", "Capture error: ${e.message}", e)
+            AppLog.e("CameraVM", "Capture error: ${e.message}", e)
             _uiState.update {
                 it.copy(
                     captureStatus = CaptureStatus.ERROR,
@@ -1060,7 +1060,7 @@ class CameraViewModel @Inject constructor(
 
         val selectedAttempt = selectCaptureOcrAttempt(sourceLanguage, attempts)
         if (selectedAttempt.language.code != sourceLanguage.code) {
-            Log.i(
+            AppLog.i(
                 "CameraVM",
                 "Capture OCR fallback: ${sourceLanguage.code} -> ${selectedAttempt.language.code}, " +
                     "score=${selectedAttempt.score.selectionScore}, lines=${selectedAttempt.score.lineCount}"
@@ -1093,7 +1093,7 @@ class CameraViewModel @Inject constructor(
             lines = mixedLines,
             fallback = detectedLanguages.first()
         )
-        Log.i(
+        AppLog.i(
             "CameraVM",
             "Auto capture OCR selected ${selectedAttempt.language.code}, source=${detectedLanguage.code}, " +
                 "languages=${detectedLanguages.joinToString { it.code }}, lines=${mixedLines.size}"
@@ -1714,7 +1714,7 @@ class CameraViewModel @Inject constructor(
                 val normalized = sanitizeDocumentTranslation(translated)
                 if (normalized.isNotBlank()) return normalized
             }.onFailure { error ->
-                Log.e("CameraVM", "Document HY-MT failed for ${sourceLanguage.code}: ${error.message}")
+                AppLog.e("CameraVM", "Document HY-MT failed for ${sourceLanguage.code}: ${error.message}")
             }
         }
 
@@ -1816,7 +1816,7 @@ class CameraViewModel @Inject constructor(
                     targetLanguage = targetLanguage
                 )
             } catch (e: Exception) {
-                Log.e("CameraVM", "Structured HY-MT failed for ${sourceLanguage.code}: ${e.message}")
+                AppLog.e("CameraVM", "Structured HY-MT failed for ${sourceLanguage.code}: ${e.message}")
                 translateCaptureLinesWithCameraModel(block.lines, sourceLanguage, targetLanguage)
             }
         } else {
@@ -1861,7 +1861,7 @@ class CameraViewModel @Inject constructor(
 
         val parsed = parseStructuredTranslations(translated, ids)
         if (parsed == null) {
-            Log.w("CameraVM", "Structured translation did not preserve lines for ${block.id}")
+            AppLog.w("CameraVM", "Structured translation did not preserve lines for ${block.id}")
             return null
         }
 
@@ -1993,9 +1993,9 @@ class CameraViewModel @Inject constructor(
                     translatedOverlay = state.paintedBitmap ?: original
                 )
                 _uiState.update { it.copy(captureMessage = "Debug pack saved: ${packDir.name}") }
-                Log.i("CameraVM", "Debug capture pack saved: ${packDir.absolutePath}")
+                AppLog.i("CameraVM", "Debug capture pack saved: ${packDir.absolutePath}")
             } catch (e: Exception) {
-                Log.e("CameraVM", "Debug capture pack save failed: ${e.message}", e)
+                AppLog.e("CameraVM", "Debug capture pack save failed: ${e.message}", e)
                 _uiState.update { it.copy(captureMessage = "Debug pack save failed") }
             }
         }
