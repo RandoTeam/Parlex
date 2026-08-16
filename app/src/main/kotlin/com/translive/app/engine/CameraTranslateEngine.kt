@@ -2,13 +2,20 @@ package com.translive.app.engine
 
 import android.util.Log
 import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.TranslateRemoteModel
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.suspendCancellableCoroutine
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -39,6 +46,18 @@ class CameraTranslateEngine @Inject constructor() {
 
     private val _isDownloading = MutableStateFlow(false)
     val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
+
+    data class PackageStatus(
+        val supported: Boolean,
+        /** ML Kit language codes required for the current camera pair. */
+        val requiredLanguageCodes: Set<String> = emptySet(),
+        val downloadedLanguageCodes: Set<String> = emptySet()
+    ) {
+        val isReady: Boolean get() = supported &&
+            requiredLanguageCodes.all { it in downloadedLanguageCodes }
+        val missingLanguageCodes: Set<String> get() =
+            requiredLanguageCodes - downloadedLanguageCodes
+    }
 
     /**
      * Map our Language codes to ML Kit TranslateLanguage codes.
@@ -85,10 +104,73 @@ class CameraTranslateEngine @Inject constructor() {
     }
 
     /**
-     * Prepare translator for given language pair.
-     * Downloads model if needed (~30MB, WiFi only by default).
+     * Returns the exact on-device packages needed for a camera language pair.
+     * This is intentionally separate from activation: opening the camera must
+     * never make an implicit network request.
      */
-    suspend fun prepare(sourceCode: String, targetCode: String): Boolean {
+    suspend fun getPackageStatus(sourceCode: String, targetCode: String): PackageStatus {
+        val source = toMlKitLang(sourceCode) ?: return PackageStatus(supported = false)
+        val target = toMlKitLang(targetCode) ?: return PackageStatus(supported = false)
+        if (source == target) {
+            return PackageStatus(supported = true)
+        }
+
+        val required = linkedSetOf(source, target)
+        val manager = RemoteModelManager.getInstance()
+        val downloaded = suspendCancellableCoroutine<Set<TranslateRemoteModel>> { cont ->
+            manager.getDownloadedModels(TranslateRemoteModel::class.java)
+                .addOnSuccessListener { models -> if (cont.isActive) cont.resume(models) }
+                .addOnFailureListener {
+                    Log.w(TAG, "Cannot read installed ML Kit language packs", it)
+                    if (cont.isActive) cont.resume(emptySet())
+                }
+        }.mapTo(mutableSetOf()) { it.language }
+
+        return PackageStatus(
+            supported = true,
+            requiredLanguageCodes = required,
+            downloadedLanguageCodes = downloaded
+        )
+    }
+
+    /**
+     * Explicitly downloads the language packages selected by the user in the
+     * Model Manager, then activates their translator. ML Kit owns these files,
+     * so they cannot be exported as ordinary app model files.
+     */
+    suspend fun downloadAndActivate(sourceCode: String, targetCode: String): Boolean {
+        val status = getPackageStatus(sourceCode, targetCode)
+        if (!status.supported) return false
+        if (status.isReady) return activateDownloadedPair(sourceCode, targetCode)
+
+        _isDownloading.value = true
+        _isReady.value = false
+        return try {
+            val manager = RemoteModelManager.getInstance()
+            val conditions = DownloadConditions.Builder().build()
+            status.missingLanguageCodes.forEach { language ->
+                val model = TranslateRemoteModel.Builder(language).build()
+                suspendCancellableCoroutine<Unit> { cont ->
+                    manager.download(model, conditions)
+                        .addOnSuccessListener { if (cont.isActive) cont.resume(Unit) }
+                        .addOnFailureListener { error ->
+                            if (cont.isActive) cont.resumeWith(Result.failure(error))
+                        }
+                }
+            }
+            activateDownloadedPair(sourceCode, targetCode)
+        } catch (error: Throwable) {
+            Log.e(TAG, "ML Kit language pack download failed", error)
+            false
+        } finally {
+            _isDownloading.value = false
+        }
+    }
+
+    /**
+     * Activates only an already installed pair. It never starts a download.
+     */
+    suspend fun activateDownloadedPair(sourceCode: String, targetCode: String): Boolean {
         // Already prepared for this pair
         if (sourceCode == currentSourceLang && targetCode == currentTargetLang && _isReady.value) {
             return true
@@ -119,28 +201,16 @@ class CameraTranslateEngine @Inject constructor() {
         currentSourceLang = sourceCode
         currentTargetLang = targetCode
 
-        // Download model if needed
-        _isDownloading.value = true
         _isReady.value = false
-
-        return suspendCancellableCoroutine { cont ->
-            val conditions = DownloadConditions.Builder()
-                .build()  // Allow any network (not just WiFi)
-
-            translator.downloadModelIfNeeded(conditions)
-                .addOnSuccessListener {
-                    Log.i(TAG, "ML Kit model ready: $sourceCode -> $targetCode")
-                    _isReady.value = true
-                    _isDownloading.value = false
-                    if (cont.isActive) cont.resume(true)
-                }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "Model download failed: ${e.message}", e)
-                    _isReady.value = false
-                    _isDownloading.value = false
-                    if (cont.isActive) cont.resume(false)
-                }
+        val status = getPackageStatus(sourceCode, targetCode)
+        if (!status.isReady) {
+            Log.i(TAG, "ML Kit language packs are not installed: $sourceCode -> $targetCode")
+            return false
         }
+
+        Log.i(TAG, "ML Kit model activated: $sourceCode -> $targetCode")
+        _isReady.value = true
+        return true
     }
 
     fun isReadyFor(sourceCode: String, targetCode: String): Boolean =
@@ -180,7 +250,12 @@ class CameraTranslateEngine @Inject constructor() {
      */
     suspend fun translateLines(lines: List<String>): List<String> {
         if (!_isReady.value || currentTranslator == null) return lines
-        return lines.map { translate(it) }
+        val concurrency = Semaphore(3)
+        return coroutineScope {
+            lines.map { line ->
+                async { concurrency.withPermit { translate(line) } }
+            }.awaitAll()
+        }
     }
 
     fun release() {

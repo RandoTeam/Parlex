@@ -14,7 +14,7 @@ extern "C" {
 
 JNIEXPORT jlong JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
-    JNIEnv*, jobject, jstring, jint) {
+    JNIEnv*, jobject, jstring, jint, jboolean) {
     LOGW("Stub: nativeLoadModel called. llama.cpp not integrated yet.");
     // Return non-zero so the engine thinks a model is loaded
     return 1;
@@ -22,7 +22,7 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
 
 JNIEXPORT jstring JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
-    JNIEnv* env, jobject, jlong, jstring, jint) {
+    JNIEnv* env, jobject, jlong, jstring, jint, jboolean, jfloat, jint, jfloat, jfloat) {
     LOGW("Stub: nativeTranslate called. llama.cpp not integrated yet.");
     return env->NewStringUTF("[Stub: model not loaded]");
 }
@@ -40,9 +40,16 @@ Java_com_translive_app_engine_TranslationEngine_nativeIsLoaded(
     return JNI_TRUE;
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_translive_app_engine_TranslationEngine_nativeRuntimeDiagnostics(
+    JNIEnv* env, jobject /*thiz*/) {
+    return env->NewStringUTF("Native llama.cpp engine is not packaged in this build.");
+}
+
 JNIEXPORT jintArray JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
-    JNIEnv* env, jobject, jlong, jstring, jint, jobject callback) {
+    JNIEnv* env, jobject, jlong, jstring, jint, jboolean, jfloat, jint, jfloat, jfloat,
+    jobject callback) {
     LOGW("Stub: nativeTranslateStreaming called. llama.cpp not integrated yet.");
 
     // Send one stub token through the callback so the UI shows something

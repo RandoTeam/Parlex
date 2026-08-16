@@ -25,7 +25,9 @@ data class TranslationStats(
     val promptTokens: Int = 0,
     val generatedTokens: Int = 0,
     val totalTimeMs: Long = 0,
-    val tokensPerSecond: Float = 0f
+    val tokensPerSecond: Float = 0f,
+    val backend: String? = null,
+    val hasNativeTokenMetrics: Boolean = false
 )
 
 data class TranslationUiState(
@@ -114,7 +116,7 @@ class TranslationViewModel @Inject constructor(
                     liteRtEngine.loadModel(modelPath, settings.backend, threads)
                 } else {
                     liteRtEngine.unloadModel()
-                    engine.loadModel(modelPath, threads)
+                    engine.loadModel(modelPath, threads, settings.backend)
                 }
 
                 _uiState.update {
@@ -151,6 +153,10 @@ class TranslationViewModel @Inject constructor(
         savedStateHandle["sourceText"] = text
         scheduleSourceLanguageDetection(text)
     }
+
+    fun shouldHideKeyboardOnTranslate(): Boolean = settings.hideKeyboardOnTextTranslate
+
+    fun shouldShowTechnicalTranslationStats(): Boolean = settings.showTechnicalTranslationStats
 
     fun setSourceLanguage(lang: Language) {
         _uiState.update {
@@ -277,7 +283,13 @@ class TranslationViewModel @Inject constructor(
                     promptTokens = promptTokens,
                     generatedTokens = genTokens,
                     totalTimeMs = elapsed,
-                    tokensPerSecond = tps
+                    tokensPerSecond = tps,
+                    backend = if (runtime == ModelRuntime.LITERT_LM) {
+                        liteRtEngine.currentBackend
+                    } else {
+                        engine.currentBackend
+                    },
+                    hasNativeTokenMetrics = runtime != ModelRuntime.LITERT_LM
                 )
 
                 _uiState.update {

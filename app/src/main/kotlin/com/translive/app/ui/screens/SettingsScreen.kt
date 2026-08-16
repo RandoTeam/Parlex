@@ -44,6 +44,9 @@ fun SettingsScreen(
     val threads by viewModel.threads.collectAsState()
     val timeoutMinutes by viewModel.idleTimeout.collectAsState()
     val backend by viewModel.backend.collectAsState()
+    val hideKeyboardOnTextTranslate by viewModel.hideKeyboardOnTextTranslate.collectAsState()
+    val showTechnicalTranslationStats by viewModel.showTechnicalTranslationStats.collectAsState()
+    val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
 
     Scaffold(
         bottomBar = {
@@ -189,6 +192,9 @@ fun SettingsScreen(
 
             // Backend
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                val cpuSupported = viewModel.activeModelSupportsCpu()
+                val gpuSupported = viewModel.activeModelSupportsGpu()
+                val gpuRequiresOpenClBuild = viewModel.activeModelGpuRequiresOpenClBuild()
                 Text(stringResource(R.string.settings_compute_backend), style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -200,24 +206,26 @@ fun SettingsScreen(
 
                 BackendOption(
                     label = "CPU",
-                    description = stringResource(R.string.settings_backend_cpu_desc),
+                    description = if (cpuSupported) stringResource(R.string.settings_backend_cpu_desc)
+                    else "Выбранная модель поддерживает только GPU. Для CPU выберите другую модель.",
                     selected = backend == SettingsRepository.BACKEND_CPU,
-                    enabled = true,
+                    enabled = cpuSupported,
                     onClick = { viewModel.setBackend(SettingsRepository.BACKEND_CPU) }
                 )
                 BackendOption(
-                    label = "GPU (Vulkan)",
-                    description = stringResource(R.string.settings_backend_gpu_desc),
+                    label = "GPU",
+                    description = if (gpuSupported) stringResource(R.string.settings_backend_gpu_desc)
+                    else if (gpuRequiresOpenClBuild) "GGUF поддерживает GPU через OpenCL, но этот путь ещё не добавлен в текущий APK."
+                    else "Выбранная модель не поддерживает GPU.",
                     selected = backend == SettingsRepository.BACKEND_GPU,
-                    enabled = true,
+                    enabled = gpuSupported,
                     onClick = { viewModel.setBackend(SettingsRepository.BACKEND_GPU) }
                 )
-                BackendOption(
-                    label = "NPU (NNAPI)",
-                    description = stringResource(R.string.settings_backend_npu_desc),
-                    selected = backend == SettingsRepository.BACKEND_NPU,
-                    enabled = true,
-                    onClick = { viewModel.setBackend(SettingsRepository.BACKEND_NPU) }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Возможности выбранной модели: ${viewModel.activeModelBackendLabel()}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
@@ -274,6 +282,73 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(24.dp))
 
+            SectionHeader(icon = Icons.Outlined.Keyboard, title = stringResource(R.string.settings_text_behavior))
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.settings_hide_keyboard_on_translate),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.settings_hide_keyboard_on_translate_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = hideKeyboardOnTextTranslate,
+                        onCheckedChange = viewModel::setHideKeyboardOnTextTranslate
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Технические данные перевода", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Время, backend и токены, если движок их сообщает",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = showTechnicalTranslationStats,
+                        onCheckedChange = viewModel::setShowTechnicalTranslationStats
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            SectionHeader(icon = Icons.Outlined.Analytics, title = "Диагностика устройства")
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text("Проверка CPU, RAM, Vulkan и OpenCL", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Не загружает модель. Отчёт показывает доступность системных библиотек и реальный статус GGUF-бэкенда.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(onClick = viewModel::runRuntimeDiagnostics) {
+                    Icon(Icons.Outlined.Analytics, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Запустить проверку")
+                }
+            }
+
             // --- Info ---
             SectionHeader(icon = Icons.Outlined.Info, title = stringResource(R.string.settings_about))
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -286,6 +361,23 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    runtimeDiagnostics?.let { report ->
+        AlertDialog(
+            onDismissRequest = viewModel::clearRuntimeDiagnostics,
+            title = { Text("Отчёт диагностики") },
+            text = {
+                Text(
+                    report,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.verticalScroll(rememberScrollState())
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::clearRuntimeDiagnostics) { Text("Закрыть") }
+            }
+        )
     }
 }
 

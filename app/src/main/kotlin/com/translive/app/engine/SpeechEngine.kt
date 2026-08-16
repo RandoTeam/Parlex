@@ -9,6 +9,8 @@ import android.media.MediaRecorder
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.*
+import com.translive.app.data.SettingsRepository
+import com.translive.app.data.model.SttModelInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,245 +20,213 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
-enum class ListeningState {
-    IDLE,
-    LISTENING,
-    PROCESSING,
-    ERROR
-}
+enum class ListeningState { IDLE, LISTENING, PROCESSING, ERROR }
 
 data class SpeechResult(
     val text: String,
-    val language: String  // "ru", "en", etc.
+    /** The language used by the recognizer. Qwen3-ASR supplies its detected language. */
+    val language: String
 )
 
 /**
- * Continuous speech recognition engine:
- * Silero VAD → Whisper tiny (offline) → text + detected language.
+ * Offline microphone pipeline: Silero VAD then explicitly selected recognizer.
+ * Whisper Tiny is the fast default; Qwen3-ASR is an opt-in quality model.
  */
 @Singleton
 class SpeechEngine @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settings: SettingsRepository
 ) {
     companion object {
         private const val TAG = "SpeechEngine"
         private const val SAMPLE_RATE = 16000
-        private const val AUDIO_GAIN = 2.0f  // Microphone gain boost for better recognition
     }
 
     private var vad: Vad? = null
     private var recognizer: OfflineRecognizer? = null
     private var audioRecord: AudioRecord? = null
     private var listenJob: Job? = null
-    private var currentLanguage: String = ""  // current Whisper language
+    private var currentLanguage = ""
+    private var currentSpeechModel = ""
 
     private val _state = MutableStateFlow(ListeningState.IDLE)
     val state: StateFlow<ListeningState> = _state.asStateFlow()
-
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
     private val sttDir: File get() = File(context.filesDir, "stt")
     val vadFile: File get() = File(sttDir, "silero_vad.onnx")
     val whisperDir: File get() = File(sttDir, "sherpa-onnx-whisper-tiny")
+    val qwen3Dir: File get() = File(sttDir, SttModelInfo.QWEN3_DIR)
 
-    fun isVadDownloaded(): Boolean = vadFile.exists() && vadFile.length() > 500_000L
+    fun isVadDownloaded() = vadFile.exists() && vadFile.length() > 500_000L
 
     fun isWhisperDownloaded(): Boolean {
         val dir = whisperDir
-        val encoder = File(dir, "tiny-encoder.onnx")
-        val decoder = File(dir, "tiny-decoder.onnx")
-        val tokens = File(dir, "tiny-tokens.txt")
-        // Validate both existence and minimum file size to catch truncated downloads
-        return encoder.exists() && encoder.length() > 10_000_000L &&
-                decoder.exists() && decoder.length() > 15_000_000L &&
-                tokens.exists()  && tokens.length()  > 100_000L
+        return File(dir, "tiny-encoder.onnx").let { it.exists() && it.length() > 10_000_000L } &&
+            File(dir, "tiny-decoder.onnx").let { it.exists() && it.length() > 15_000_000L } &&
+            File(dir, "tiny-tokens.txt").let { it.exists() && it.length() > 100_000L }
     }
 
-    fun areModelsDownloaded(): Boolean = isVadDownloaded() && isWhisperDownloaded()
+    fun isQwen3Downloaded(): Boolean {
+        val dir = qwen3Dir
+        return File(dir, "conv_frontend.onnx").let { it.exists() && it.length() > 30_000_000L } &&
+            File(dir, "encoder.int8.onnx").let { it.exists() && it.length() > 150_000_000L } &&
+            File(dir, "decoder.int8.onnx").let { it.exists() && it.length() > 650_000_000L } &&
+            File(dir, "tokenizer.json").let { it.exists() && it.length() > 100_000L }
+    }
 
-    /**
-     * Validate ONNX files have correct protobuf header.
-     * ONNX model protobuf starts with field tag 0x08 (ir_version).
-     * If header is wrong, the file is corrupt and sherpa-onnx will SIGABRT.
-     */
-    private fun validateOnnxFiles(): Boolean {
-        return try {
-            val files = listOf(
-                File(whisperDir, "tiny-encoder.onnx"),
-                File(whisperDir, "tiny-decoder.onnx")
-            )
-            for (f in files) {
-                if (!f.exists()) return false
-                f.inputStream().use { stream ->
-                    val header = ByteArray(4)
-                    val read = stream.read(header)
-                    // ONNX protobuf starts with 0x08 (varint field 1 = ir_version)
-                    if (read < 4 || header[0] != 0x08.toByte()) {
-                        Log.e(TAG, "Corrupt ONNX: ${f.name} header=${header.take(4).map { "%02x".format(it) }}")
-                        return false
-                    }
-                }
+    fun isSelectedModelDownloaded(): Boolean = isVadDownloaded() && when (settings.speechModel) {
+        SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B -> isQwen3Downloaded()
+        else -> isWhisperDownloaded()
+    }
+
+    fun areModelsDownloaded(): Boolean = isSelectedModelDownloaded()
+
+    private fun modelFiles(model: String): List<File> = when (model) {
+        SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B -> listOf(
+            File(qwen3Dir, "conv_frontend.onnx"), File(qwen3Dir, "encoder.int8.onnx"),
+            File(qwen3Dir, "decoder.int8.onnx")
+        )
+        else -> listOf(File(whisperDir, "tiny-encoder.onnx"), File(whisperDir, "tiny-decoder.onnx"))
+    }
+
+    /** Reject malformed ONNX before sherpa can abort the process from native code. */
+    private fun validateOnnxFiles(files: List<File>): Boolean = try {
+        files.all { file ->
+            file.inputStream().use { input ->
+                val header = ByteArray(4)
+                input.read(header) == 4 && header[0] == 0x08.toByte()
             }
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "ONNX validation error: ${e.message}")
-            false
         }
-    }
-
-    /** Delete corrupt whisper model files to trigger redownload */
-    private fun deleteWhisperModels() {
-        whisperDir.deleteRecursively()
-        Log.i(TAG, "Deleted whisper models for redownload")
+    } catch (e: Exception) {
+        Log.e(TAG, "ONNX validation error", e)
+        false
     }
 
     fun initialize(language: String = ""): Boolean {
-        // If language changed, recreate recognizer
-        if (recognizer != null && language != currentLanguage) {
-            Log.i(TAG, "Language changed: $currentLanguage → $language, recreating recognizer")
+        val requestedModel = settings.speechModel
+        if (recognizer != null && (language != currentLanguage || requestedModel != currentSpeechModel)) {
             recognizer?.release()
             recognizer = null
             _isReady.value = false
         }
-
         if (vad != null && recognizer != null) return true
-        if (!areModelsDownloaded()) return false
+        if (!isSelectedModelDownloaded()) return false
 
-        // Validate ONNX file integrity before loading — sherpa-onnx fatally aborts (SIGABRT)
-        // on corrupt files, which cannot be caught by try-catch
-        if (!validateOnnxFiles()) {
-            Log.e(TAG, "ONNX files corrupt — deleting for redownload")
-            deleteWhisperModels()
+        if (!validateOnnxFiles(modelFiles(requestedModel))) {
+            val dir = if (requestedModel == SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B) qwen3Dir else whisperDir
+            dir.deleteRecursively()
+            Log.e(TAG, "Invalid ONNX files removed; model must be downloaded again")
             return false
         }
 
         return try {
-            // Models are on disk (not in APK assets), so pass null for assetManager.
-            // Sherpa-ONNX fatally crashes if assetManager is non-null with absolute paths.
-
-            // Initialize VAD (only if not already created)
             if (vad == null) {
-                val sileroConfig = SileroVadModelConfig(
-                    model = vadFile.absolutePath,
-                    threshold = 0.5f,
-                    minSilenceDuration = 0.5f,
-                    minSpeechDuration = 0.25f,
-                    maxSpeechDuration = 15.0f,  // Allow longer phrases (default 5s is too short)
-                    windowSize = 512
-                )
-                val vadConfig = VadModelConfig(
-                    sileroVadModelConfig = sileroConfig,
+                vad = Vad(null, VadModelConfig(
+                    sileroVadModelConfig = SileroVadModelConfig(
+                        model = vadFile.absolutePath,
+                        threshold = 0.5f,
+                        minSilenceDuration = 0.5f,
+                        minSpeechDuration = 0.25f,
+                        maxSpeechDuration = 15.0f,
+                        windowSize = 512
+                    ),
                     sampleRate = SAMPLE_RATE,
                     numThreads = 1
-                )
-                vad = Vad(null, vadConfig)
+                ))
             }
 
-            // Initialize Whisper with explicit language
-            val wDir = whisperDir.absolutePath
-            val whisperLang = language.take(2)  // "ru", "en", "zh" etc.
-            val whisperModelConfig = OfflineWhisperModelConfig(
-                encoder = "$wDir/tiny-encoder.onnx",
-                decoder = "$wDir/tiny-decoder.onnx",
-                language = whisperLang,  // Explicit language for better accuracy
-                task = "transcribe"
-            )
-            val modelConfig = OfflineModelConfig(
-                whisper = whisperModelConfig,
-                tokens = "$wDir/tiny-tokens.txt",
-                numThreads = 2,
-                debug = false
-            )
-            val recConfig = OfflineRecognizerConfig(
-                modelConfig = modelConfig
-            )
-            recognizer = OfflineRecognizer(null, recConfig)
-
-            currentLanguage = language
+            val modelConfig = when (requestedModel) {
+                SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B -> {
+                    val dir = qwen3Dir.absolutePath
+                    OfflineModelConfig(
+                        qwen3Asr = OfflineQwen3AsrModelConfig(
+                            convFrontend = "$dir/conv_frontend.onnx",
+                            encoder = "$dir/encoder.int8.onnx",
+                            decoder = "$dir/decoder.int8.onnx",
+                            tokenizer = "$dir/tokenizer.json",
+                            maxTotalLen = 512,
+                            maxNewTokens = 128,
+                            temperature = 1.0e-6f,
+                            topP = 0.8f,
+                            seed = 42,
+                            hotwords = ""
+                        ),
+                        numThreads = 4,
+                        debug = false,
+                        provider = "cpu"
+                    )
+                }
+                else -> {
+                    val dir = whisperDir.absolutePath
+                    OfflineModelConfig(
+                        whisper = OfflineWhisperModelConfig(
+                            encoder = "$dir/tiny-encoder.onnx",
+                            decoder = "$dir/tiny-decoder.onnx",
+                            language = language.take(2),
+                            task = "transcribe"
+                        ),
+                        tokens = "$dir/tiny-tokens.txt",
+                        numThreads = 2,
+                        debug = false
+                    )
+                }
+            }
+            recognizer = OfflineRecognizer(null, OfflineRecognizerConfig(modelConfig = modelConfig))
+            currentLanguage = language.take(2)
+            currentSpeechModel = requestedModel
             _isReady.value = true
-            Log.i(TAG, "SpeechEngine initialized (VAD + Whisper, lang=$whisperLang)")
+            Log.i(TAG, "SpeechEngine initialized: model=$requestedModel, language=$currentLanguage")
             true
         } catch (e: Throwable) {
-            // Catch Throwable to handle both Exception and Error (e.g. UnsatisfiedLinkError)
-            Log.e(TAG, "Failed to initialize: ${e.message}", e)
+            Log.e(TAG, "Failed to initialize speech engine", e)
             _isReady.value = false
             false
         }
     }
 
-    /**
-     * Start continuous listening. Calls [onResult] each time speech is detected and recognized.
-     */
-    fun startListening(onResult: (SpeechResult) -> Unit) {
+    fun startListening(language: String, singleShot: Boolean, onResult: (SpeechResult) -> Unit) {
         if (_state.value == ListeningState.LISTENING) return
-        if (!_isReady.value) {
-            if (!initialize()) {
+        if (!_isReady.value || currentLanguage != language.take(2) || currentSpeechModel != settings.speechModel) {
+            if (!initialize(language)) {
                 _state.value = ListeningState.ERROR
                 return
             }
         }
-
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             _state.value = ListeningState.ERROR
             return
         }
-
-        val bufferSize = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT
-        ).coerceAtLeast(SAMPLE_RATE * 2)
-
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            bufferSize
-        )
-
+        val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(SAMPLE_RATE * 2)
+        audioRecord = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
         if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
             _state.value = ListeningState.ERROR
             return
         }
-
         audioRecord?.startRecording()
-        vad?.reset()  // Reset VAD state for new session
+        vad?.reset()
         _state.value = ListeningState.LISTENING
-
         listenJob = CoroutineScope(Dispatchers.IO).launch {
-            val chunkSize = 512  // Match VAD window size
-            val shortBuffer = ShortArray(chunkSize)
-
+            val samples = ShortArray(512)
             while (isActive && _state.value == ListeningState.LISTENING) {
-                val read = audioRecord?.read(shortBuffer, 0, chunkSize) ?: -1
+                val read = audioRecord?.read(samples, 0, samples.size) ?: -1
                 if (read <= 0) continue
-
-                // Convert short to float [-1, 1] with gain boost
-                val floatBuffer = FloatArray(read) {
-                    (shortBuffer[it] / 32768.0f * AUDIO_GAIN).coerceIn(-1.0f, 1.0f)
-                }
-
-                // Feed to VAD
-                vad?.acceptWaveform(floatBuffer)
-
-                // Check if VAD detected complete speech segment
+                vad?.acceptWaveform(FloatArray(read) { samples[it] / 32768.0f })
                 while (vad?.empty() == false) {
                     val segment = vad?.front()
                     vad?.pop()
-
-                    if (segment != null && segment.samples.isNotEmpty()) {
+                    if (segment?.samples?.isNotEmpty() == true) {
                         _state.value = ListeningState.PROCESSING
-
-                        val result = recognizeSegment(segment.samples)
-                        if (result != null && result.text.isNotBlank()) {
-                            withContext(Dispatchers.Main) {
-                                onResult(result)
+                        recognizeSegment(segment.samples)?.let { result ->
+                            withContext(Dispatchers.Main) { onResult(result) }
+                            if (singleShot) {
+                                stopListening()
+                                return@launch
                             }
                         }
-
                         _state.value = ListeningState.LISTENING
                     }
                 }
@@ -270,74 +240,49 @@ class SpeechEngine @Inject constructor(
         return try {
             stream.acceptWaveform(samples, SAMPLE_RATE)
             rec.decode(stream)
-            val text = rec.getResult(stream).text.trim()
-
-            if (text.isBlank() || text.length < 3) return null  // Filter noise/short artifacts
-
-            val language = detectLanguage(text)
-            SpeechResult(text = text, language = language)
+            val result = rec.getResult(stream)
+            val text = result.text.trim()
+            if (text.length < 3) return null
+            val language = if (currentSpeechModel == SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B) {
+                normalizeQwenLanguage(result.lang)
+            } else currentLanguage
+            if (language.isBlank()) {
+                Log.w(TAG, "Qwen3-ASR did not identify a language; ignored to prevent a wrong-direction translation")
+                null
+            } else SpeechResult(text, language)
         } finally {
-            stream.release()  // CRITICAL: free native memory
+            stream.release()
         }
     }
 
-    /**
-     * Detect language by counting script-specific characters.
-     * Supports: Chinese (CJK), Russian (Cyrillic), English (Latin),
-     * Arabic, Thai, Hindi (Devanagari), Japanese (Kana), Korean (Hangul).
-     */
-    private fun detectLanguage(text: String): String {
-        val cyrillicCount = text.count { it in '\u0400'..'\u04FF' }
-        val latinCount = text.count { it in 'A'..'Z' || it in 'a'..'z' }
-        val cjkCount = text.count {
-            it in '\u4E00'..'\u9FFF' ||  // CJK Unified Ideographs
-            it in '\u3400'..'\u4DBF' ||  // CJK Extension A
-            it in '\u3000'..'\u303F'     // CJK Symbols & Punctuation
-        }
-        val kanaCount = text.count {
-            it in '\u3040'..'\u309F' ||  // Hiragana
-            it in '\u30A0'..'\u30FF'     // Katakana
-        }
-        val hangulCount = text.count { it in '\uAC00'..'\uD7AF' }
-        val arabicCount = text.count { it in '\u0600'..'\u06FF' }
-        val thaiCount = text.count { it in '\u0E00'..'\u0E7F' }
-        val devanagariCount = text.count { it in '\u0900'..'\u097F' }
-
-        val counts = mapOf(
-            "zh" to cjkCount,
-            "ja" to kanaCount,
-            "ko" to hangulCount,
-            "ru" to cyrillicCount,
-            "en" to latinCount,
-            "ar" to arabicCount,
-            "th" to thaiCount,
-            "hi" to devanagariCount
-        )
-
-        val best = counts.maxByOrNull { it.value }
-        return if (best != null && best.value > 0) best.key else "en"
+    private fun normalizeQwenLanguage(value: String): String = when (value.trim().lowercase()) {
+        "ru", "russian", "русский" -> "ru"
+        "en", "english", "английский" -> "en"
+        "zh", "zh-cn", "chinese", "mandarin" -> "zh"
+        "ja", "japanese" -> "ja"
+        "ko", "korean" -> "ko"
+        "de", "german" -> "de"
+        "fr", "french" -> "fr"
+        "es", "spanish" -> "es"
+        "it", "italian" -> "it"
+        "pt", "portuguese" -> "pt"
+        "vi", "vietnamese" -> "vi"
+        else -> value.trim().lowercase().take(8)
     }
 
     fun stopListening() {
         _state.value = ListeningState.IDLE
         listenJob?.cancel()
         listenJob = null
-
-        audioRecord?.apply {
-            try {
-                stop()
-                release()
-            } catch (_: Exception) {}
-        }
+        audioRecord?.runCatching { stop(); release() }
         audioRecord = null
     }
 
     fun release() {
         stopListening()
-        vad?.release()
-        vad = null
-        recognizer?.release()
-        recognizer = null
+        vad?.release(); vad = null
+        recognizer?.release(); recognizer = null
+        currentSpeechModel = ""
         _isReady.value = false
     }
 }

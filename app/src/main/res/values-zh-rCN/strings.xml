@@ -19,10 +19,9 @@
     <string name="settings_cpu_threads">CPU 线程</string>
     <string name="settings_cpu_threads_desc">线程越多速度越快，但发热也越高</string>
     <string name="settings_compute_backend">计算后端</string>
-    <string name="settings_compute_backend_desc">GPU/NPU 仅用于 LiteRT Beta；失败时会回退到 CPU</string>
+    <string name="settings_compute_backend_desc">仅用于 LiteRT-LM；切换后在下一次翻译时生效，并显示实际使用的后端</string>
     <string name="settings_backend_cpu_desc">在所有设备上稳定运行</string>
     <string name="settings_backend_gpu_desc">带自动回退的 LiteRT-LM 后端</string>
-    <string name="settings_backend_npu_desc">实验性，带 CPU 回退</string>
     <string name="settings_memory">内存管理</string>
     <string name="settings_auto_unload">自动卸载模型</string>
     <string name="settings_auto_unload_desc">空闲多少分钟后从内存中卸载模型</string>
@@ -103,6 +102,7 @@
     <string name="model_accept_download">接受并下载</string>
     <string name="model_category_translation">翻译</string>
     <string name="model_family_details">%1$s • %2$s • %3$d 种语言</string>
+    <string name="model_family_details_without_languages">%1$s • %2$s</string>
     <string name="model_ready">✓ 已就绪</string>
     <string name="model_download">下载</string>
     <string name="model_delete">删除</string>
@@ -166,7 +166,7 @@
     <string name="model_family_hy_mt2_1_8b_desc">Fast-thinking 翻译，33 种语言，移动端 GGUF</string>
     <string name="model_family_hy_mt2_7b_desc">Fast-thinking 翻译，33 种语言，高质量档</string>
     <string name="model_family_translate_gemma_desc">专用于翻译，55 种语言</string>
-    <string name="model_family_translate_gemma_litert_beta_desc">Beta runtime：LiteRT-LM .litertlm，CPU/GPU/NPU</string>
+    <string name="model_family_translate_gemma_litert_beta_desc">Beta runtime：LiteRT-LM .litertlm，CPU/GPU</string>
     <string name="model_variant_hy_mt_1_25bit_desc">AngelSlim 1.25-bit，Tencent 官方</string>
     <string name="model_variant_hy_mt_2bit_desc">AngelSlim 2-bit，Tencent 官方</string>
     <string name="model_variant_hy_mt_q4_k_m_desc">4-bit，Tencent 官方</string>
@@ -192,7 +192,7 @@
     <string name="model_variant_translate_gemma_q6_k_desc">6-bit</string>
     <string name="model_variant_translate_gemma_q8_0_desc">8-bit</string>
     <string name="model_variant_translate_gemma_f16_desc">FP16</string>
-    <string name="model_variant_translate_gemma_litert_beta_int4_desc">LiteRT-LM INT4，约 2 GB，用于 CPU/GPU/NPU 测试</string>
+    <string name="model_variant_translate_gemma_litert_beta_int4_desc">LiteRT-LM INT4，约 2 GB，用于 CPU/GPU 测试</string>
     <string name="model_variant_translate_gemma_litert_beta_dynamic_int8_desc">LiteRT-LM dynamic INT8，约 4 GB，质量更高</string>
     <string name="settings_tts_engine_value">Android System TTS</string>
     <string name="stt_combined_description">Silero VAD (2 MB) + Whisper Tiny (40 MB)</string>

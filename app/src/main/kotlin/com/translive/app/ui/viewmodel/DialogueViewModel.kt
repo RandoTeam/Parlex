@@ -91,7 +91,7 @@ class DialogueViewModel @Inject constructor(
             liteRtEngine.loadModel(path, settings.backend, threads)
         } else {
             liteRtEngine.unloadModel()
-            engine.loadModel(path, threads)
+            engine.loadModel(path, threads, settings.backend)
         }
     }
 
@@ -226,18 +226,6 @@ class DialogueViewModel @Inject constructor(
                     }
                     return@launch
                 }
-                val ok = speechEngine.initialize("")  // Auto-detect for bidirectional
-                if (!ok) {
-                    _uiState.update {
-                        it.copy(
-                            isConversationActive = false,
-                            phase = DialoguePhase.ERROR,
-                            error = tr(R.string.error_stt_init_failed)
-                        )
-                    }
-                    return@launch
-                }
-
                 // 3. Create a Room session
                 val state = _uiState.value
                 val session = DialogueSession(
@@ -247,10 +235,7 @@ class DialogueViewModel @Inject constructor(
                 )
                 currentSessionId = dialogueDao.insertSession(session)
 
-                // 4. Start listening
-                speechEngine.startListening { result ->
-                    onSpeechRecognized(result)
-                }
+                // Each speaking side starts a separate, language-locked turn.
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -284,8 +269,37 @@ class DialogueViewModel @Inject constructor(
         }
     }
 
-    private fun onSpeechRecognized(result: SpeechResult) {
+    fun speakFromSourceLanguage() = startRecognitionTurn(_uiState.value.sourceLanguage)
+
+    fun speakFromTargetLanguage() = startRecognitionTurn(_uiState.value.targetLanguage)
+
+    private fun startRecognitionTurn(fromLang: Language) {
+        if (!_uiState.value.isConversationActive || _uiState.value.phase != DialoguePhase.LISTENING) return
+        viewModelScope.launch(Dispatchers.IO) {
+            if (!speechEngine.initialize(fromLang.code)) {
+                _uiState.update { it.copy(phase = DialoguePhase.ERROR, error = tr(R.string.error_stt_init_failed)) }
+                return@launch
+            }
+            speechEngine.startListening(language = fromLang.code, singleShot = true) { result ->
+                onSpeechRecognized(result, fromLang)
+            }
+        }
+    }
+
+    private fun onSpeechRecognized(result: SpeechResult, explicitFromLang: Language) {
         if (!_uiState.value.isConversationActive) return
+
+        // A dialogue turn is deliberately language-locked by its button. Qwen3-ASR
+        // may identify a third language; never pass that text into the translator.
+        if (result.language != explicitFromLang.code) {
+            _uiState.update {
+                it.copy(
+                    phase = DialoguePhase.LISTENING,
+                    error = "Speech language does not match the selected side"
+                )
+            }
+            return
+        }
 
         _uiState.update { it.copy(phase = DialoguePhase.TRANSLATING) }
 
@@ -294,7 +308,7 @@ class DialogueViewModel @Inject constructor(
                 val state = _uiState.value
 
                 // Bidirectional: detect spoken language and translate to the other
-                val detectedLang = Language.fromCode(result.language)
+                val detectedLang = explicitFromLang
                 val fromLang: Language
                 val toLang: Language
 
@@ -352,7 +366,6 @@ class DialogueViewModel @Inject constructor(
                 // Resume listening after TTS finishes
                 if (_uiState.value.isConversationActive) {
                     _uiState.update { it.copy(phase = DialoguePhase.LISTENING) }
-                    speechEngine.startListening { onSpeechRecognized(it) }
                 }
             } catch (e: Exception) {
                 _uiState.update {

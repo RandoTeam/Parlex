@@ -22,6 +22,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -511,22 +512,34 @@ fun CameraScreen(
                             }
                         }
 
-                        // NMT error badge
+                        // NMT pack is missing. A live frame never starts a transfer.
                         if (uiState.nmtError != null && !uiState.isNmtDownloading) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
                                     .padding(top = 8.dp)
-                                    .clip(RoundedCornerShape(20.dp))
+                                    .clip(RoundedCornerShape(14.dp))
                                     .background(Color(0xCCCC3333))
-                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Filled.Warning, null, tint = Color.White,
-                                        modifier = Modifier.size(14.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(uiState.nmtError ?: "", color = Color.White,
-                                        style = MaterialTheme.typography.labelSmall)
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Filled.Warning, null, tint = Color.White,
+                                            modifier = Modifier.size(14.dp))
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(uiState.nmtError ?: "", color = Color.White,
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    TextButton(
+                                        onClick = onNavigateToModels,
+                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.camera_open_model_packages),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = Color.White
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1208,6 +1221,15 @@ private fun LiveCameraView(
                         .setFlashMode(ImageCapture.FLASH_MODE_OFF)
                         .setJpegQuality(95)
                         .build()
+                    val imageAnalysis = ImageAnalysis.Builder()
+                        .setTargetRotation(rotation)
+                        // Do not queue camera frames while OCR/NMT is busy.
+                        .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                        .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+                        .build()
+                        .also { analysis ->
+                            analysis.setAnalyzer(executor, viewModel::processLiveFrame)
+                        }
 
                     provider.unbindAll()
                     boundCamera.set(null)
@@ -1222,6 +1244,7 @@ private fun LiveCameraView(
                                 .setViewPort(viewPort)
                                 .addUseCase(preview)
                                 .addUseCase(imageCapture)
+                                .addUseCase(imageAnalysis)
                                 .build()
                             provider.bindToLifecycle(lifecycleOwner, selector, useCaseGroup)
                         } else {
@@ -1230,7 +1253,7 @@ private fun LiveCameraView(
                                 "PreviewView ViewPort unavailable, binding fallback"
                             )
                             provider.bindToLifecycle(
-                                lifecycleOwner, selector, preview, imageCapture
+                                lifecycleOwner, selector, preview, imageCapture, imageAnalysis
                             )
                         }
                     }

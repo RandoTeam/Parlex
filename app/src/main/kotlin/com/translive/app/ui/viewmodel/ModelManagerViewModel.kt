@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.translive.app.R
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.model.Language
 import com.translive.app.data.model.ModelCatalog
 import com.translive.app.data.model.ModelFamily
 import com.translive.app.data.model.ModelRuntime
@@ -15,6 +16,7 @@ import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
 import com.translive.app.engine.DownloadState
 import com.translive.app.engine.LiteRtTranslationEngine
+import com.translive.app.engine.CameraTranslateEngine
 import com.translive.app.engine.ModelDownloadManager
 import com.translive.app.engine.SpeechEngine
 import com.translive.app.engine.TranslationEngine
@@ -34,6 +36,7 @@ import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 enum class ModelStatus {
     NOT_DOWNLOADED,
     DOWNLOADING,
+    PAUSED,
     DOWNLOADED,
     ACTIVE,
     LOADING
@@ -52,12 +55,16 @@ data class FamilyUiState(
     /** Number of downloaded variants in this family */
     val downloadedCount: Int = 0,
     /** True if the active model belongs to this family */
-    val hasActiveVariant: Boolean = false
+    val hasActiveVariant: Boolean = false,
+    val activeDownloadCount: Int = 0,
+    val pausedDownloadCount: Int = 0,
+    val downloadProgress: Float? = null
 )
 
 data class ModelManagerUiState(
     val families: List<FamilyUiState> = emptyList(),
     val models: List<ModelItemState> = emptyList(),
+    val externalModels: List<ModelItemState> = emptyList(),
     val totalDownloadedSize: Long = 0L,
     val availableSpace: Long = 0L,
     val isLoadingModel: Boolean = false,
@@ -68,10 +75,27 @@ data class ModelManagerUiState(
     val sttDownloaded: Boolean = false,
     val sttDownloading: Boolean = false,
     val sttProgress: Float = 0f,
+    val qwen3Downloaded: Boolean = false,
+    val qwen3Downloading: Boolean = false,
+    val qwen3Progress: Float = 0f,
+    val selectedSpeechModel: String = SettingsRepository.SPEECH_MODEL_WHISPER_TINY,
+    val cameraPack: CameraTranslationPackUiState? = null,
     val error: String? = null,
     val successMessage: String? = null,
     /** Variant pending license confirmation before download */
     val pendingLicenseVariant: ModelVariant? = null
+)
+
+/** ML Kit-owned offline language packages required by the current camera pair. */
+data class CameraTranslationPackUiState(
+    val sourceLanguage: Language,
+    val targetLanguage: Language,
+    val isAutoSource: Boolean,
+    val supported: Boolean,
+    val isReady: Boolean,
+    val isDownloading: Boolean = false,
+    val requiredPackageCount: Int = 0,
+    val downloadedPackageCount: Int = 0
 )
 
 @HiltViewModel
@@ -81,6 +105,7 @@ class ModelManagerViewModel @Inject constructor(
     private val engine: TranslationEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
     private val speechEngine: SpeechEngine,
+    private val cameraTranslateEngine: CameraTranslateEngine,
     private val settings: SettingsRepository,
     private val texts: LocalizedTextProvider
 ) : ViewModel() {
@@ -115,6 +140,13 @@ class ModelManagerViewModel @Inject constructor(
                 updateDownloadStates(downloads)
             }
         }
+        viewModelScope.launch {
+            cameraTranslateEngine.isDownloading.collect { downloading ->
+                _uiState.update { state ->
+                    state.copy(cameraPack = state.cameraPack?.copy(isDownloading = downloading))
+                }
+            }
+        }
     }
 
     private fun updateDownloadStates(downloads: Map<String, DownloadState>) {
@@ -129,6 +161,7 @@ class ModelManagerViewModel @Inject constructor(
                 val status = when {
                     isActive -> ModelStatus.ACTIVE
                     downloadState is DownloadState.Downloading -> ModelStatus.DOWNLOADING
+                    downloadState is DownloadState.Paused -> ModelStatus.PAUSED
                     isDownloaded -> ModelStatus.DOWNLOADED
                     else -> ModelStatus.NOT_DOWNLOADED
                 }
@@ -139,23 +172,43 @@ class ModelManagerViewModel @Inject constructor(
                 isExpanded = family.id in expandedIds,
                 variants = variantStates,
                 downloadedCount = variantStates.count { it.status == ModelStatus.DOWNLOADED || it.status == ModelStatus.ACTIVE },
-                hasActiveVariant = variantStates.any { it.status == ModelStatus.ACTIVE }
+                hasActiveVariant = variantStates.any { it.status == ModelStatus.ACTIVE },
+                activeDownloadCount = variantStates.count { it.status == ModelStatus.DOWNLOADING },
+                pausedDownloadCount = variantStates.count { it.status == ModelStatus.PAUSED },
+                downloadProgress = variantStates.mapNotNull { item ->
+                    when (val state = item.downloadState) {
+                        is DownloadState.Downloading -> state.bytesDownloaded.toDouble() to state.totalBytes.toDouble()
+                        is DownloadState.Paused -> state.bytesDownloaded.toDouble() to state.totalBytes.toDouble()
+                        else -> null
+                    }
+                }.takeIf { it.isNotEmpty() }?.let { progressItems ->
+                    val total = progressItems.sumOf { it.second }
+                    if (total > 0.0) (progressItems.sumOf { it.first } / total).toFloat() else 0f
+                }
             )
         }
 
         // Flat list for backward compat
         val allModels = families.flatMap { it.variants }
+        val externalModels = repo.getExternalModels().map { variant ->
+            ModelItemState(
+                variant = variant,
+                status = if (variant.id == activeId) ModelStatus.ACTIVE else ModelStatus.DOWNLOADED
+            )
+        }
 
         val sttVadState = downloads["stt-vad"]
         val sttWhisperState = downloads["stt-whisper"]
+        val sttQwenState = downloads["stt-qwen3-asr-0.6b"]
 
         _uiState.update { old ->
             old.copy(
                 families = families,
                 models = allModels,
+                externalModels = externalModels,
                 totalDownloadedSize = repo.getTotalDownloadedSize(),
                 availableSpace = repo.getAvailableSpace(),
-                sttDownloaded = speechEngine.areModelsDownloaded(),
+                sttDownloaded = speechEngine.isVadDownloaded() && speechEngine.isWhisperDownloaded(),
                 sttDownloading = sttVadState is DownloadState.Downloading ||
                         sttWhisperState is DownloadState.Downloading,
                 sttProgress = when {
@@ -164,13 +217,68 @@ class ModelManagerViewModel @Inject constructor(
                     sttVadState is DownloadState.Downloading ->
                         sttVadState.progress * 0.05f
                     else -> old.sttProgress
-                }
+                },
+                qwen3Downloaded = speechEngine.isVadDownloaded() && speechEngine.isQwen3Downloaded(),
+                qwen3Downloading = sttQwenState is DownloadState.Downloading,
+                qwen3Progress = when (sttQwenState) {
+                    is DownloadState.Downloading -> sttQwenState.progress
+                    is DownloadState.Paused -> sttQwenState.progress
+                    else -> old.qwen3Progress
+                },
+                selectedSpeechModel = settings.speechModel
             )
         }
     }
 
     fun refreshModels() {
         updateDownloadStates(downloadManager.activeDownloads.value)
+        refreshCameraTranslationPack()
+    }
+
+    private fun refreshCameraTranslationPack() {
+        val source = settings.cameraSourceLanguage
+        val target = settings.cameraTargetLanguage
+        val isAutoSource = settings.cameraSourceAuto
+        viewModelScope.launch(Dispatchers.IO) {
+            val status = cameraTranslateEngine.getPackageStatus(source.code, target.code)
+            _uiState.update {
+                it.copy(
+                    cameraPack = CameraTranslationPackUiState(
+                        sourceLanguage = source,
+                        targetLanguage = target,
+                        isAutoSource = isAutoSource,
+                        supported = status.supported,
+                        isReady = status.isReady,
+                        isDownloading = cameraTranslateEngine.isDownloading.value,
+                        requiredPackageCount = status.requiredLanguageCodes.size,
+                        downloadedPackageCount = status.downloadedLanguageCodes.count {
+                            it in status.requiredLanguageCodes
+                        }
+                    )
+                )
+            }
+        }
+    }
+
+    fun downloadCameraTranslationPack() {
+        val pack = _uiState.value.cameraPack ?: return
+        if (!pack.supported || pack.isReady || pack.isDownloading) return
+
+        _uiState.update { state ->
+            state.copy(cameraPack = pack.copy(isDownloading = true))
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val activated = cameraTranslateEngine.downloadAndActivate(
+                pack.sourceLanguage.code,
+                pack.targetLanguage.code
+            )
+            if (!activated) {
+                _uiState.update {
+                    it.copy(error = tr(R.string.camera_pack_download_failed))
+                }
+            }
+            refreshCameraTranslationPack()
+        }
     }
 
     fun toggleFamily(familyId: String) {
@@ -232,6 +340,14 @@ class ModelManagerViewModel @Inject constructor(
         downloadManager.cancelDownload(variant.id)
     }
 
+    fun pauseDownload(variant: ModelVariant) {
+        downloadManager.pauseDownload(variant.id)
+    }
+
+    fun resumeDownload(variant: ModelVariant) {
+        downloadModel(variant)
+    }
+
     fun selectModel(variant: ModelVariant) {
         if (!repo.isDownloaded(variant)) return
 
@@ -241,18 +357,25 @@ class ModelManagerViewModel @Inject constructor(
             try {
                 engine.unloadModel()
                 liteRtEngine.unloadModel()
-                repo.setActiveModelId(variant.id)
                 val path = repo.getModelPath(variant) ?: return@launch
 
+                if (variant.supportsGpu && !variant.supportsCpu) {
+                    settings.backend = SettingsRepository.BACKEND_GPU
+                }
                 val threads = settings.threads
                 val loaded = if (variant.runtime == ModelRuntime.LITERT_LM) {
                     liteRtEngine.loadModel(path, settings.backend, threads)
                 } else {
-                    engine.loadModel(path, threads)
+                    engine.loadModel(path, threads, settings.backend)
                 }
 
                 if (!loaded) {
                     _uiState.update { it.copy(error = tr(R.string.error_load_named_model, variant.quantName)) }
+                } else {
+                    // A model becomes active only after its runtime has loaded it.
+                    // This keeps an incompatible external file from replacing a
+                    // working translator configuration.
+                    repo.setActiveModelId(variant.id)
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = tr(R.string.error_prefix, e.message ?: "")) }
@@ -278,6 +401,26 @@ class ModelManagerViewModel @Inject constructor(
         speechEngine.release()
         val sttDir = File(speechEngine.vadFile.parent ?: return)
         if (sttDir.exists()) sttDir.deleteRecursively()
+        refreshModels()
+    }
+
+    fun selectSpeechModel(model: String) {
+        val isReady = when (model) {
+            SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B -> speechEngine.isVadDownloaded() && speechEngine.isQwen3Downloaded()
+            else -> speechEngine.isVadDownloaded() && speechEngine.isWhisperDownloaded()
+        }
+        if (!isReady) return
+        speechEngine.release()
+        settings.speechModel = model
+        refreshModels()
+    }
+
+    fun deleteQwen3Model() {
+        if (settings.speechModel == SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B) {
+            settings.speechModel = SettingsRepository.SPEECH_MODEL_WHISPER_TINY
+        }
+        speechEngine.release()
+        speechEngine.qwen3Dir.deleteRecursively()
         refreshModels()
     }
 
@@ -335,28 +478,23 @@ class ModelManagerViewModel @Inject constructor(
             }
 
             result.fold(
-                onSuccess = { filename ->
-                    // Auto-activate if no model is currently active
-                    val shouldActivate = repo.getActiveModelId() == null
-                    if (shouldActivate) {
-                        repo.setActiveByFilename(filename)
-                        val path = repo.getActiveModelPath()
-                        if (path != null) {
-                            val threads = settings.threads
-                            if (repo.getActiveRuntime() == ModelRuntime.LITERT_LM) {
-                                engine.unloadModel()
-                                liteRtEngine.loadModel(path, settings.backend, threads)
-                            } else {
-                                liteRtEngine.unloadModel()
-                                engine.loadModel(path, threads)
-                            }
-                        }
+                onSuccess = { imported ->
+                    // A catalog model may become the first active model only
+                    // through the same load-before-activate gate. External
+                    // models always remain explicit user choices.
+                    if (repo.getActiveModelId() == null && imported.recognizedCatalogVariant) {
+                        selectModel(imported.variant)
                     }
                     _uiState.update {
                         it.copy(
                             isImporting = false,
                             importProgress = 1f,
-                            successMessage = tr(R.string.success_model_installed, filename)
+                            successMessage = when {
+                                imported.alreadyPresent -> "Модель уже добавлена и прошла проверку"
+                                imported.integrityVerified -> "Проверенная модель из каталога добавлена"
+                                imported.recognizedCatalogVariant -> "Модель из каталога добавлена; контрольная сумма для неё пока не опубликована"
+                                else -> "Внешняя модель добавлена в отдельный список"
+                            }
                         )
                     }
                     refreshModels()
@@ -409,6 +547,72 @@ class ModelManagerViewModel @Inject constructor(
                     _uiState.update { it.copy(sttDownloading = false) }
                 }
                 else -> {}
+            }
+        }
+    }
+
+    /** Download Qwen3-ASR only after user explicitly asks for the quality STT mode. */
+    fun downloadQwen3Model() {
+        if (_uiState.value.qwen3Downloading || speechEngine.isQwen3Downloaded()) return
+        val sttDir = File(speechEngine.vadFile.parent ?: return).apply { mkdirs() }
+        _uiState.update { it.copy(qwen3Downloading = true, qwen3Progress = 0f) }
+        val startQwen = { downloadQwen3Archive(sttDir) }
+        if (speechEngine.isVadDownloaded()) {
+            startQwen()
+            return
+        }
+        val vadVariant = ModelVariant(
+            id = "stt-vad",
+            quantName = SttModelInfo.VAD_DISPLAY_NAME,
+            displayName = SttModelInfo.VAD_DISPLAY_NAME,
+            description = "VAD",
+            sizeBytes = SttModelInfo.VAD_SIZE_BYTES,
+            ramEstimateMb = 50,
+            downloadUrl = SttModelInfo.VAD_DOWNLOAD_URL,
+            filename = SttModelInfo.VAD_FILENAME
+        )
+        downloadManager.startDownload(vadVariant, speechEngine.vadFile) { state ->
+            when (state) {
+                is DownloadState.Completed -> startQwen()
+                is DownloadState.Failed -> _uiState.update { it.copy(qwen3Downloading = false, error = tr(R.string.error_prefix, "VAD: ${state.error}")) }
+                is DownloadState.Cancelled -> _uiState.update { it.copy(qwen3Downloading = false) }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun downloadQwen3Archive(sttDir: File) {
+        val archive = File(sttDir, SttModelInfo.QWEN3_ARCHIVE)
+        val variant = ModelVariant(
+            id = "stt-qwen3-asr-0.6b",
+            quantName = SttModelInfo.QWEN3_DISPLAY_NAME,
+            displayName = SttModelInfo.QWEN3_DISPLAY_NAME,
+            description = "Offline quality ASR, CPU",
+            sizeBytes = SttModelInfo.QWEN3_ARCHIVE_SIZE_BYTES,
+            ramEstimateMb = SttModelInfo.QWEN3_RAM_MB,
+            downloadUrl = SttModelInfo.QWEN3_DOWNLOAD_URL,
+            filename = SttModelInfo.QWEN3_ARCHIVE,
+            sha256 = SttModelInfo.QWEN3_SHA256
+        )
+        downloadManager.startDownload(variant, archive) { state ->
+            when (state) {
+                is DownloadState.Completed -> try {
+                    _uiState.update { it.copy(qwen3Progress = 0.98f) }
+                    withContext(Dispatchers.IO) {
+                        extractTarBz2(archive, sttDir)
+                        archive.delete()
+                    }
+                    if (!speechEngine.isQwen3Downloaded()) {
+                        throw IllegalStateException("Qwen3-ASR archive has missing or incomplete files")
+                    }
+                    _uiState.update { it.copy(qwen3Downloading = false, qwen3Downloaded = true, qwen3Progress = 1f) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Qwen3-ASR extract error", e)
+                    _uiState.update { it.copy(qwen3Downloading = false, error = tr(R.string.error_prefix, "Qwen3-ASR: ${e.message ?: ""}")) }
+                }
+                is DownloadState.Failed -> _uiState.update { it.copy(qwen3Downloading = false, error = tr(R.string.error_prefix, "Qwen3-ASR: ${state.error}")) }
+                is DownloadState.Cancelled -> _uiState.update { it.copy(qwen3Downloading = false) }
+                else -> Unit
             }
         }
     }
@@ -469,6 +673,11 @@ class ModelManagerViewModel @Inject constructor(
             var entry = tais.nextEntry
             while (entry != null) {
                 val outFile = File(destDir, entry.name)
+                val root = destDir.canonicalFile
+                val candidate = outFile.canonicalFile
+                require(candidate.path.startsWith(root.path + File.separator)) {
+                    "Unsafe archive entry: ${entry.name}"
+                }
                 if (entry.isDirectory) {
                     outFile.mkdirs()
                     Log.d(TAG, "  DIR: ${entry.name}")

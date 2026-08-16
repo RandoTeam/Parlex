@@ -72,6 +72,12 @@ class DownloadService : Service() {
 
                 // Find the most active download for notification
                 val active = downloads.values.filterIsInstance<DownloadState.Downloading>()
+                if (active.isEmpty()) {
+                    // Paused work is durable but must not keep a foreground
+                    // notification/service alive after the app is closed.
+                    stopSelf()
+                    return@collect
+                }
                 if (active.isNotEmpty()) {
                     val total = active.sumOf { it.totalBytes }
                     val done = active.sumOf { it.bytesDownloaded }

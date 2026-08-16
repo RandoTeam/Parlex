@@ -26,13 +26,16 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
+import com.translive.app.data.SettingsRepository
 import com.translive.app.engine.DownloadState
 import com.translive.app.data.model.ModelFamily
+import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.viewmodel.FamilyUiState
+import com.translive.app.ui.viewmodel.CameraTranslationPackUiState
 import com.translive.app.ui.viewmodel.ModelItemState
 import com.translive.app.ui.viewmodel.ModelManagerViewModel
 import com.translive.app.ui.viewmodel.ModelStatus
@@ -184,6 +187,8 @@ fun ModelManagerScreen(
                         val variant = modelState.variant
                         val onDownload = remember(variant) { { viewModel.requestDownload(variant) } }
                         val onCancel = remember(variant) { { viewModel.cancelDownload(variant) } }
+                        val onPause = remember(variant) { { viewModel.pauseDownload(variant) } }
+                        val onResume = remember(variant) { { viewModel.resumeDownload(variant) } }
                         val onSelect = remember(variant) { { viewModel.selectModel(variant) } }
                         val onDelete = remember(variant) { { viewModel.deleteModel(variant) } }
                         val onExport = remember(variant) { {
@@ -194,6 +199,8 @@ fun ModelManagerScreen(
                             state = modelState,
                             onDownload = onDownload,
                             onCancel = onCancel,
+                            onPause = onPause,
+                            onResume = onResume,
                             onSelect = onSelect,
                             onDelete = onDelete,
                             onExport = onExport,
@@ -204,6 +211,41 @@ fun ModelManagerScreen(
                                 .animateItem()
                         )
                     }
+                }
+            }
+
+            if (uiState.externalModels.isNotEmpty()) {
+                item(key = "external_models_header", contentType = "external_header") {
+                    Text(
+                        text = "Внешние модели",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = 6.dp)
+                    )
+                }
+                items(
+                    uiState.externalModels,
+                    key = { it.variant.id },
+                    contentType = { "external_model_card" }
+                ) { modelState ->
+                    val variant = modelState.variant
+                    ModelCard(
+                        state = modelState,
+                        onDownload = {},
+                        onCancel = {},
+                        onPause = {},
+                        onResume = {},
+                        onSelect = { viewModel.selectModel(variant) },
+                        onDelete = { viewModel.deleteModel(variant) },
+                        onExport = {
+                            viewModel.startExport(variant)
+                            exportLauncher.launch(variant.filename)
+                        },
+                        isExporting = uiState.isExporting,
+                        exportProgress = uiState.exportProgress,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
+                    )
                 }
             }
 
@@ -260,13 +302,56 @@ fun ModelManagerScreen(
 
             item(key = "stt_card", contentType = "stt_card") {
                 SttModelCard(
+                    title = "Silero VAD + Whisper Tiny",
+                    description = stringResource(R.string.stt_combined_description),
+                    downloadSizeBytes = SttModelInfo.TOTAL_SIZE_BYTES,
+                    ramMb = SttModelInfo.WHISPER_RAM_MB,
                     isDownloaded = uiState.sttDownloaded,
                     isDownloading = uiState.sttDownloading,
                     progress = uiState.sttProgress,
+                    isSelected = uiState.selectedSpeechModel == SettingsRepository.SPEECH_MODEL_WHISPER_TINY,
                     onDownload = { viewModel.downloadSttModels() },
+                    onSelect = { viewModel.selectSpeechModel(SettingsRepository.SPEECH_MODEL_WHISPER_TINY) },
                     onDelete = { viewModel.deleteSttModels() },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+            }
+
+            item(key = "qwen3_stt_card", contentType = "stt_card") {
+                SttModelCard(
+                    title = "Qwen3-ASR 0.6B INT8",
+                    description = stringResource(R.string.stt_qwen3_description),
+                    downloadSizeBytes = SttModelInfo.QWEN3_ARCHIVE_SIZE_BYTES,
+                    ramMb = SttModelInfo.QWEN3_RAM_MB,
+                    isDownloaded = uiState.qwen3Downloaded,
+                    isDownloading = uiState.qwen3Downloading,
+                    progress = uiState.qwen3Progress,
+                    isSelected = uiState.selectedSpeechModel == SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B,
+                    onDownload = { viewModel.downloadQwen3Model() },
+                    onSelect = { viewModel.selectSpeechModel(SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B) },
+                    onDelete = { viewModel.deleteQwen3Model() },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            item(key = "camera_packs_header", contentType = "section_header") {
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.models_camera_packages_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+            }
+
+            uiState.cameraPack?.let { pack ->
+                item(key = "camera_packs_card", contentType = "camera_packs_card") {
+                    CameraTranslationPackCard(
+                        pack = pack,
+                        onDownload = viewModel::downloadCameraTranslationPack,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
             }
         }
     }
@@ -361,9 +446,18 @@ private fun FamilyHeader(
                     }
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = stringResource(R.string.model_family_details, family.developer, family.parameterSize, family.languageCount),
+                        text = if (family.languageCount > 0) {
+                            stringResource(R.string.model_family_details, family.developer, family.parameterSize, family.languageCount)
+                        } else {
+                            stringResource(R.string.model_family_details_without_languages, family.developer, family.parameterSize)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = familyBackendLabel(family),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
                     )
                 }
 
@@ -380,6 +474,22 @@ private fun FamilyHeader(
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
+                }
+                familyState.downloadProgress?.let { progress ->
+                    Box(modifier = Modifier.size(28.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.size(28.dp),
+                            strokeWidth = 3.dp
+                        )
+                        Icon(
+                            if (familyState.activeDownloadCount > 0) Icons.Filled.Downloading else Icons.Filled.Pause,
+                            null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(6.dp))
                 }
                 Icon(
                     if (familyState.isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
@@ -402,10 +512,16 @@ private fun FamilyHeader(
 
 @Composable
 private fun SttModelCard(
+    title: String,
+    description: String,
+    downloadSizeBytes: Long,
+    ramMb: Int,
     isDownloaded: Boolean,
     isDownloading: Boolean,
     progress: Float,
+    isSelected: Boolean,
     onDownload: () -> Unit,
+    onSelect: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -430,7 +546,7 @@ private fun SttModelCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "Silero VAD + Whisper Tiny",
+                    text = title,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
                 )
@@ -451,7 +567,7 @@ private fun SttModelCard(
 
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = stringResource(R.string.stt_combined_description),
+                text = description,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -464,7 +580,7 @@ private fun SttModelCard(
                 Icon(Icons.Outlined.FolderZip, null, modifier = Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    text = formatSize(SttModelInfo.TOTAL_SIZE_BYTES),
+                    text = formatSize(downloadSizeBytes),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -472,7 +588,7 @@ private fun SttModelCard(
                 Icon(Icons.Outlined.Memory, null, modifier = Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(
-                    text = stringResource(R.string.ram_mb, SttModelInfo.WHISPER_RAM_MB),
+                    text = stringResource(R.string.ram_mb, ramMb),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -515,8 +631,13 @@ private fun SttModelCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
+                    if (!isSelected) {
+                        FilledTonalButton(onClick = onSelect) {
+                            Text(stringResource(R.string.model_select))
+                        }
+                    }
                     OutlinedButton(
                         onClick = onDelete,
                         colors = ButtonDefaults.outlinedButtonColors(
@@ -575,6 +696,8 @@ private fun ModelCard(
     state: ModelItemState,
     onDownload: () -> Unit,
     onCancel: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
     onSelect: () -> Unit,
     onDelete: () -> Unit,
     onExport: () -> Unit,
@@ -606,6 +729,12 @@ private fun ModelCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = variant.backendLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 8.dp)
                 )
                 if (variant.isRecommended) {
                     Surface(
@@ -726,10 +855,24 @@ private fun ModelCard(
                         }
                     }
                     ModelStatus.DOWNLOADING -> {
+                        IconButton(onClick = onPause) {
+                            Icon(Icons.Filled.Pause, "Pause", tint = MaterialTheme.colorScheme.primary)
+                        }
                         OutlinedButton(onClick = onCancel) {
                             Icon(Icons.Filled.Close, null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(stringResource(R.string.notification_cancel))
+                        }
+                    }
+                    ModelStatus.PAUSED -> {
+                        IconButton(onClick = onCancel) {
+                            Icon(Icons.Outlined.Delete, stringResource(R.string.cd_delete), tint = MaterialTheme.colorScheme.error)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(onClick = onResume) {
+                            Icon(Icons.Filled.PlayArrow, null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Продолжить")
                         }
                     }
                     ModelStatus.DOWNLOADED -> {
@@ -816,6 +959,139 @@ private fun localizedFamilyDescription(family: ModelFamily): String {
         else -> null
     }
     return resourceId?.let { stringResource(it) } ?: family.description
+}
+
+@Composable
+private fun CameraTranslationPackCard(
+    pack: CameraTranslationPackUiState,
+    onDownload: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (pack.isReady)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            else MaterialTheme.colorScheme.surfaceVariant
+        )
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    Icons.Filled.CameraAlt,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = stringResource(R.string.models_camera_translation),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f)
+                )
+                if (pack.isReady) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.model_ready),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = stringResource(
+                    R.string.models_camera_current_pair,
+                    pack.sourceLanguage.displayName,
+                    pack.targetLanguage.displayName
+                ),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Text(
+                text = if (pack.isAutoSource) {
+                    stringResource(R.string.models_camera_auto_source_note)
+                } else {
+                    stringResource(R.string.models_camera_package_note)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (!pack.supported) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.models_camera_unsupported_pair),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error
+                )
+                return@Column
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = stringResource(
+                    R.string.models_camera_package_progress,
+                    pack.downloadedPackageCount,
+                    pack.requiredPackageCount
+                ),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (pack.isDownloading) {
+                Spacer(modifier = Modifier.height(8.dp))
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp))
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.models_camera_downloading),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else if (!pack.isReady) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    FilledTonalButton(onClick = onDownload) {
+                        Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.models_camera_download_packages))
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun familyBackendLabel(family: ModelFamily): String {
+    val variants = family.variants
+    if (variants.all { it.runtime == ModelRuntime.GGUF }) {
+        return "CPU / GPU (OpenCL)"
+    }
+    val cpu = variants.any { it.supportsCpu }
+    val gpu = variants.any { it.supportsGpu }
+    return when {
+        cpu && gpu && variants.all { it.supportsCpu && it.supportsGpu } -> "CPU / GPU"
+        cpu && gpu -> "CPU / GPU — зависит от варианта"
+        gpu -> "GPU only"
+        else -> "CPU only"
+    }
 }
 
 @Composable

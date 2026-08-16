@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
     id("com.google.dagger.hilt.android")
@@ -23,9 +22,9 @@ android {
     defaultConfig {
         applicationId = "com.translive.app"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 9
-        versionName = "1.4.1-beta.1"
+        targetSdk = 36
+        versionCode = 10
+        versionName = "1.4.1"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -35,7 +34,10 @@ android {
             cmake {
                 cppFlags += "-std=c++17"
                 arguments += listOf(
-                    "-DANDROID_STL=c++_shared",
+                    // The app's JNI bridge is self-contained.  Static STL
+                    // avoids a launch-time dependency on libc++_shared.so,
+                    // which ColorOS will not supply from the system image.
+                    "-DANDROID_STL=c++_static",
                     "-DCMAKE_BUILD_TYPE=Release"
                 )
             }
@@ -78,12 +80,15 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     buildFeatures {
         compose = true
+    }
+
+    // libOpenCL.so is a link-time stub only. The manifest declares the public
+    // Android system library, so packaging this stub would mask the Adreno
+    // driver on the device.
+    packaging {
+        jniLibs.excludes += "**/libOpenCL.so"
     }
 }
 
@@ -112,8 +117,8 @@ dependencies {
     ksp("androidx.room:room-compiler:2.8.4")
 
     // Hilt DI
-    implementation("com.google.dagger:hilt-android:2.57.2")
-    ksp("com.google.dagger:hilt-android-compiler:2.57.2")
+    implementation("com.google.dagger:hilt-android:2.60.1")
+    ksp("com.google.dagger:hilt-android-compiler:2.60.1")
     implementation("androidx.hilt:hilt-navigation-compose:1.3.0")
 
     // Splash screen
@@ -123,10 +128,11 @@ dependencies {
     implementation("com.airbnb.android:lottie-compose:6.7.1")
 
     // OkHttp for model downloads
-    implementation("com.squareup.okhttp3:okhttp:5.3.2")
+    implementation("com.squareup.okhttp3:okhttp:5.4.0")
 
     // Sherpa-ONNX for offline STT (Whisper Tiny + Silero VAD)
-    implementation(files("libs/sherpa-onnx-1.13.1.aar"))
+    // Official release AAR. Qwen3-ASR Kotlin support begins after 1.13.1.
+    implementation(files("libs/sherpa-onnx-1.13.4.aar"))
 
     // Apache Commons Compress for tar.bz2 extraction
     implementation("org.apache.commons:commons-compress:1.28.0")
@@ -147,8 +153,9 @@ dependencies {
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
 
-    // LiteRT-LM beta runtime for TranslateGemma .litertlm experiments
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.12.0")
+    // LiteRT-LM runtime. Keep this aligned with the official Gemma LiteRT
+    // model releases; 0.16.0 is required for the current GPU model catalog.
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.0")
 
     // Tesseract4Android (Cyrillic/Arabic/Thai/etc. OCR — ML Kit doesn't support these scripts)
     implementation("com.github.adaptech-cz.Tesseract4Android:tesseract4android:4.9.0")

@@ -2,6 +2,7 @@ package com.translive.app.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -19,8 +20,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -44,6 +48,8 @@ fun TranslationScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val clipboardManager = LocalClipboardManager.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
     val systemTts = viewModel.systemTts
     val isSpeaking by systemTts.isSpeaking.collectAsState()
 
@@ -143,7 +149,10 @@ fun TranslationScreen(
                             unfocusedContainerColor = Color.Transparent,
                             focusedContainerColor = Color.Transparent
                         ),
-                        textStyle = MaterialTheme.typography.bodyLarge
+                        textStyle = MaterialTheme.typography.bodyLarge,
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Sentences
+                        )
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -168,7 +177,13 @@ fun TranslationScreen(
 
             // Translate button
             Button(
-                onClick = { viewModel.translate() },
+                onClick = {
+                    if (viewModel.shouldHideKeyboardOnTranslate()) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    }
+                    viewModel.translate()
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
@@ -256,31 +271,32 @@ fun TranslationScreen(
                         )
 
                         // Stats bar
-                        uiState.stats?.let { stats ->
+                        uiState.stats?.takeIf { viewModel.shouldShowTechnicalTranslationStats() }?.let { stats ->
                             HorizontalDivider(
                                 modifier = Modifier.padding(vertical = 8.dp),
                                 thickness = 0.5.dp,
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
                             )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(
-                                    text = "⏱ ${formatTime(stats.totalTimeMs)}",
+                                    text = "Время: ${formatTime(stats.totalTimeMs)}",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Text(
-                                    text = "📥 ${stats.promptTokens} → 📤 ${stats.generatedTokens} tok",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = "⚡ ${"%.1f".format(stats.tokensPerSecond)} tok/s",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
+                                stats.backend?.let { backend ->
+                                    Text(
+                                        text = "Backend: ${backend.uppercase()}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                if (stats.hasNativeTokenMetrics) {
+                                    Text(
+                                        text = "Токены: ${stats.promptTokens} → ${stats.generatedTokens}; ${"%.1f".format(stats.tokensPerSecond)} ток/с",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
 

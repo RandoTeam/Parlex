@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.ImageFormat
 import android.graphics.Rect
+import android.os.SystemClock
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -41,11 +42,18 @@ data class OcrFrameQuality(
     val sharpness: Float
 )
 
+data class OcrDiagnostics(
+    val backend: String,
+    val recognitionMs: Long,
+    val qualityAnalysisMs: Long = 0L
+)
+
 data class OcrResult(
     val blocks: List<OcrBlock>,
     val imageWidth: Int,
     val imageHeight: Int,
-    val quality: OcrFrameQuality? = null
+    val quality: OcrFrameQuality? = null,
+    val diagnostics: OcrDiagnostics? = null
 )
 
 /**
@@ -141,8 +149,12 @@ class OcrEngine @Inject constructor(
         }
 
     suspend fun recognize(bitmap: Bitmap, sourceLanguageCode: String = "en"): OcrResult {
+        val backend = backendFor(sourceLanguageCode)
+        val qualityStartedAt = SystemClock.elapsedRealtime()
         val quality = analyzeFrameQuality(bitmap)
-        val result = when (backendFor(sourceLanguageCode)) {
+        val qualityMs = SystemClock.elapsedRealtime() - qualityStartedAt
+        val recognitionStartedAt = SystemClock.elapsedRealtime()
+        val result = when (backend) {
             OcrBackend.MLKIT_LATIN -> {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 recognizeWithMlKit(image, latinRecognizer)
@@ -159,7 +171,14 @@ class OcrEngine @Inject constructor(
                 recognizeWithTesseract(bitmap, sourceLanguageCode)
             }
         }
-        return result.copy(quality = quality)
+        return result.copy(
+            quality = quality,
+            diagnostics = OcrDiagnostics(
+                backend = backend.name,
+                recognitionMs = SystemClock.elapsedRealtime() - recognitionStartedAt,
+                qualityAnalysisMs = qualityMs
+            )
+        )
     }
 
     @androidx.camera.core.ExperimentalGetImage
@@ -178,6 +197,51 @@ class OcrEngine @Inject constructor(
         } else {
             OcrResult(emptyList(), 0, 0)
         }
+    }
+
+    /**
+     * Fast CameraX path for the scripts supported by ML Kit.  Do not turn a
+     * YUV frame into JPEG/Bitmap first: ML Kit accepts the camera image and
+     * its rotation directly.  Tesseract still needs a bitmap and uses the
+     * regular path below.
+     */
+    @androidx.camera.core.ExperimentalGetImage
+    suspend fun recognizeLive(
+        imageProxy: androidx.camera.core.ImageProxy,
+        sourceLanguageCode: String = "en"
+    ): OcrResult {
+        val recognizer = when (backendFor(sourceLanguageCode)) {
+            OcrBackend.MLKIT_LATIN -> latinRecognizer
+            OcrBackend.MLKIT_CHINESE -> chineseRecognizer
+            OcrBackend.MLKIT_DEVANAGARI -> devanagariRecognizer
+            OcrBackend.TESSERACT -> null
+        }
+
+        if (recognizer == null) {
+            return recognize(imageProxy, sourceLanguageCode)
+        }
+
+        val mediaImage = imageProxy.image
+        if (mediaImage == null) {
+            imageProxy.close()
+            return OcrResult(emptyList(), 0, 0)
+        }
+
+        val image = InputImage.fromMediaImage(
+            mediaImage,
+            imageProxy.imageInfo.rotationDegrees
+        )
+        val recognitionStartedAt = SystemClock.elapsedRealtime()
+        return recognizeWithMlKit(
+            image = image,
+            recognizer = recognizer,
+            onComplete = imageProxy::close
+        ).copy(
+            diagnostics = OcrDiagnostics(
+                backend = backendFor(sourceLanguageCode).name,
+                recognitionMs = SystemClock.elapsedRealtime() - recognitionStartedAt
+            )
+        )
     }
 
     // ── ML Kit ───────────────────────────────────────────────────────────

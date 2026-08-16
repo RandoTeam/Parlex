@@ -242,6 +242,7 @@ class CameraViewModel @Inject constructor(
     private var frameCounter = 0
     private var lastLiveFrameStartedAtMs = 0L
     private var lastAutoLiveSourceLanguage: Language? = null
+    private var lastLivePairWarningKey: String? = null
 
     init {
         // Observe ML Kit translation readiness
@@ -346,7 +347,10 @@ class CameraViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val ok = cameraTranslateEngine.prepare(state.sourceLanguage.code, state.targetLanguage.code)
+            val ok = cameraTranslateEngine.activateDownloadedPair(
+                state.sourceLanguage.code,
+                state.targetLanguage.code
+            )
             if (!ok) {
                 _uiState.update { it.copy(nmtError = texts.text(R.string.error_camera_translation_model_missing)) }
             } else {
@@ -487,7 +491,14 @@ class CameraViewModel @Inject constructor(
                 val liveOcr = recognizeLiveFrame(imageProxy, state)
                 val ocrResult = liveOcr.result
                 val rawLines = extractLiveLines(ocrResult)
-                requestCameraTranslateModel(liveOcr.sourceLanguage, state.targetLanguage)
+                ocrResult.diagnostics?.let { diagnostics ->
+                    Log.d(
+                        "CameraVM",
+                        "Live OCR ${diagnostics.backend}: ${diagnostics.recognitionMs} ms, " +
+                            "quality ${diagnostics.qualityAnalysisMs} ms, ${rawLines.size} lines"
+                    )
+                }
+                reportLiveTranslationReadiness(liveOcr.sourceLanguage, state.targetLanguage)
                 val qualityWarnings = buildQualityWarnings(
                     ocrResult = ocrResult,
                     lineTexts = rawLines.map { it.text },
@@ -520,10 +531,16 @@ class CameraViewModel @Inject constructor(
                 }
 
                 val smoothedLines = smoothLiveLines(rawLines)
+                val translationStartedAt = SystemClock.elapsedRealtime()
                 val translatedBlocks = translateLiveLines(
                     lines = smoothedLines,
                     sourceLanguage = liveOcr.sourceLanguage,
                     targetLanguage = state.targetLanguage
+                )
+                Log.d(
+                    "CameraVM",
+                    "Live translation: ${SystemClock.elapsedRealtime() - translationStartedAt} ms, " +
+                        "${smoothedLines.size} lines"
                 )
 
                 if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) return@launch
@@ -556,7 +573,7 @@ class CameraViewModel @Inject constructor(
     ): LiveOcrPass {
         if (!state.isSourceAuto) {
             return LiveOcrPass(
-                result = ocrEngine.recognize(imageProxy, state.sourceLanguage.code),
+                result = ocrEngine.recognizeLive(imageProxy, state.sourceLanguage.code),
                 sourceLanguage = state.sourceLanguage,
                 ocrLanguage = state.sourceLanguage
             )
@@ -660,22 +677,23 @@ class CameraViewModel @Inject constructor(
         nextLiveTrackId = 0
         lastLiveFrameStartedAtMs = 0L
         lastAutoLiveSourceLanguage = null
+        lastLivePairWarningKey = null
     }
 
-    private fun requestCameraTranslateModel(sourceLanguage: Language, targetLanguage: Language) {
+    /**
+     * Live camera must never start a model download from an analyzed frame.
+     * The selected fixed language pair is prepared when the user opens the
+     * screen or changes languages.  Auto-detected pairs remain visible but
+     * are translated only after their pack has been explicitly prepared.
+     */
+    private fun reportLiveTranslationReadiness(sourceLanguage: Language, targetLanguage: Language) {
         if (sourceLanguage.code == targetLanguage.code) return
         if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
-        if (cameraTranslateEngine.isPreparingFor(sourceLanguage.code, targetLanguage.code)) return
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val ok = cameraTranslateEngine.prepare(sourceLanguage.code, targetLanguage.code)
-            _uiState.update {
-                if (ok) {
-                    it.copy(nmtError = null)
-                } else {
-                    it.copy(nmtError = texts.text(R.string.error_camera_translation_model_missing))
-                }
-            }
+        val key = "${sourceLanguage.code}:${targetLanguage.code}"
+        if (lastLivePairWarningKey == key) return
+        lastLivePairWarningKey = key
+        _uiState.update {
+            it.copy(nmtError = texts.text(R.string.error_camera_translation_model_missing))
         }
     }
 
@@ -684,7 +702,10 @@ class CameraViewModel @Inject constructor(
         if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
         if (cameraTranslateEngine.isPreparingFor(sourceLanguage.code, targetLanguage.code)) return
 
-        val ok = cameraTranslateEngine.prepare(sourceLanguage.code, targetLanguage.code)
+        val ok = cameraTranslateEngine.activateDownloadedPair(
+            sourceLanguage.code,
+            targetLanguage.code
+        )
         _uiState.update {
             if (ok) {
                 it.copy(nmtError = null)
@@ -2631,7 +2652,7 @@ private const val DOCUMENT_PAPER_MIN_LUMA = 160f
 private const val GALLERY_DECODE_MAX_SIZE = 3072
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
-private const val LIVE_FRAME_INTERVAL_MS = 450L
+private const val LIVE_FRAME_INTERVAL_MS = 200L
 
 private val AUTO_CAPTURE_OCR_LANGUAGES = listOf(
     Language.ENGLISH,

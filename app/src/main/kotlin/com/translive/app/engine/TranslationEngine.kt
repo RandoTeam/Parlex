@@ -1,8 +1,13 @@
 package com.translive.app.engine
 
+import android.app.ActivityManager
+import android.content.Context
+import android.os.Build
 import com.translive.app.data.ModelRepository
+import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.PromptStyle
+import com.translive.app.data.model.TranslationProfile
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.sync.Mutex
@@ -50,16 +55,30 @@ class TranslationEngine {
     // --- Native methods (JNI) ---
 
     /** Load GGUF model from file path. Returns context pointer or 0 on failure. */
-    private external fun nativeLoadModel(modelPath: String, nThreads: Int): Long
+    private external fun nativeLoadModel(modelPath: String, nThreads: Int, useGpu: Boolean): Long
 
     /** Run translation inference. Returns translated text. */
     private external fun nativeTranslate(
-        contextPtr: Long, prompt: String, maxTokens: Int, useChatTemplate: Boolean
+        contextPtr: Long,
+        prompt: String,
+        maxTokens: Int,
+        useChatTemplate: Boolean,
+        temperature: Float,
+        topK: Int,
+        topP: Float,
+        repetitionPenalty: Float
     ): String
 
     /** Run streaming translation. Calls callback.onToken() per token. Returns [promptTokens, genTokens]. */
     private external fun nativeTranslateStreaming(
-        contextPtr: Long, prompt: String, maxTokens: Int, useChatTemplate: Boolean,
+        contextPtr: Long,
+        prompt: String,
+        maxTokens: Int,
+        useChatTemplate: Boolean,
+        temperature: Float,
+        topK: Int,
+        topP: Float,
+        repetitionPenalty: Float,
         callback: TokenCallback
     ): IntArray
 
@@ -69,35 +88,57 @@ class TranslationEngine {
     /** Check if model is loaded. */
     private external fun nativeIsLoaded(contextPtr: Long): Boolean
 
+    /** Hardware/runtime probe. Does not allocate or load a language model. */
+    private external fun nativeRuntimeDiagnostics(): String
+
     // --- Kotlin API ---
 
     private var contextPtr: Long = 0L
 
+    /** Backend of the currently loaded GGUF context, never a UI assumption. */
+    @Volatile
+    var currentBackend: String? = null
+        private set
+
     val isLoaded: Boolean
         get() = nativeLock.withLock { isLoadedLocked() }
 
-    fun loadModel(modelPath: String, nThreads: Int = 4): Boolean {
+    fun loadModel(
+        modelPath: String,
+        nThreads: Int = 4,
+        backend: String = SettingsRepository.BACKEND_CPU
+    ): Boolean {
         return nativeLock.withLock {
             if (isLoadedLocked()) {
                 nativeUnloadModel(contextPtr)
                 contextPtr = 0L
+                currentBackend = null
             }
             val optimalThreads = getOptimalThreadCount(nThreads)
             android.util.Log.i("TranslationEngine", "Loading model: threads=$optimalThreads (requested=$nThreads, cores=${Runtime.getRuntime().availableProcessors()})")
-            contextPtr = nativeLoadModel(modelPath, optimalThreads)
-            isLoadedLocked()
+            contextPtr = nativeLoadModel(
+                modelPath,
+                optimalThreads,
+                backend == SettingsRepository.BACKEND_GPU
+            )
+            val loaded = isLoadedLocked()
+            currentBackend = if (loaded) {
+                if (backend == SettingsRepository.BACKEND_GPU) "opencl" else "cpu"
+            } else {
+                null
+            }
+            loaded
         }
     }
 
     /**
-     * Clamp thread count to performance cores.
-     * On big.LITTLE SoCs (e.g. 4 perf + 4 efficiency), using all 8 cores
-     * pushes threads to slow efficiency cores, degrading throughput.
+     * Honor the user's selected thread count up to the number of online cores.
+     * A fixed half-core clamp is incorrect on all-performance designs such as
+     * Snapdragon 8 Elite (six 3.53 GHz cores plus two 4.32 GHz prime cores).
      */
     private fun getOptimalThreadCount(requested: Int): Int {
         val totalCores = Runtime.getRuntime().availableProcessors()
-        val perfCores = (totalCores / 2).coerceAtLeast(2)
-        return requested.coerceIn(1, perfCores)
+        return requested.coerceIn(1, totalCores.coerceAtLeast(1))
     }
 
     fun unloadModel() {
@@ -105,7 +146,22 @@ class TranslationEngine {
             if (contextPtr != 0L) {
                 nativeUnloadModel(contextPtr)
                 contextPtr = 0L
+                currentBackend = null
             }
+        }
+    }
+
+    fun collectRuntimeDiagnostics(context: Context): String {
+        val memory = ActivityManager.MemoryInfo().also { info ->
+            context.getSystemService(ActivityManager::class.java).getMemoryInfo(info)
+        }
+        val mib = 1024L * 1024L
+        return buildString {
+            appendLine("Device: ${Build.MANUFACTURER} ${Build.MODEL}")
+            appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+            appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
+            appendLine("App-visible RAM: ${memory.availMem / mib} MiB free / ${memory.totalMem / mib} MiB total")
+            append(nativeRuntimeDiagnostics())
         }
     }
 
@@ -116,14 +172,22 @@ class TranslationEngine {
         sourceText: String,
         source: Language,
         target: Language,
-        maxTokens: Int = 2048
+        maxTokens: Int = 512
     ): String {
         return nativeLock.withLock {
             if (!isLoadedLocked()) throw IllegalStateException("Модель перевода не загружена")
-            val style = getActivePromptStyle()
-            val prompt = buildPrompt(sourceText, source, target, style)
-            val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
-            nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+            val profile = getActiveProfile()
+            val prompt = buildPrompt(sourceText, source, target, profile.promptStyle)
+            nativeTranslate(
+                contextPtr,
+                prompt,
+                maxTokens,
+                profile.useChatTemplate,
+                profile.sampling.temperature,
+                profile.sampling.topK,
+                profile.sampling.topP,
+                profile.sampling.repetitionPenalty
+            ).trim()
         }
     }
 
@@ -132,7 +196,7 @@ class TranslationEngine {
         sourceText: String,
         source: Language,
         target: Language,
-        maxTokens: Int = 2048
+        maxTokens: Int = 512
     ): String = inferenceMutex.withLock {
         translate(sourceText, source, target, maxTokens)
     }
@@ -145,14 +209,22 @@ class TranslationEngine {
         sourceText: String,
         source: Language,
         target: Language,
-        maxTokens: Int = 2048
+        maxTokens: Int = 512
     ): String {
         return nativeLock.withLock {
             if (!isLoadedLocked()) throw IllegalStateException("Модель перевода не загружена")
-            val style = getActivePromptStyle()
-            val prompt = buildStructuredPrompt(sourceText, source, target, style)
-            val useChatTemplate = true
-            nativeTranslate(contextPtr, prompt, maxTokens, useChatTemplate).trim()
+            val profile = getActiveProfile()
+            val prompt = buildStructuredPrompt(sourceText, source, target, profile.promptStyle)
+            nativeTranslate(
+                contextPtr,
+                prompt,
+                maxTokens,
+                profile.useChatTemplate,
+                profile.sampling.temperature,
+                profile.sampling.topK,
+                profile.sampling.topP,
+                profile.sampling.repetitionPenalty
+            ).trim()
         }
     }
 
@@ -161,7 +233,7 @@ class TranslationEngine {
         sourceText: String,
         source: Language,
         target: Language,
-        maxTokens: Int = 2048
+        maxTokens: Int = 512
     ): String = inferenceMutex.withLock {
         translateStructured(sourceText, source, target, maxTokens)
     }
@@ -175,14 +247,13 @@ class TranslationEngine {
         sourceText: String,
         source: Language,
         target: Language,
-        maxTokens: Int = 2048,
+        maxTokens: Int = 512,
         onComplete: ((StreamResult) -> Unit)? = null
     ): Flow<String> = channelFlow {
         val streamResult = nativeLock.withLock {
             if (!isLoadedLocked()) throw IllegalStateException("Модель перевода не загружена")
-            val style = getActivePromptStyle()
-            val prompt = buildPrompt(sourceText, source, target, style)
-            val useChatTemplate = true  // Both HY-MT and TranslateGemma use chat template
+            val profile = getActiveProfile()
+            val prompt = buildPrompt(sourceText, source, target, profile.promptStyle)
 
             val callback = object : TokenCallback {
                 override fun onToken(token: String): Boolean {
@@ -194,7 +265,17 @@ class TranslationEngine {
                 }
             }
 
-            val counts = nativeTranslateStreaming(contextPtr, prompt, maxTokens, useChatTemplate, callback)
+            val counts = nativeTranslateStreaming(
+                contextPtr,
+                prompt,
+                maxTokens,
+                profile.useChatTemplate,
+                profile.sampling.temperature,
+                profile.sampling.topK,
+                profile.sampling.topP,
+                profile.sampling.repetitionPenalty,
+                callback
+            )
             StreamResult(
                 promptTokens = counts.getOrElse(0) { 0 },
                 generatedTokens = counts.getOrElse(1) { 0 }
@@ -205,8 +286,9 @@ class TranslationEngine {
 
     private fun isLoadedLocked(): Boolean = contextPtr != 0L && nativeIsLoaded(contextPtr)
 
-    private fun getActivePromptStyle(): PromptStyle =
-        modelRepository?.getActiveFamily()?.promptStyle ?: PromptStyle.HY_MT
+    private fun getActiveProfile(): TranslationProfile =
+        modelRepository?.getActiveTranslationProfile()
+            ?: com.translive.app.data.model.TranslationProfiles.forModel(null, com.translive.app.data.model.ModelRuntime.GGUF)
 
     private fun buildPrompt(text: String, source: Language, target: Language, style: PromptStyle): String {
         return when (style) {

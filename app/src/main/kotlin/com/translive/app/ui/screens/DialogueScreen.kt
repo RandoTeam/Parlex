@@ -189,8 +189,12 @@ fun DialogueScreen(
                     ConversationButton(
                         isActive = uiState.isConversationActive,
                         phase = uiState.phase,
+                        sourceLanguage = uiState.sourceLanguage,
+                        targetLanguage = uiState.targetLanguage,
                         onStart = { viewModel.startConversation() },
-                        onStop = { viewModel.stopConversation() }
+                        onStop = { viewModel.stopConversation() },
+                        onSpeakSource = viewModel::speakFromSourceLanguage,
+                        onSpeakTarget = viewModel::speakFromTargetLanguage
                     )
                 }
             }
@@ -411,8 +415,12 @@ private fun DialogueLanguageSelector(
 private fun ConversationButton(
     isActive: Boolean,
     phase: DialoguePhase,
+    sourceLanguage: Language,
+    targetLanguage: Language,
     onStart: () -> Unit,
-    onStop: () -> Unit
+    onStop: () -> Unit,
+    onSpeakSource: () -> Unit,
+    onSpeakTarget: () -> Unit
 ) {
     // Pulsing animation when listening
     val scale by animateFloatAsState(
@@ -432,6 +440,27 @@ private fun ConversationButton(
     else MaterialTheme.colorScheme.primary
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        if (isActive) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onSpeakSource,
+                    enabled = phase == DialoguePhase.LISTENING
+                ) {
+                    Icon(Icons.Filled.Mic, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("${sourceLanguage.flag} ${sourceLanguage.nativeName}")
+                }
+                Button(
+                    onClick = onSpeakTarget,
+                    enabled = phase == DialoguePhase.LISTENING
+                ) {
+                    Icon(Icons.Filled.Mic, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("${targetLanguage.flag} ${targetLanguage.nativeName}")
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
         FloatingActionButton(
             onClick = { if (isActive) onStop() else onStart() },
             modifier = Modifier

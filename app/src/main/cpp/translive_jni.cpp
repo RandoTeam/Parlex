@@ -11,21 +11,52 @@
  */
 
 #include <jni.h>
+#include <algorithm>
+#include <dlfcn.h>
+#include <fstream>
 #include <string>
+#include <sys/sysinfo.h>
+#include <unistd.h>
 #include <vector>
 #include <android/log.h>
 #include "llama.h"
+#include "ggml-backend.h"
 
 #define TAG "TransLive-JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+static bool runtime_library_available(const char * name) {
+    void * handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
+    if (!handle) return false;
+    dlclose(handle);
+    return true;
+}
+
+static std::string read_first_line(const char * path) {
+    std::ifstream file(path);
+    std::string line;
+    return std::getline(file, line) ? line : "unavailable";
+}
 
 struct TransLiveContext {
     llama_model* model = nullptr;
     llama_context* ctx = nullptr;
     const llama_vocab* vocab = nullptr;
     int n_threads = 4;
+    bool gpu_requested = false;
+    std::string gpu_device;
 };
+
+static ggml_backend_dev_t find_gpu_device() {
+    for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
+        auto * device = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_GPU) {
+            return device;
+        }
+    }
+    return nullptr;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
@@ -96,6 +127,21 @@ static int prefill_prompt(TransLiveContext* tlctx, const std::vector<llama_token
 }
 
 /**
+ * Never decode past the actual context window. A small reserve keeps the
+ * final EOG token and runtime bookkeeping from exhausting the KV cache.
+ */
+static int bounded_generation_tokens(
+    TransLiveContext* tlctx,
+    size_t prompt_token_count,
+    int requested_tokens
+) {
+    const int context_tokens = llama_n_ctx(tlctx->ctx);
+    const int reserve_tokens = 8;
+    const int available_tokens = context_tokens - static_cast<int>(prompt_token_count) - reserve_tokens;
+    return std::max(0, std::min(requested_tokens, available_tokens));
+}
+
+/**
  * Create translation sampler with official HY-MT 1.5 recommended parameters.
  * Source: https://huggingface.co/tencent/HY-MT1.5-1.8B
  * { "top_k": 20, "top_p": 0.6, "repetition_penalty": 1.05, "temperature": 0.7 }
@@ -104,12 +150,19 @@ static int prefill_prompt(TransLiveContext* tlctx, const std::vector<llama_token
  * Penalties must see full logit distribution before filtering.
  * Caller must free with llama_sampler_free().
  */
-static llama_sampler* create_translation_sampler() {
+static llama_sampler* create_translation_sampler(
+    const llama_vocab* vocab,
+    float temperature,
+    int top_k,
+    float top_p,
+    float repetition_penalty
+) {
     llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
-    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(64, 1.05f, 0.0f, 0.0f));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(20));
-    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.6f, 1));
-    llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.7f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
+        llama_vocab_n_tokens(vocab), 64, repetition_penalty, 0.0f, 0.0f));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_k(top_k));
+    llama_sampler_chain_add(sampler, llama_sampler_init_top_p(top_p, 1));
+    llama_sampler_chain_add(sampler, llama_sampler_init_temp(temperature));
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
     return sampler;
 }
@@ -136,14 +189,28 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* /*vm*/, void* /*reserved*/) {
 
 JNIEXPORT jlong JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
-    JNIEnv* env, jobject /*thiz*/, jstring modelPath, jint nThreads) {
+    JNIEnv* env, jobject /*thiz*/, jstring modelPath, jint nThreads, jboolean useGpu) {
 
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
     LOGI("Loading model: %s (threads=%d)", path, nThreads);
 
-    // Load model with mmap (default, explicit for clarity)
+    // Load model through mmap. Newer llama.cpp exposes this as load_mode.
     llama_model_params model_params = llama_model_default_params();
-    model_params.use_mmap = true;
+    model_params.load_mode = LLAMA_LOAD_MODE_MMAP;
+    if (useGpu) {
+        auto * gpu = find_gpu_device();
+        if (!gpu) {
+            LOGE("GPU was requested, but no compiled GGUF GPU backend is available");
+            env->ReleaseStringUTFChars(modelPath, path);
+            return 0;
+        }
+        // -1 means all transformer layers. Keep input on CPU as llama.cpp does
+        // internally, and let its scheduler use the OpenCL device for the rest.
+        model_params.n_gpu_layers = -1;
+        LOGI("GGUF GPU requested: device=%s", ggml_backend_dev_name(gpu));
+    } else {
+        model_params.n_gpu_layers = 0;
+    }
     llama_model* model = llama_model_load_from_file(path, model_params);
     env->ReleaseStringUTFChars(modelPath, path);
 
@@ -171,15 +238,21 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
     tlctx->ctx = ctx;
     tlctx->vocab = llama_model_get_vocab(model);
     tlctx->n_threads = nThreads;
+    tlctx->gpu_requested = useGpu;
+    if (useGpu) {
+        auto * gpu = find_gpu_device();
+        tlctx->gpu_device = gpu ? ggml_backend_dev_name(gpu) : "unavailable";
+    }
 
-    LOGI("Model loaded (mmap=1, flash_attn=1, n_ctx=1024)");
+    LOGI("Model loaded (mmap=1, flash_attn=1, n_ctx=1024, GPU=%d)", useGpu);
     return reinterpret_cast<jlong>(tlctx);
 }
 
 JNIEXPORT jstring JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     JNIEnv* env, jobject /*thiz*/, jlong contextPtr, jstring prompt,
-    jint maxTokens, jboolean useChatTemplate) {
+    jint maxTokens, jboolean useChatTemplate, jfloat temperature, jint topK,
+    jfloat topP, jfloat repetitionPenalty) {
 
     auto* tlctx = reinterpret_cast<TransLiveContext*>(contextPtr);
     if (!tlctx || !tlctx->ctx) {
@@ -198,12 +271,18 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
         return env->NewStringUTF("[Error: decode failed]");
     }
 
+    const int generation_limit = bounded_generation_tokens(tlctx, tokens.size(), maxTokens);
+    if (generation_limit <= 0) {
+        return env->NewStringUTF("[Error: input exceeds model context]");
+    }
+
     // Generate
-    llama_sampler* sampler = create_translation_sampler();
+    llama_sampler* sampler = create_translation_sampler(
+        tlctx->vocab, temperature, topK, topP, repetitionPenalty);
     std::string result;
     llama_token eos = llama_vocab_eos(tlctx->vocab);
 
-    for (int i = 0; i < maxTokens; i++) {
+    for (int i = 0; i < generation_limit; i++) {
         llama_token token = llama_sampler_sample(sampler, tlctx->ctx, -1);
 
         if (llama_vocab_is_eog(tlctx->vocab, token) || token == eos) break;
@@ -229,7 +308,8 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
 JNIEXPORT jintArray JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
     JNIEnv* env, jobject /*thiz*/, jlong contextPtr, jstring prompt,
-    jint maxTokens, jboolean useChatTemplate, jobject callback) {
+    jint maxTokens, jboolean useChatTemplate, jfloat temperature, jint topK,
+    jfloat topP, jfloat repetitionPenalty, jobject callback) {
 
     auto* tlctx = reinterpret_cast<TransLiveContext*>(contextPtr);
 
@@ -258,12 +338,20 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
         return arr;
     }
 
+    const int generation_limit = bounded_generation_tokens(tlctx, tokens.size(), maxTokens);
+    if (generation_limit <= 0) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
     // Generate with per-token callback
-    llama_sampler* sampler = create_translation_sampler();
+    llama_sampler* sampler = create_translation_sampler(
+        tlctx->vocab, temperature, topK, topP, repetitionPenalty);
     llama_token eos = llama_vocab_eos(tlctx->vocab);
     int generated = 0;
 
-    for (int i = 0; i < maxTokens; i++) {
+    for (int i = 0; i < generation_limit; i++) {
         llama_token token = llama_sampler_sample(sampler, tlctx->ctx, -1);
 
         if (llama_vocab_is_eog(tlctx->vocab, token) || token == eos) break;
@@ -313,6 +401,32 @@ Java_com_translive_app_engine_TranslationEngine_nativeIsLoaded(
 
     auto* tlctx = reinterpret_cast<TransLiveContext*>(contextPtr);
     return (tlctx && tlctx->model && tlctx->ctx) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_translive_app_engine_TranslationEngine_nativeRuntimeDiagnostics(
+    JNIEnv * env, jobject /*thiz*/) {
+    struct sysinfo memory {};
+    sysinfo(&memory);
+    const unsigned long long totalMiB =
+        (static_cast<unsigned long long>(memory.totalram) * memory.mem_unit) / (1024ULL * 1024ULL);
+    const unsigned long long freeMiB =
+        (static_cast<unsigned long long>(memory.freeram) * memory.mem_unit) / (1024ULL * 1024ULL);
+    std::string report;
+    report += "CPU logical cores: " + std::to_string(sysconf(_SC_NPROCESSORS_ONLN)) + "\n";
+    report += "System RAM: " + std::to_string(freeMiB) + " MiB free / " + std::to_string(totalMiB) + " MiB total\n";
+    report += "GPU (KGSL): " + read_first_line("/sys/class/kgsl/kgsl-3d0/gpu_model") + "\n";
+    report += "Vulkan loader: " + std::string(runtime_library_available("libvulkan.so") ? "available" : "unavailable") + "\n";
+    report += "OpenCL loader: " + std::string(runtime_library_available("libOpenCL.so") ? "available" : "unavailable") + "\n";
+    auto * gpu = find_gpu_device();
+    report += "GGUF GPU backend compiled: " + std::string(gpu ? "OpenCL" : "no") + "\n";
+    if (gpu) {
+        report += "GGUF GPU device: " + std::string(ggml_backend_dev_name(gpu)) + "\n";
+        report += "GGUF GPU offload: available; no model benchmark was run";
+    } else {
+        report += "GGUF GPU offload: unavailable; no model benchmark was run";
+    }
+    return env->NewStringUTF(report.c_str());
 }
 
 } // extern "C"

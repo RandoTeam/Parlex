@@ -15,8 +15,21 @@ data class ModelVariant(
     val downloadUrl: String,
     val filename: String,
     val isRecommended: Boolean = false,
-    val runtime: ModelRuntime = ModelRuntime.GGUF
+    val runtime: ModelRuntime = ModelRuntime.GGUF,
+    /** SHA-256 published by the artifact source. Null only for legacy/import-only models. */
+    val sha256: String? = null,
+    /** Backends verified for this exact model artifact, not just its model family. */
+    val supportsCpu: Boolean = true,
+    val supportsGpu: Boolean = false
 ) {
+
+    val backendLabel: String
+        get() = when {
+            runtime == ModelRuntime.GGUF -> "CPU / GPU (OpenCL)"
+            supportsCpu && supportsGpu -> "CPU / GPU"
+            supportsGpu -> "GPU only"
+            else -> "CPU only"
+        }
     val sizeMb: Double get() = sizeBytes / (1024.0 * 1024.0)
     val sizeGb: Double get() = sizeBytes / (1024.0 * 1024.0 * 1024.0)
 

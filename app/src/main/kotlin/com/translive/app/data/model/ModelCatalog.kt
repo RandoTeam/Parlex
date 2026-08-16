@@ -12,7 +12,7 @@ object ModelCatalog {
         hyMt2QualityFamily(),
         hyMtFamily(),
         translateGemmaFamily(),
-        translateGemmaLiteRtFamily()
+        gemma4LiteRtFamily()
     )
 
     // ─── HY-MT 1.5 1.8B (Tencent) ────────────────────────────────────
@@ -179,41 +179,43 @@ object ModelCatalog {
         )
     }
 
-    private fun translateGemmaLiteRtFamily(): ModelFamily {
-        val b = "https://huggingface.co/barakplasma/translategemma-4b-it-android-task-quantized/resolve/main"
+    private fun gemma4LiteRtFamily(): ModelFamily {
+        val b = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main"
         return ModelFamily(
-            id = "translate_gemma_litert_beta",
-            name = "TranslateGemma LiteRT Beta",
-            developer = "Google / LiteRT",
-            description = "Beta runtime: LiteRT-LM .litertlm, CPU/GPU/NPU",
-            languageCount = 55,
-            parameterSize = "4B",
-            promptStyle = PromptStyle.TRANSLATE_GEMMA,
-            license = ModelLicense.GEMMA_TOU,
-            isSpecialized = true,
+            id = "gemma_4_litert", name = "Gemma 4", developer = "Google / LiteRT Community",
+            description = "Official LiteRT-LM models for GPU; strict translation prompt",
+            languageCount = 0, parameterSize = "E2B / E4B",
+            promptStyle = PromptStyle.TRANSLATE_GEMMA, license = ModelLicense.APACHE_2,
+            isSpecialized = false,
             variants = listOf(
                 v(
-                    "translate_gemma_litert_beta:int4",
-                    "INT4 LiteRT Beta",
-                    "Beta",
-                    "LiteRT-LM INT4, ~2 GB, for CPU/GPU/NPU tests",
-                    2_011_201_536L,
-                    6_144,
-                    "$b/artifacts/int4-generic/translategemma-4b-it-int4-generic.litertlm?download=true",
-                    "translategemma-4b-it-int4-generic.litertlm",
+                    "gemma_4_litert:gpu",
+                    "E2B LiteRT",
+                    "GPU",
+                    "Official LiteRT GPU bundle, ~2 GB",
+                    2_008_432_640L,
+                    3_000,
+                    "$b/gemma-4-E2B-it-gpu.litertlm?download=true",
+                    "gemma-4-E2B-it-gpu.litertlm",
                     rec = true,
-                    runtime = ModelRuntime.LITERT_LM
+                    runtime = ModelRuntime.LITERT_LM,
+                    sha256 = "a53a59001894c58e6bdb5b9b227709f91a2e3e556baa7d85acf9c55402ba5cf5",
+                    cpu = false,
+                    gpu = true
                 ),
                 v(
-                    "translate_gemma_litert_beta:dynamic_int8",
-                    "INT8 LiteRT Beta",
-                    "Quality beta",
-                    "LiteRT-LM dynamic INT8, ~4 GB, better quality",
-                    3_920_576_512L,
-                    8_192,
-                    "$b/artifacts/dynamic_int8-generic/translategemma-4b-it-dynamic_int8-generic.litertlm?download=true",
-                    "translategemma-4b-it-dynamic_int8-generic.litertlm",
-                    runtime = ModelRuntime.LITERT_LM
+                    "gemma_4_litert:e4b_qat",
+                    "E4B LiteRT",
+                    "GPU quality",
+                    "Official mixed INT4/INT8 LiteRT bundle, ~3.66 GB",
+                    3_659_530_240L,
+                    4_000,
+                    "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm?download=true",
+                    "gemma-4-E4B-it.litertlm",
+                    runtime = ModelRuntime.LITERT_LM,
+                    sha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
+                    cpu = true,
+                    gpu = true
                 )
             )
         )
@@ -224,6 +226,9 @@ object ModelCatalog {
     private fun v(
         id: String, quant: String, display: String, desc: String,
         size: Long, ram: Int, url: String, file: String, rec: Boolean = false,
-        runtime: ModelRuntime = ModelRuntime.GGUF
-    ) = ModelVariant(id, quant, display, desc, size, ram, url, file, rec, runtime)
+        runtime: ModelRuntime = ModelRuntime.GGUF,
+        sha256: String? = null,
+        cpu: Boolean = true,
+        gpu: Boolean = false
+    ) = ModelVariant(id, quant, display, desc, size, ram, url, file, rec, runtime, sha256, cpu, gpu)
 }

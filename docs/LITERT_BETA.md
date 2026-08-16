@@ -12,7 +12,7 @@ This spike is measurement-driven: LiteRT moves forward only if it beats the curr
 - Text/dialogue translation: `TranslationEngine` -> JNI -> `llama.cpp` -> GGUF.
 - Stable model families: Tencent HY-MT 1.5 1.8B and Google TranslateGemma 4B.
 - Camera translation: OCR plus ML Kit on-device translation for the fast camera path.
-- Settings already expose CPU/GPU/NPU labels, but GPU/NPU are placeholders for the current GGUF runtime.
+- Settings expose CPU/GPU selection. GPU is only available to LiteRT-LM.
 
 ## Target Runtime
 
@@ -22,8 +22,8 @@ This spike is measurement-driven: LiteRT moves forward only if it beats the curr
 - LiteRT-LM `0.12.0` keeps the newer Kotlin toolchain requirement from the previous beta baseline, so the app remains on Kotlin/KSP `2.2.21`.
 - Annotation processors were kept compatible with that toolchain: Room `2.8.4`, Hilt `2.57.2`. Hilt `2.59.2` requires AGP 9.0+ and is not compatible with the current AGP `8.9.1` baseline.
 - Non-LLM LiteRT dependency candidate for plain `.tflite` experiments: `com.google.ai.edge.litert:litert:2.1.5`.
-- Backends to benchmark: CPU, GPU, NPU.
-- The in-app beta loader tries the selected LiteRT backend first and falls back to CPU if GPU/NPU is unavailable.
+- Backends to benchmark: CPU, GPU.
+- The in-app beta loader tries the selected LiteRT backend first and falls back to CPU if GPU is unavailable.
 
 The important distinction: LiteRT is the low-level on-device runtime, while LiteRT-LM is the LLM path we need for text generation and streaming translation.
 
@@ -38,6 +38,21 @@ Initial smoke-test artifact:
 - License note: model weights remain under Google Gemma Terms of Use; conversion scripts are Apache 2.0.
 
 Use `tools/litert-download-translategemma.ps1 -Quant int4` to download the first beta artifact into ignored local model storage.
+
+## Catalog Integrity Audit — 2026-08-16
+
+The active catalog is pinned to the current `main` revision of the conversion repository. It is not a Google-published device-specific model package.
+
+| Variant | File size | SHA-256 | Product position |
+|---|---:|---|---|
+| INT4 | 2,011,201,536 bytes | `94d2edceddeefe94aeb81fa3446f0b392c91e62f187392e049d4f74b2bb2315b` | Compact beta |
+| Dynamic INT8 | 3,920,576,512 bytes | `6ccc74202695d3079797d1c1b5cc4a9e4a069a53f5a1b6c3e25c8775f295858b` | Largest correct text-only option / quality beta |
+
+The catalog intentionally does not add the 2.76 GB multimodal INT4 artifact: it is not larger than dynamic INT8 and adds no value to a text-only translation pipeline.
+
+The app verifies the pinned SHA-256 before completing a catalog download. An imported file remains user-supplied and is only checked for the `.litertlm` container signature.
+
+GPU is never inferred from the phone model. The selected backend is recorded separately from the actually initialized backend. If GPU initialization fails, the engine reports CPU as active and retains the failure reason in logs.
 
 ## Why Snapdragon 8 Elite Matters
 
@@ -57,7 +72,7 @@ Snapdragon 8 Elite class hardware is the correct target for this test because it
 
 3. Outside-app smoke test
    - Run LiteRT-LM sample binary or minimal harness before touching app UI.
-   - Test CPU first, then GPU/NPU.
+   - Test CPU first, then GPU.
    - Capture load time, first-token latency, generated tokens/sec, peak RSS, and errors.
 
 4. App beta runtime
@@ -78,7 +93,7 @@ Snapdragon 8 Elite class hardware is the correct target for this test because it
 - Full translation latency.
 - Generated tokens/sec.
 - Peak app RSS.
-- Backend actually used: CPU, GPU, or NPU.
+- Backend actually used: CPU or GPU.
 - Device temperature/thermal throttling notes.
 - Translation quality notes for fixed prompts.
 
@@ -86,19 +101,16 @@ Snapdragon 8 Elite class hardware is the correct target for this test because it
 
 - INT4 `.litertlm` loads on the Snapdragon 8 Elite class phone through the LiteRT-LM CPU backend in about 0.7 seconds after APK install and model placement.
 - GPU backend starts LiteRT GPU/OpenCL registration, but the current INT4 artifact fails on this device with a single ~1.34 GB allocation request over a 1 GB GPU allocation limit. The app now falls back to CPU instead of surfacing a hard load failure.
-- NPU remains unproven and must stay beta until a backend-specific smoke test produces stable output.
 
 ## Pass Criteria
 
-- CPU LiteRT must be competitive with GGUF before GPU/NPU work matters.
-- GPU/NPU must produce stable output, not just faster startup.
-- NPU support must be proven on the target phone, not inferred from the SoC name.
+- CPU LiteRT must be competitive with GGUF before GPU work matters.
+- GPU must produce stable output, not just faster startup.
 - App integration must not affect existing HY-MT/GGUF behavior.
 
 ## Sources To Recheck Before Integration
 
 - LiteRT Android docs: https://ai.google.dev/edge/litert/android
 - LiteRT-LM Android docs: https://ai.google.dev/edge/litert-lm/android
-- LiteRT-LM NPU docs: https://ai.google.dev/edge/litert/next/litert_lm_npu
 - Google Maven LiteRT-LM metadata: https://dl.google.com/dl/android/maven2/com/google/ai/edge/litertlm/litertlm-android/maven-metadata.xml
 - Google Maven LiteRT metadata: https://dl.google.com/dl/android/maven2/com/google/ai/edge/litert/litert/maven-metadata.xml

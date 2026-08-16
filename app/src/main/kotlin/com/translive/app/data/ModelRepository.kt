@@ -7,8 +7,11 @@ import com.translive.app.data.model.ModelCatalog
 import com.translive.app.data.model.ModelFamily
 import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.ModelVariant
+import com.translive.app.data.model.TranslationProfile
+import com.translive.app.data.model.TranslationProfiles
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -16,6 +19,12 @@ import javax.inject.Singleton
 class ModelRepository @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    data class ImportedModel(
+        val variant: ModelVariant,
+        val recognizedCatalogVariant: Boolean,
+        val integrityVerified: Boolean,
+        val alreadyPresent: Boolean
+    )
     private val prefs: SharedPreferences =
         context.getSharedPreferences("parlex_models", Context.MODE_PRIVATE)
 
@@ -40,6 +49,25 @@ class ModelRepository @Inject constructor(
     /** Get the currently active model ID, with migration from legacy non-namespaced IDs */
     fun getActiveModelId(): String? {
         val raw = prefs.getString("active_model_id", null) ?: return null
+
+        // TranslateGemma LiteRT was removed from the downloadable catalog because
+        // its Android GPU artifact is not verified. Preserve an already selected
+        // local file as an external model instead of silently losing it.
+        val retiredLiteRtFilename = when (raw) {
+            "translate_gemma_litert_beta:int4" -> "translategemma-4b-it-int4-generic.litertlm"
+            "translate_gemma_litert_beta:dynamic_int8" -> "translategemma-4b-it-dynamic_int8-generic.litertlm"
+            else -> null
+        }
+        if (retiredLiteRtFilename != null) {
+            val retiredFile = File(modelsDir, retiredLiteRtFilename)
+            if (retiredFile.exists() && retiredFile.length() > 0) {
+                val migrated = "custom:$retiredLiteRtFilename"
+                prefs.edit().putString("active_model_id", migrated).apply()
+                return migrated
+            }
+            prefs.edit().remove("active_model_id").apply()
+            return null
+        }
         // Migrate legacy IDs: "q4_k_m" → "hy_mt:q4_k_m"
         if (!raw.contains(":") && !raw.startsWith("custom")) {
             val migrated = "hy_mt:$raw"
@@ -71,6 +99,10 @@ class ModelRepository @Inject constructor(
         return ModelRuntime.GGUF
     }
 
+    /** Inference contract for the selected model. */
+    fun getActiveTranslationProfile(): TranslationProfile =
+        TranslationProfiles.forModel(getActiveFamily(), getActiveRuntime())
+
     /** Get the active model variant */
     fun getActiveVariant(): ModelVariant? {
         val id = getActiveModelId() ?: return null
@@ -100,10 +132,10 @@ class ModelRepository @Inject constructor(
 
     /** Get total size of all downloaded models */
     fun getTotalDownloadedSize(): Long {
-        return ModelVariant.ALL.sumOf { variant ->
-            val file = File(modelsDir, variant.filename)
-            if (file.exists()) file.length() else 0L
-        }
+        return modelsDir.listFiles()
+            ?.filter { it.isFile && !it.name.endsWith(".tmp") }
+            ?.sumOf { it.length() }
+            ?: 0L
     }
 
     /** Get available storage space */
@@ -151,17 +183,18 @@ class ModelRepository @Inject constructor(
     /**
      * Import a GGUF or LiteRT-LM model from a SAF URI.
      * Validates known magic bytes, copies the file with progress reporting.
-     * @return the filename of the imported model, or null on failure.
+     * Known catalog models are recognized by SHA-256 when a catalog checksum is
+     * available (LiteRT). Unknown files stay separate as external models.
      */
     fun importModelFromUri(
         uri: Uri,
         onProgress: (Float) -> Unit = {}
-    ): Result<String> {
+    ): Result<ImportedModel> {
         val resolver = context.contentResolver
 
-        val filename = resolveFilename(uri) ?: "imported_model.gguf"
-        val isGguf = filename.endsWith(".gguf", ignoreCase = true)
-        val isLiteRtLm = filename.endsWith(".litertlm", ignoreCase = true)
+        val inputFilename = sanitizeFilename(resolveFilename(uri) ?: "imported_model.gguf")
+        val isGguf = inputFilename.endsWith(".gguf", ignoreCase = true)
+        val isLiteRtLm = inputFilename.endsWith(".litertlm", ignoreCase = true)
         if (!isGguf && !isLiteRtLm) {
             return Result.failure(IllegalArgumentException("Файл должен иметь расширение .gguf или .litertlm"))
         }
@@ -192,16 +225,21 @@ class ModelRepository @Inject constructor(
             val totalSize = fileDescriptor?.statSize ?: -1L
             fileDescriptor?.close()
 
-            // Copy to models directory
-            val destFile = File(modelsDir, filename)
-            destFile.outputStream().buffered().use { out ->
+            // Copy to an isolated temporary file first. The destination is only
+            // chosen after its digest is known, so a cancelled import cannot
+            // overwrite a usable model.
+            val tempFile = File(modelsDir, ".import-${System.currentTimeMillis()}-$inputFilename.tmp")
+            val digest = MessageDigest.getInstance("SHA-256")
+            tempFile.outputStream().buffered().use { out ->
                 // Write the magic bytes we already read
                 out.write(magic)
+                digest.update(magic)
                 var copied = magicSize.toLong()
                 val buffer = ByteArray(8192)
                 var bytesRead: Int
                 while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                     out.write(buffer, 0, bytesRead)
+                    digest.update(buffer, 0, bytesRead)
                     copied += bytesRead
                     if (totalSize > 0) {
                         onProgress(copied.toFloat() / totalSize)
@@ -210,7 +248,55 @@ class ModelRepository @Inject constructor(
             }
 
             inputStream.close()
-            Result.success(filename)
+
+            val actualSha = digest.digest().toHex()
+            val knownByChecksum = ModelVariant.ALL.find { variant ->
+                variant.sha256?.equals(actualSha, ignoreCase = true) == true
+            }
+            val knownByNameAndSize = ModelVariant.ALL.find { variant ->
+                variant.sha256 == null &&
+                    variant.filename.equals(inputFilename, ignoreCase = true) &&
+                    variant.sizeBytes == tempFile.length()
+            }
+            val known = knownByChecksum ?: knownByNameAndSize
+            val canonicalFilename = known?.filename ?: uniqueExternalFilename(inputFilename)
+            val destination = File(modelsDir, canonicalFilename)
+
+            if (destination.exists()) {
+                if (knownByChecksum != null && sha256(destination).equals(actualSha, ignoreCase = true)) {
+                    tempFile.delete()
+                    return Result.success(ImportedModel(knownByChecksum, true, true, alreadyPresent = true))
+                }
+                if (known == null) {
+                    tempFile.renameTo(File(modelsDir, uniqueExternalFilename(inputFilename)))
+                } else {
+                    tempFile.delete()
+                    return Result.failure(IllegalStateException("A different model already uses the catalog filename"))
+                }
+            } else if (!tempFile.renameTo(destination)) {
+                return Result.failure(IllegalStateException("Could not finalize imported model"))
+            }
+
+            val storedFile = if (known == null && destination.exists()) destination else File(modelsDir, canonicalFilename)
+            val externalVariant = ModelVariant(
+                id = "custom:${storedFile.name}",
+                quantName = "External",
+                displayName = storedFile.name,
+                description = "External ${if (isLiteRtLm) "LiteRT-LM" else "GGUF"} model — compatibility checked on activation",
+                sizeBytes = storedFile.length(),
+                ramEstimateMb = 0,
+                downloadUrl = "",
+                filename = storedFile.name,
+                runtime = if (isLiteRtLm) ModelRuntime.LITERT_LM else ModelRuntime.GGUF
+            )
+            Result.success(
+                ImportedModel(
+                    variant = known ?: externalVariant,
+                    recognizedCatalogVariant = known != null,
+                    integrityVerified = knownByChecksum != null,
+                    alreadyPresent = false
+                )
+            )
         } catch (e: Exception) {
             inputStream.close()
             Result.failure(e)
@@ -228,6 +314,55 @@ class ModelRepository @Inject constructor(
         // Fallback to URI last path segment
         return uri.lastPathSegment?.substringAfterLast('/')
     }
+
+    fun getExternalModels(): List<ModelVariant> = modelsDir.listFiles()
+        ?.filter { file ->
+            file.isFile && !file.name.endsWith(".tmp") &&
+                ModelVariant.ALL.none { it.filename.equals(file.name, ignoreCase = true) } &&
+                (file.name.endsWith(".gguf", ignoreCase = true) || file.name.endsWith(".litertlm", ignoreCase = true))
+        }
+        ?.sortedBy { it.name.lowercase() }
+        ?.map { file ->
+            ModelVariant(
+                id = "custom:${file.name}",
+                quantName = "External",
+                displayName = file.name,
+                description = "External ${if (file.name.endsWith(".litertlm", true)) "LiteRT-LM" else "GGUF"} model",
+                sizeBytes = file.length(),
+                ramEstimateMb = 0,
+                downloadUrl = "",
+                filename = file.name,
+                runtime = if (file.name.endsWith(".litertlm", true)) ModelRuntime.LITERT_LM else ModelRuntime.GGUF
+            )
+        }
+        ?: emptyList()
+
+    private fun uniqueExternalFilename(filename: String): String {
+        val base = filename.substringBeforeLast('.', filename)
+        val extension = filename.substringAfterLast('.', "")
+        var index = 1
+        var candidate = "external-$base.${extension}"
+        while (File(modelsDir, candidate).exists()) {
+            candidate = "external-$base-$index.${extension}"
+            index++
+        }
+        return candidate
+    }
+
+    private fun sanitizeFilename(filename: String): String =
+        filename.substringAfterLast('/').substringAfterLast('\\').replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered().use { input ->
+            val buffer = ByteArray(64 * 1024)
+            var read: Int
+            while (input.read(buffer).also { read = it } != -1) digest.update(buffer, 0, read)
+        }
+        return digest.digest().toHex()
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
 
     /** Set active model by filename (for imported models) */
     fun setActiveByFilename(filename: String) {

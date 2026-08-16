@@ -7,8 +7,11 @@ import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.ModelRepository
 import com.translive.app.data.model.Language
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -21,9 +24,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.concurrent.withLock
 
+data class LiteRtBackendStatus(
+    val requested: String,
+    val active: String? = null,
+    val fallbackReason: String? = null
+)
+
 @Singleton
 class LiteRtTranslationEngine @Inject constructor(
-    @param:ApplicationContext private val context: Context
+    @param:ApplicationContext private val context: Context,
+    private val modelRepository: ModelRepository
 ) {
     private val nativeLock = ReentrantLock()
     private val inferenceMutex = Mutex()
@@ -33,12 +43,18 @@ class LiteRtTranslationEngine @Inject constructor(
     private var loadedModelPath: String? = null
     private var loadedBackend: String? = null
     private var samplerConfig: SamplerConfig? = null
+    private var backendStatus = LiteRtBackendStatus(requested = SettingsRepository.BACKEND_CPU)
+    private var lastLoadFailure: String? = null
 
     val isLoaded: Boolean
         get() = nativeLock.withLock { engine?.isInitialized() == true }
 
     val currentBackend: String?
         get() = nativeLock.withLock { loadedBackend }
+
+    /** Requested backend, actually active backend, and a non-silent fallback reason. */
+    val currentBackendStatus: LiteRtBackendStatus
+        get() = nativeLock.withLock { backendStatus }
 
     fun loadModel(modelPath: String, backendSetting: String, threads: Int): Boolean {
         val requestedBackend = normalizeBackend(backendSetting)
@@ -51,22 +67,35 @@ class LiteRtTranslationEngine @Inject constructor(
             }
 
             closeLocked()
+            lastLoadFailure = null
 
             val backend = backendFor(requestedBackend, threads)
             if (loadWithBackendLocked(modelPath, requestedBackend, backend)) {
+                backendStatus = LiteRtBackendStatus(
+                    requested = requestedBackend,
+                    active = requestedBackend
+                )
                 return@withLock true
             }
 
             if (requestedBackend != SettingsRepository.BACKEND_CPU) {
-                Log.w(TAG, "Falling back to CPU backend after $requestedBackend failed")
+                val failure = lastLoadFailure ?: "accelerator initialization failed"
+                Log.w(TAG, "Falling back to CPU backend after $requestedBackend failed: $failure")
                 closeLocked()
-                return@withLock loadWithBackendLocked(
+                val cpuLoaded = loadWithBackendLocked(
                     modelPath = modelPath,
                     backendName = SettingsRepository.BACKEND_CPU,
                     backend = Backend.CPU(numOfThreads = threads.coerceAtLeast(1))
                 )
+                backendStatus = LiteRtBackendStatus(
+                    requested = requestedBackend,
+                    active = if (cpuLoaded) SettingsRepository.BACKEND_CPU else null,
+                    fallbackReason = failure
+                )
+                return@withLock cpuLoaded
             }
 
+            backendStatus = LiteRtBackendStatus(requested = requestedBackend)
             false
         }
     }
@@ -80,7 +109,7 @@ class LiteRtTranslationEngine @Inject constructor(
         source: Language,
         target: Language
     ): String {
-        val prompt = buildTranslateGemmaLiteRtPrompt(sourceText, source, target)
+        val prompt = buildLiteRtPrompt(sourceText, source, target)
         return nativeLock.withLock {
             val currentEngine = engine ?: throw IllegalStateException("LiteRT model is not loaded")
             currentEngine.createConversation(conversationConfig()).use { conversation ->
@@ -102,7 +131,7 @@ class LiteRtTranslationEngine @Inject constructor(
         source: Language,
         target: Language
     ): Flow<String> = flow {
-        val prompt = buildTranslateGemmaLiteRtPrompt(sourceText, source, target)
+        val prompt = buildLiteRtPrompt(sourceText, source, target)
         inferenceMutex.withLock {
             val conversation = nativeLock.withLock {
                 val currentEngine = engine ?: throw IllegalStateException("LiteRT model is not loaded")
@@ -132,16 +161,12 @@ class LiteRtTranslationEngine @Inject constructor(
     private fun backendFor(backendSetting: String, threads: Int): Backend =
         when (backendSetting) {
             SettingsRepository.BACKEND_GPU -> Backend.GPU()
-            SettingsRepository.BACKEND_NPU -> Backend.NPU(
-                nativeLibraryDir = context.applicationInfo.nativeLibraryDir
-            )
             else -> Backend.CPU(numOfThreads = threads.coerceAtLeast(1))
         }
 
     private fun normalizeBackend(backendSetting: String): String =
         when (backendSetting) {
-            SettingsRepository.BACKEND_GPU,
-            SettingsRepository.BACKEND_NPU -> backendSetting
+            SettingsRepository.BACKEND_GPU -> backendSetting
             else -> SettingsRepository.BACKEND_CPU
         }
 
@@ -150,17 +175,20 @@ class LiteRtTranslationEngine @Inject constructor(
         backendName: String,
         backend: Backend
     ): Boolean {
-        samplerConfig = if (backend is Backend.NPU) {
-            null
-        } else {
-            SamplerConfig(topK = 10, topP = 0.95, temperature = 0.2)
-        }
+        val sampling = modelRepository.getActiveTranslationProfile().sampling
+        samplerConfig = SamplerConfig(
+            topK = sampling.topK,
+            topP = sampling.topP.toDouble(),
+            temperature = sampling.temperature.toDouble()
+        )
 
         return try {
+            configureExperimentalFeatures()
+            val profile = modelRepository.getActiveTranslationProfile()
             val config = EngineConfig(
                 modelPath = modelPath,
                 backend = backend,
-                maxNumTokens = 2048,
+                maxNumTokens = profile.defaultMaxOutputTokens,
                 cacheDir = context.cacheDir.absolutePath
             )
             val nextEngine = Engine(config)
@@ -171,9 +199,11 @@ class LiteRtTranslationEngine @Inject constructor(
             engine = nextEngine
             loadedModelPath = modelPath
             loadedBackend = backendName
+            lastLoadFailure = null
             Log.i(TAG, "Loaded LiteRT-LM model with $backendName backend in ${elapsed}ms")
             true
         } catch (e: Exception) {
+            lastLoadFailure = e.message ?: e.javaClass.simpleName
             Log.e(TAG, "Failed to load LiteRT-LM model with $backendName backend", e)
             closeLocked()
             false
@@ -202,11 +232,26 @@ class LiteRtTranslationEngine @Inject constructor(
         samplerConfig = null
     }
 
-    private fun buildTranslateGemmaLiteRtPrompt(
+    private fun buildLiteRtPrompt(
         text: String,
         source: Language,
         target: Language
-    ): String = "<src>${source.code}</src><dst>${target.code}</dst><text>$text</text>"
+    ): String {
+        val profile = modelRepository.getActiveTranslationProfile()
+        return if (profile.liteRtUsesTranslationTags) {
+            "<src>${source.code}</src><dst>${target.code}</dst><text>$text</text>"
+        } else {
+            "Translate the following text from ${source.displayName} to ${target.displayName}. " +
+                "Output only the translation, without explanations:\n$text"
+        }
+    }
+
+    /** Enable MTP only for the known Gemma 4 LiteRT bundles that include a drafter. */
+    @OptIn(ExperimentalApi::class)
+    private fun configureExperimentalFeatures() {
+        ExperimentalFlags.enableSpeculativeDecoding =
+            modelRepository.getActiveFamily()?.id == "gemma_4_litert"
+    }
 
     private fun stripControlText(text: String): String =
         if (text.startsWith("<ctrl")) "" else text
