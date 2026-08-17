@@ -33,6 +33,26 @@
 - [ ] MNN 3.6.1 уже проверен отдельной arm64-сборкой с NDK 27.3: OpenCL и Vulkan включены, KleidiAI отключён из-за риска SIGILL на новых ARM-устройствах. Полная библиотека получилась около 52 МБ; перед интеграцией нужен mini/OCR-only профиль и измерение на OnePlus 13.
 - [ ] Корпус OnePlus 13: русский, английский, китайский, арабский, тайский, постеры, страницы книг и смешанные надписи; сохранить метрики OCR, перевода и end-to-end latency.
 
+### OCR runtime decision (2026-08-17)
+
+- The official PaddleOCR Android SDK was audited as a correctness reference:
+  detection, quadrilateral sorting/unclip, perspective crops, batched
+  recognition, CTC decoding, and timing breakdowns are all present.
+- Its shipped executor is ONNX Runtime. It is suitable as a CPU correctness
+  fallback and benchmark reference, but it is not the primary Snapdragon GPU
+  path for Parlex.
+- PP-OCRv6 tiny detector/recognizer ONNX graphs were converted to MNN and open
+  successfully. A standalone MNN 3.6.1 arm64 build was produced with OpenCL
+  and Vulkan enabled; the mini build is about 27 MB and the full build about
+  52 MB. These are research artifacts until Android inference is proven.
+- Production direction: reproduce the audited behavior independently, run
+  PP-OCR through MNN on supported GPU backends, retain a controlled CPU
+  fallback, and expose the actual backend in diagnostics. Do not copy the
+  GPL-3.0 `offline-translator` source.
+- Before shipping OCR packages, require a real Android detector and
+  recognizer inference test, checksum/model metadata validation, cold/warm
+  timings, and graceful fallback when GPU initialization fails.
+
 ## Перевод экрана
 
 1. [x] Первый релиз: `ACTION_PROCESS_TEXT` и `ACTION_SEND` — перевод выделенного или переданного текста из других приложений без захвата экрана.
