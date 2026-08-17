@@ -817,8 +817,26 @@ class CameraViewModel @Inject constructor(
         }
 
         if (!cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+            // ML Kit is only the realtime accelerator. Languages which do not
+            // have an ML Kit package must still work offline through the
+            // already loaded local translation model. Keep this fallback
+            // explicit so a missing fast package never turns into an empty
+            // overlay or a network request from a camera frame.
+            if (!translationEngine.isLoaded) {
+                return lines.map { line ->
+                    TranslatedBlock(line.text, "", line.boundingBox)
+                }
+            }
             return lines.map { line ->
-                TranslatedBlock(line.text, "", line.boundingBox)
+                val translated = runCatching {
+                    translationEngine.translateSafe(
+                        sourceText = line.text,
+                        source = sourceLanguage,
+                        target = targetLanguage,
+                        maxTokens = 256
+                    )
+                }.getOrDefault(line.text)
+                TranslatedBlock(line.text, translated, line.boundingBox)
             }
         }
 
