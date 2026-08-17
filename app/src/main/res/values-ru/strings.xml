@@ -214,5 +214,8 @@
     <string name="models_camera_all_packages_note">Скачивайте только нужные языки. Варианты китайского используют один общий пакет.</string>
     <string name="camera_open_model_packages">Открыть пакеты</string>
     <string name="camera_download_current_packages">Скачать пакеты текущей пары</string>
+    <string name="camera_translation_mode_fast">Быстро</string>
+    <string name="camera_translation_mode_quality">Качество</string>
+    <string name="camera_translation_mode_quality_note">Сделайте фото для качественного перевода выбранной основной моделью.</string>
     <string name="camera_pack_download_failed">Не удалось скачать языковые пакеты камеры</string>
 </resources>

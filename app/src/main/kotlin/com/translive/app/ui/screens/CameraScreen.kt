@@ -78,6 +78,7 @@ import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.CameraMode
 import com.translive.app.ui.viewmodel.CameraQualityWarning
 import com.translive.app.ui.viewmodel.CameraViewModel
+import com.translive.app.ui.viewmodel.CameraTranslationMode
 import com.translive.app.ui.viewmodel.CaptureStatus
 import com.translive.app.ui.viewmodel.TranslatedBlock
 import java.util.concurrent.atomic.AtomicBoolean
@@ -490,7 +491,7 @@ fun CameraScreen(
                         FocusReticle(focusPoint)
 
                         // NMT status badge
-                        if (uiState.isNmtDownloading) {
+                        if (uiState.translationMode == CameraTranslationMode.FAST && uiState.isNmtDownloading) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
@@ -513,7 +514,9 @@ fun CameraScreen(
                         }
 
                         // NMT pack is missing. A live frame never starts a transfer.
-                        if (uiState.nmtError != null && !uiState.isNmtDownloading) {
+                        if (uiState.translationMode == CameraTranslationMode.FAST &&
+                            uiState.nmtError != null && !uiState.isNmtDownloading
+                        ) {
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
@@ -663,6 +666,38 @@ fun CameraScreen(
                             label = { Text("${uiState.targetLanguage.flag} ${uiState.targetLanguage.nativeName}") },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp)
+                        )
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    SingleChoiceSegmentedButtonRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        SegmentedButton(
+                            selected = uiState.translationMode == CameraTranslationMode.FAST,
+                            onClick = { viewModel.setTranslationMode(CameraTranslationMode.FAST) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                            icon = {}
+                        ) {
+                            Text(stringResource(R.string.camera_translation_mode_fast))
+                        }
+                        SegmentedButton(
+                            selected = uiState.translationMode == CameraTranslationMode.QUALITY,
+                            onClick = { viewModel.setTranslationMode(CameraTranslationMode.QUALITY) },
+                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                            icon = {}
+                        ) {
+                            Text(stringResource(R.string.camera_translation_mode_quality))
+                        }
+                    }
+                    if (uiState.translationMode == CameraTranslationMode.QUALITY) {
+                        Text(
+                            text = stringResource(R.string.camera_translation_mode_quality_note),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                         )
                     }
                 }

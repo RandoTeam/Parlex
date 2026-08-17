@@ -162,6 +162,9 @@ private enum class OcrTextScript {
 
 enum class CameraMode { LIVE, CAPTURE }
 
+/** Fast live NMT and deliberate high-quality photo/document translation are separate workflows. */
+enum class CameraTranslationMode { FAST, QUALITY }
+
 enum class CaptureStatus { IDLE, PROCESSING, READY, EMPTY, ERROR }
 
 enum class CameraQualityWarning {
@@ -174,6 +177,7 @@ enum class CameraQualityWarning {
 
 data class CameraUiState(
     val mode: CameraMode = CameraMode.LIVE,
+    val translationMode: CameraTranslationMode = CameraTranslationMode.FAST,
     val sourceLanguage: Language = Language.RUSSIAN,
     val isSourceAuto: Boolean = false,
     val detectedSourceLanguage: Language? = null,
@@ -299,6 +303,18 @@ class CameraViewModel @Inject constructor(
         settings.cameraTargetLanguage = lang
         resetModeVisuals()
         prepareNmt()
+    }
+
+    fun setTranslationMode(mode: CameraTranslationMode) {
+        if (_uiState.value.translationMode == mode) return
+        _uiState.update {
+            it.copy(
+                translationMode = mode,
+                liveBlocks = emptyList(),
+                qualityWarnings = emptyList()
+            )
+        }
+        clearLiveSession()
     }
 
     fun swapLanguages() {
@@ -509,6 +525,11 @@ class CameraViewModel @Inject constructor(
     @androidx.camera.core.ExperimentalGetImage
     fun processLiveFrame(imageProxy: androidx.camera.core.ImageProxy) {
         if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) {
+            imageProxy.close()
+            return
+        }
+
+        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) {
             imageProxy.close()
             return
         }
@@ -767,6 +788,19 @@ class CameraViewModel @Inject constructor(
                     cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)
             }
 
+    private fun canTranslateCapture(
+        lines: List<PaintLine>,
+        sourceLanguage: Language,
+        targetLanguage: Language
+    ): Boolean {
+        if (sourceLanguage.code == targetLanguage.code) return true
+        return if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) {
+            translationEngine.isLoaded
+        } else {
+            canCameraTranslateAll(lines, sourceLanguage, targetLanguage)
+        }
+    }
+
     private suspend fun translateLiveLines(
         lines: List<OcrLine>,
         sourceLanguage: Language,
@@ -968,9 +1002,11 @@ class CameraViewModel @Inject constructor(
                 lineBoxes = rawCaptureLines.map { it.box },
                 sourceLanguage = effectiveSourceLanguage,
                 allowMixedScripts = sourceAuto && captureOcr.detectedSourceLanguages.size > 1,
-                canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
-                    translationEngine.isLoaded ||
-                    canCameraTranslateAll(rawCaptureLines, effectiveSourceLanguage, targetLanguage)
+                canTranslate = canTranslateCapture(
+                    rawCaptureLines,
+                    effectiveSourceLanguage,
+                    targetLanguage
+                )
             )
 
             if (rawCaptureLines.isEmpty()) {
@@ -1030,7 +1066,7 @@ class CameraViewModel @Inject constructor(
 
             _uiState.update { it.copy(captureMessage = texts.text(R.string.camera_capture_translating_lines)) }
 
-            if (!translationEngine.isLoaded) {
+            if (_uiState.value.translationMode == CameraTranslationMode.FAST) {
                 prepareCaptureTranslateModel(effectiveSourceLanguage, targetLanguage)
             }
             val finalQualityWarnings = buildQualityWarnings(
@@ -1039,9 +1075,11 @@ class CameraViewModel @Inject constructor(
                 lineBoxes = rawCaptureLines.map { it.box },
                 sourceLanguage = effectiveSourceLanguage,
                 allowMixedScripts = sourceAuto && captureOcr.detectedSourceLanguages.size > 1,
-                canTranslate = effectiveSourceLanguage.code == targetLanguage.code ||
-                    translationEngine.isLoaded ||
-                    canCameraTranslateAll(allLines, effectiveSourceLanguage, targetLanguage)
+                canTranslate = canTranslateCapture(
+                    allLines,
+                    effectiveSourceLanguage,
+                    targetLanguage
+                )
             )
             val useDocumentLayout = shouldUseDocumentCaptureLayout(
                 blocks = captureBlocks,
@@ -1766,7 +1804,7 @@ class CameraViewModel @Inject constructor(
         if (sourceText.isBlank()) return ""
         if (sourceLanguage.code == targetLanguage.code) return sourceText
 
-        if (translationEngine.isLoaded) {
+        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && translationEngine.isLoaded) {
             runCatching {
                 val maxTokens = (sourceText.length * 2).coerceIn(512, 2048)
                 translationEngine.translateSafe(sourceText, sourceLanguage, targetLanguage, maxTokens)
@@ -1777,6 +1815,8 @@ class CameraViewModel @Inject constructor(
                 Log.e("CameraVM", "Document HY-MT failed for ${sourceLanguage.code}: ${error.message}")
             }
         }
+
+        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) return sourceText
 
         prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
         return if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
@@ -1864,7 +1904,11 @@ class CameraViewModel @Inject constructor(
         val texts = block.lines.map { it.text }
         if (sourceLanguage.code == targetLanguage.code) return texts
 
-        return if (translationEngine.isLoaded) {
+        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && !translationEngine.isLoaded) {
+            return texts
+        }
+
+        return if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) {
             try {
                 translateCaptureBlockWithStructure(
                     block = block,
@@ -1877,7 +1921,7 @@ class CameraViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Log.e("CameraVM", "Structured HY-MT failed for ${sourceLanguage.code}: ${e.message}")
-                translateCaptureLinesWithCameraModel(block.lines, sourceLanguage, targetLanguage)
+                texts
             }
         } else {
             translateCaptureLinesWithCameraModel(block.lines, sourceLanguage, targetLanguage)

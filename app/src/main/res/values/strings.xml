@@ -114,6 +114,9 @@
     <string name="models_camera_all_packages_note">Download only the languages you use. Chinese variants share one Chinese package.</string>
     <string name="camera_open_model_packages">Open packages</string>
     <string name="camera_download_current_packages">Download current packages</string>
+    <string name="camera_translation_mode_fast">Fast</string>
+    <string name="camera_translation_mode_quality">Quality</string>
+    <string name="camera_translation_mode_quality_note">Take a photo for quality translation with the selected main model.</string>
     <string name="camera_pack_download_failed">Could not download camera language packages</string>
     <string name="model_license_title">%1$s license</string>
     <string name="model_license_message">Model %1$s is distributed under %2$s. By downloading, you accept these terms. Continue?</string>
