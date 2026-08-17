@@ -120,3 +120,13 @@
 - https://developers.google.com/ml-kit/language/translation/translation-language-support
 - https://developer.android.com/media/grow/media-projection
 - https://github.com/DavidVentura/offline-translator
+
+### PP-OCRv6 tiny tensor validation
+
+- Host MNN inference was run against the converted artifacts before Android
+  activation: detector `(1,3,640,640)` → `(1,1,640,640)` and recognizer
+  `(1,3,48,320)` → `(1,40,6906)`.
+- The recognizer decoder uses `time=40` and `classes=6906`; the dictionary
+  and exact normalization metadata remain part of the package manifest.
+- Both models complete a zero-filled Float32 MNN CPU session. Android GPU
+  validation is still required on the target device.
