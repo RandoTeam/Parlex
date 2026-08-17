@@ -12,6 +12,8 @@ import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import com.google.mlkit.vision.text.devanagari.DevanagariTextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.googlecode.tesseract.android.TessBaseAPI
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -61,7 +63,9 @@ data class OcrResult(
  */
 private enum class OcrBackend {
     MLKIT_LATIN,       // en, fr, de, es, pt, it, nl, pl, cs, tr, vi, id, ms, fil
-    MLKIT_CHINESE,     // zh, zh-Hant, ja, ko, yue, nan
+    MLKIT_CHINESE,     // zh, zh-Hant, yue, nan
+    MLKIT_JAPANESE,    // ja
+    MLKIT_KOREAN,      // ko
     MLKIT_DEVANAGARI,  // hi, mr, gu
     TESSERACT          // ru, uk, ar, fa, ur, he, th, bn, ta, te, my, km, bo, mn, ug
 }
@@ -88,6 +92,12 @@ class OcrEngine @Inject constructor(
     private val chineseRecognizer: TextRecognizer =
         TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
 
+    private val japaneseRecognizer: TextRecognizer =
+        TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+
+    private val koreanRecognizer: TextRecognizer =
+        TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+
     private val devanagariRecognizer: TextRecognizer =
         TextRecognition.getClient(DevanagariTextRecognizerOptions.Builder().build())
 
@@ -104,8 +114,11 @@ class OcrEngine @Inject constructor(
             "en", "fr", "de", "es", "pt", "it", "nl", "pl", "cs",
             "tr", "vi", "id", "ms", "fil" -> OcrBackend.MLKIT_LATIN
 
-            // CJK → ML Kit Chinese (handles Japanese, Korean too)
-            "zh", "zh-Hant", "ja", "ko", "yue", "nan" -> OcrBackend.MLKIT_CHINESE
+            // Chinese variants share one recognizer; Japanese and Korean use
+            // their dedicated ML Kit recognizers below.
+            "zh", "zh-Hant", "yue", "nan" -> OcrBackend.MLKIT_CHINESE
+            "ja" -> OcrBackend.MLKIT_JAPANESE
+            "ko" -> OcrBackend.MLKIT_KOREAN
 
             // Devanagari → ML Kit Devanagari
             "hi", "mr", "gu" -> OcrBackend.MLKIT_DEVANAGARI
@@ -163,6 +176,14 @@ class OcrEngine @Inject constructor(
                 val image = InputImage.fromBitmap(bitmap, 0)
                 recognizeWithMlKit(image, chineseRecognizer)
             }
+            OcrBackend.MLKIT_JAPANESE -> {
+                val image = InputImage.fromBitmap(bitmap, 0)
+                recognizeWithMlKit(image, japaneseRecognizer)
+            }
+            OcrBackend.MLKIT_KOREAN -> {
+                val image = InputImage.fromBitmap(bitmap, 0)
+                recognizeWithMlKit(image, koreanRecognizer)
+            }
             OcrBackend.MLKIT_DEVANAGARI -> {
                 val image = InputImage.fromBitmap(bitmap, 0)
                 recognizeWithMlKit(image, devanagariRecognizer)
@@ -213,6 +234,8 @@ class OcrEngine @Inject constructor(
         val recognizer = when (backendFor(sourceLanguageCode)) {
             OcrBackend.MLKIT_LATIN -> latinRecognizer
             OcrBackend.MLKIT_CHINESE -> chineseRecognizer
+            OcrBackend.MLKIT_JAPANESE -> japaneseRecognizer
+            OcrBackend.MLKIT_KOREAN -> koreanRecognizer
             OcrBackend.MLKIT_DEVANAGARI -> devanagariRecognizer
             OcrBackend.TESSERACT -> null
         }
