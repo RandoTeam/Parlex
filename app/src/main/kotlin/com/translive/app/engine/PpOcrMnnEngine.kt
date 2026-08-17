@@ -15,7 +15,9 @@ class PpOcrMnnEngine @Inject constructor(
         val backend: Int = 1,
         val detectorThreshold: Float = 0.3f,
         val minComponentArea: Int = 3,
-        val recognizerThreshold: Float = 0.0f
+        val recognizerThreshold: Float = 0.0f,
+        /** PP-OCR CTC metadata appends a space token after the dictionary. */
+        val useSpaceCharacter: Boolean = true
     )
 
     fun recognize(
@@ -68,11 +70,17 @@ class PpOcrMnnEngine @Inject constructor(
                     // CTC class 0 is blank; every remaining class must have a
                     // dictionary entry. Never silently truncate an incompatible
                     // language package and return plausible-looking garbage.
-                    if (time <= 0 || classes <= 1 || classes != dictionary.size + 1) {
+                    val expectedClasses = dictionary.size + 1 + if (config.useSpaceCharacter) 1 else 0
+                    if (time <= 0 || classes <= 1 || classes != expectedClasses) {
                         return@mapNotNull null
                     }
+                    val decoderDictionary = if (config.useSpaceCharacter) {
+                        dictionary + " "
+                    } else {
+                        dictionary
+                    }
                     val (text, score) = PpOcrPostProcessor.decodeCtc(
-                        logits, time, classes, dictionary, config.recognizerThreshold
+                        logits, time, classes, decoderDictionary, config.recognizerThreshold
                     )
                     if (text.isBlank()) return@mapNotNull null
                     val left = originalQuad.minOf { it.x }.toInt()
