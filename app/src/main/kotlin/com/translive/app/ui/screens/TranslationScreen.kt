@@ -39,6 +39,8 @@ import com.translive.app.ui.viewmodel.TranslationViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TranslationScreen(
+    incomingText: String? = null,
+    onIncomingTextConsumed: () -> Unit = {},
     onNavigateToDialogue: () -> Unit,
     onNavigateToCamera: () -> Unit = {},
     onNavigateToHistory: () -> Unit,
@@ -71,6 +73,17 @@ fun TranslationScreen(
 
     // Auto-load model on first launch
     LaunchedEffect(Unit) { viewModel.loadModel() }
+
+    // Standard Android text-selection and share actions open Parlex directly
+    // on the text translation screen. Translation remains an explicit user
+    // action so a shared long text never starts a costly model inference by
+    // surprise.
+    LaunchedEffect(incomingText) {
+        incomingText?.takeIf { it.isNotBlank() }?.let { text ->
+            viewModel.setSourceText(text)
+            onIncomingTextConsumed()
+        }
+    }
 
     Scaffold(
         bottomBar = {

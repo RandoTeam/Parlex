@@ -1,6 +1,7 @@
 package com.translive.app.ui
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -8,8 +9,20 @@ import com.translive.app.ui.screens.*
 
 @androidx.camera.core.ExperimentalGetImage
 @Composable
-fun TransLiveNavHost() {
+fun TransLiveNavHost(
+    incomingText: String? = null,
+    onIncomingTextConsumed: () -> Unit = {}
+) {
     val navController = rememberNavController()
+
+    LaunchedEffect(incomingText) {
+        if (!incomingText.isNullOrBlank()) {
+            navController.navigate("translate") {
+                popUpTo("translate") { inclusive = false }
+                launchSingleTop = true
+            }
+        }
+    }
 
     fun navigateTo(route: String) {
         if (route == "translate") {
@@ -27,6 +40,8 @@ fun TransLiveNavHost() {
     NavHost(navController = navController, startDestination = "translate") {
         composable("translate") {
             TranslationScreen(
+                incomingText = incomingText,
+                onIncomingTextConsumed = onIncomingTextConsumed,
                 onNavigateToDialogue = { navigateTo("dialogue") },
                 onNavigateToCamera = { navigateTo("camera") },
                 onNavigateToHistory = { navigateTo("history") },
