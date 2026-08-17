@@ -1,5 +1,7 @@
 #include <jni.h>
 #include <string>
+#include <vector>
+#include <cstring>
 
 #ifdef PARLEX_MNN_LINKED
 #include <MNN/Interpreter.hpp>
@@ -87,5 +89,43 @@ Java_com_translive_app_engine_OcrMnnRuntime_nativeReleaseModel(
     delete holder;
 #else
     (void) handle;
+#endif
+}
+
+extern "C" JNIEXPORT jfloatArray JNICALL
+Java_com_translive_app_engine_OcrMnnRuntime_nativeRunFloat(
+        JNIEnv *env, jobject, jlong handle, jfloatArray inputValues, jintArray inputShape) {
+#ifdef PARLEX_MNN_LINKED
+    auto* holder = reinterpret_cast<OcrMnnSession*>(handle);
+    if (holder == nullptr || holder->interpreter == nullptr || holder->session == nullptr) return nullptr;
+    const jsize shapeSize = env->GetArrayLength(inputShape);
+    std::vector<jint> shapeValues(static_cast<size_t>(shapeSize));
+    env->GetIntArrayRegion(inputShape, 0, shapeSize, shapeValues.data());
+    std::vector<int> shape(shapeValues.begin(), shapeValues.end());
+    auto* input = holder->interpreter->getSessionInput(holder->session, nullptr);
+    if (input == nullptr) return nullptr;
+    holder->interpreter->resizeTensor(input, shape);
+    holder->interpreter->resizeSession(holder->session);
+
+    const jsize inputSize = env->GetArrayLength(inputValues);
+    std::vector<float> values(static_cast<size_t>(inputSize));
+    env->GetFloatArrayRegion(inputValues, 0, inputSize, values.data());
+    std::shared_ptr<MNN::Tensor> host(MNN::Tensor::create<float>(shape, nullptr, MNN::Tensor::CAFFE));
+    if (host == nullptr || host->elementSize() != inputSize) return nullptr;
+    std::memcpy(host->host<float>(), values.data(), values.size() * sizeof(float));
+    if (!input->copyFromHostTensor(host.get())) return nullptr;
+    if (holder->interpreter->runSession(holder->session) != MNN::NO_ERROR) return nullptr;
+
+    auto* output = holder->interpreter->getSessionOutput(holder->session, nullptr);
+    if (output == nullptr || output->elementSize() <= 0) return nullptr;
+    std::shared_ptr<MNN::Tensor> outputHost(new MNN::Tensor(output, MNN::Tensor::CAFFE));
+    if (!output->copyToHostTensor(outputHost.get())) return nullptr;
+    const int outputSize = outputHost->elementSize();
+    jfloatArray result = env->NewFloatArray(outputSize);
+    env->SetFloatArrayRegion(result, 0, outputSize, outputHost->host<float>());
+    return result;
+#else
+    (void) env; (void) handle; (void) inputValues; (void) inputShape;
+    return nullptr;
 #endif
 }
