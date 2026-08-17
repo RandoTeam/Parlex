@@ -153,13 +153,17 @@ class CameraTranslateEngine @Inject constructor() {
      * never make an implicit network request.
      */
     suspend fun getPackageStatus(sourceCode: String, targetCode: String): PackageStatus {
-        val source = toMlKitLang(sourceCode) ?: return PackageStatus(supported = false)
-        val target = toMlKitLang(targetCode) ?: return PackageStatus(supported = false)
-        if (source == target) {
+        val sourceLanguage = Language.fromCode(sourceCode) ?: return PackageStatus(supported = false)
+        val targetLanguage = Language.fromCode(targetCode) ?: return PackageStatus(supported = false)
+        val pair = CameraLanguageMatrix.forPair(sourceLanguage, targetLanguage, ::toMlKitLang)
+        if (pair.route == CameraLanguageMatrix.Route.LOCAL_LLM) {
+            return PackageStatus(supported = false)
+        }
+        if (pair.isSameLanguage) {
             return PackageStatus(supported = true)
         }
 
-        val required = linkedSetOf(source, target)
+        val required = pair.requiredFastPackages
         val downloaded = downloadedLanguageCodes()
 
         return PackageStatus(
