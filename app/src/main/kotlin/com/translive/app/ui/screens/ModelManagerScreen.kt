@@ -62,6 +62,10 @@ fun ModelManagerScreen(
         uri?.let { viewModel.importModelFromUri(it) }
     }
 
+    val ocrImportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let(viewModel::importOcrPackageFromUri) }
+
     // SAF picker for model export
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
@@ -344,6 +348,15 @@ fun ModelManagerScreen(
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                )
+            }
+
+            item(key = "ocr_package", contentType = "ocr_package") {
+                OcrPackageCard(
+                    installed = uiState.ocrPackageInstalled,
+                    busy = uiState.ocrPackageBusy,
+                    onImport = { ocrImportLauncher.launch(arrayOf("application/zip", "application/octet-stream")) },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
             }
 
@@ -978,6 +991,41 @@ private fun localizedFamilyDescription(family: ModelFamily): String {
         else -> null
     }
     return resourceId?.let { stringResource(it) } ?: family.description
+}
+
+@Composable
+private fun OcrPackageCard(
+    installed: Boolean,
+    busy: Boolean,
+    onImport: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(modifier = modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp)) {
+        Row(
+            modifier = Modifier.padding(14.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Filled.DocumentScanner, contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text("PP-OCRv6 tiny (MNN)", style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold)
+                Text(
+                    if (installed) "Установлен и проверен; быстрый OCR OpenCL"
+                    else "Detector + recognizer для камеры, фото и экрана",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            when {
+                busy -> CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                installed -> Icon(Icons.Filled.CheckCircle, contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary)
+                else -> TextButton(onClick = onImport) { Text("Импорт ZIP") }
+            }
+        }
+    }
 }
 
 @Composable

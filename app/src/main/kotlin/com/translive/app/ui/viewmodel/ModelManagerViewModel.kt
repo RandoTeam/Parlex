@@ -1,6 +1,7 @@
 package com.translive.app.ui.viewmodel
 
 import android.net.Uri
+import android.content.Context
 
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -22,6 +23,7 @@ import com.translive.app.engine.SpeechEngine
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.i18n.LocalizedTextProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -29,6 +31,8 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.util.zip.ZipInputStream
+import com.translive.app.engine.PpOcrPackage
 import javax.inject.Inject
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -83,6 +87,8 @@ data class ModelManagerUiState(
     val cameraLanguagePacks: List<CameraLanguagePackUiState> = emptyList(),
     val cameraLanguagePacksExpanded: Boolean = false,
     val cameraPackagePair: CameraPackagePairUiState? = null,
+    val ocrPackageInstalled: Boolean = false,
+    val ocrPackageBusy: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null,
     /** Variant pending license confirmation before download */
@@ -123,6 +129,7 @@ data class CameraPackagePairUiState(
 
 @HiltViewModel
 class ModelManagerViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val repo: ModelRepository,
     private val downloadManager: ModelDownloadManager,
     private val engine: TranslationEngine,
@@ -249,6 +256,9 @@ class ModelManagerViewModel @Inject constructor(
                     else -> old.qwen3Progress
                 },
                 selectedSpeechModel = settings.speechModel
+                ,ocrPackageInstalled = PpOcrPackage.validate(
+                    File(appContext.filesDir, "ocr/${PpOcrPackage.ID}")
+                ).valid
             )
         }
     }
@@ -671,6 +681,41 @@ class ModelManagerViewModel @Inject constructor(
                 }
                 else -> {}
             }
+        }
+    }
+
+    /** Import one complete PP-OCR MNN zip; incomplete archives are discarded. */
+    fun importOcrPackageFromUri(uri: Uri) {
+        if (_uiState.value.ocrPackageBusy) return
+        _uiState.update { it.copy(ocrPackageBusy = true, error = null) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val root = File(appContext.filesDir, "ocr/${PpOcrPackage.ID}")
+            val staging = File(appContext.cacheDir, "ocr-import-${System.nanoTime()}")
+            val result = runCatching {
+                staging.deleteRecursively()
+                staging.mkdirs()
+                appContext.contentResolver.openInputStream(uri)?.use { input ->
+                    ZipInputStream(BufferedInputStream(input)).use { zip ->
+                        generateSequence { zip.nextEntry }.forEach { entry ->
+                            if (!entry.isDirectory) {
+                                val output = File(staging, File(entry.name).name)
+                                output.outputStream().use { out -> zip.copyTo(out) }
+                            }
+                            zip.closeEntry()
+                        }
+                    }
+                } ?: error("Не удалось открыть OCR-архив")
+                val validation = PpOcrPackage.validate(staging)
+                check(validation.valid) { validation.message }
+                root.deleteRecursively()
+                staging.renameTo(root)
+                "PP-OCRv6 MNN-пакет установлен и проверен"
+            }
+            staging.deleteRecursively()
+            result.fold(
+                onSuccess = { message -> _uiState.update { it.copy(ocrPackageBusy = false, ocrPackageInstalled = true, successMessage = message) } },
+                onFailure = { error -> _uiState.update { it.copy(ocrPackageBusy = false, error = "OCR: ${error.message ?: "архив не прошёл проверку"}") } }
+            )
         }
     }
 
