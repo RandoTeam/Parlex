@@ -34,6 +34,7 @@ object CameraLanguageMatrix {
         }
 
     fun forPair(source: Language, target: Language, toFastCode: (String) -> String?): Pair {
+        if (source == target) return Pair(source, target, Route.FAST_PACKAGE)
         val sourceCode = toFastCode(source.code)
         val targetCode = toFastCode(target.code)
         return if (sourceCode != null && targetCode != null) {
