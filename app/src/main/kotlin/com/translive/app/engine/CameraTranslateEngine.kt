@@ -67,7 +67,9 @@ class CameraTranslateEngine @Inject constructor() {
      */
     data class LanguagePackage(
         val modelLanguageCode: String,
-        val languages: List<Language>
+        val languages: List<Language>,
+        /** False when the language is handled by the local LLM fallback. */
+        val fastSupported: Boolean
     )
 
     /**
@@ -121,11 +123,14 @@ class CameraTranslateEngine @Inject constructor() {
      */
     fun availableLanguagePackages(): List<LanguagePackage> =
         Language.allLanguages
-            .mapNotNull { language ->
-                toMlKitLang(language.code)?.let { modelCode -> modelCode to language }
+            .groupBy { language -> toMlKitLang(language.code) ?: "llm:${language.code}" }
+            .map { (modelCode, languages) ->
+                LanguagePackage(
+                    modelLanguageCode = modelCode,
+                    languages = languages,
+                    fastSupported = !modelCode.startsWith("llm:")
+                )
             }
-            .groupBy({ it.first }, { it.second })
-            .map { (modelCode, languages) -> LanguagePackage(modelCode, languages) }
             .sortedBy { it.languages.first().displayName }
 
     suspend fun downloadedLanguageCodes(): Set<String> {

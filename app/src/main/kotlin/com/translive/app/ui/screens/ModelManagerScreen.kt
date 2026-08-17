@@ -1111,7 +1111,11 @@ private fun CameraLanguagePacksGroup(
     modifier: Modifier = Modifier
 ) {
     val ready = packs.count { it.isDownloaded }
-    val supportedLanguages = remember(packs) { packs.flatMap { it.languages }.distinct() }
+    // The picker must expose the complete model catalog, not only ML Kit's
+    // fast subset. Unsupported fast packages use the local LLM fallback.
+    val supportedLanguages = remember(packs) {
+        packs.flatMap { it.languages }.distinct().ifEmpty { Language.allLanguages }
+    }
     var selectingSource by remember { mutableStateOf(false) }
     var selectingTarget by remember { mutableStateOf(false) }
     Card(
@@ -1199,7 +1203,14 @@ private fun CameraLanguagePacksGroup(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        if (selectedPair.isDownloading) {
+                        if (!selectedPair.fastSupported) {
+                            Text(
+                                text = stringResource(R.string.models_camera_unsupported_pair),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 10.dp)
+                            )
+                        } else if (selectedPair.isDownloading) {
                             CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                         } else if (selectedPair.isReady) {
                             Text(
@@ -1231,6 +1242,12 @@ private fun CameraLanguagePacksGroup(
                             modifier = Modifier.weight(1f)
                         )
                         when {
+                            !pack.fastSupported -> Text(
+                                text = stringResource(R.string.models_camera_unsupported_pair),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
                             pack.isDownloaded -> Text(
                                 text = stringResource(R.string.model_ready),
                                 style = MaterialTheme.typography.labelMedium,

@@ -105,6 +105,7 @@ data class CameraTranslationPackUiState(
 data class CameraLanguagePackUiState(
     val modelLanguageCode: String,
     val languages: List<Language>,
+    val fastSupported: Boolean = true,
     val isDownloaded: Boolean,
     val isDownloading: Boolean = false
 )
@@ -113,6 +114,7 @@ data class CameraLanguagePackUiState(
 data class CameraPackagePairUiState(
     val sourceLanguage: Language,
     val targetLanguage: Language,
+    val fastSupported: Boolean = true,
     val isReady: Boolean,
     val isDownloading: Boolean = false,
     val requiredPackageCount: Int = 0,
@@ -267,6 +269,7 @@ class ModelManagerViewModel @Inject constructor(
                 CameraLanguagePackUiState(
                     modelLanguageCode = pack.modelLanguageCode,
                     languages = pack.languages,
+                    fastSupported = pack.fastSupported,
                     isDownloaded = pack.modelLanguageCode in downloadedCodes,
                     isDownloading = cameraTranslateEngine.isDownloading.value
                 )
@@ -293,6 +296,7 @@ class ModelManagerViewModel @Inject constructor(
                     cameraPackagePair = CameraPackagePairUiState(
                         sourceLanguage = pairSource,
                         targetLanguage = pairTarget,
+                        fastSupported = pairStatus.supported,
                         isReady = pairStatus.isReady,
                         isDownloading = existingPair?.isDownloading == true || cameraTranslateEngine.isDownloading.value,
                         requiredPackageCount = pairStatus.requiredLanguageCodes.size,
@@ -338,6 +342,7 @@ class ModelManagerViewModel @Inject constructor(
                 cameraPackagePair = CameraPackagePairUiState(
                     sourceLanguage = language,
                     targetLanguage = if (target == language) Language.ENGLISH else target,
+                    fastSupported = false,
                     isReady = false
                 )
             )
@@ -353,6 +358,7 @@ class ModelManagerViewModel @Inject constructor(
                 cameraPackagePair = CameraPackagePairUiState(
                     sourceLanguage = if (source == language) Language.ENGLISH else source,
                     targetLanguage = language,
+                    fastSupported = false,
                     isReady = false
                 )
             )
