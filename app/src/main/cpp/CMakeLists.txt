@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # llama.cpp source directory (to be cloned/placed here)
 set(LLAMA_CPP_DIR "${CMAKE_SOURCE_DIR}/llama.cpp")
+set(MNN_DIR "${CMAKE_SOURCE_DIR}/MNN")
 # Reconfigure when the separately restored llama.cpp checkout appears or changes.
 # Without this dependency, a clean clone can keep packaging the JNI stub after
 # llama.cpp is restored because the previous CMake cache selected the stub path.
@@ -60,4 +61,13 @@ else()
         ocr_mnn_jni.cpp
     )
     target_link_libraries(translive android log)
+endif()
+
+# MNN is restored separately for native builds, just like llama.cpp. Keep the
+# capability bridge in every APK; the real implementation can only be enabled
+# when the exact pinned checkout is present for this ABI.
+if(EXISTS "${MNN_DIR}/CMakeLists.txt")
+    message(STATUS "MNN checkout detected at ${MNN_DIR}; OCR native integration is enabled by the pinned bridge build.")
+else()
+    message(STATUS "MNN checkout not present; OCR bridge remains capability-only.")
 endif()
