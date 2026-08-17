@@ -7,6 +7,7 @@ import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.ModelRuntime
 import com.translive.app.engine.LiteRtTranslationEngine
+import com.translive.app.engine.OcrMnnRuntime
 import com.translive.app.engine.TranslationEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,7 +23,8 @@ class SettingsViewModel @Inject constructor(
     private val settings: SettingsRepository,
     private val modelRepository: ModelRepository,
     private val engine: TranslationEngine,
-    private val liteRtEngine: LiteRtTranslationEngine
+    private val liteRtEngine: LiteRtTranslationEngine,
+    private val ocrMnnRuntime: OcrMnnRuntime
 ) : ViewModel() {
 
     private val _appLanguage = MutableStateFlow(settings.appLanguageCode)
@@ -104,7 +106,17 @@ class SettingsViewModel @Inject constructor(
 
     fun runRuntimeDiagnostics() {
         viewModelScope.launch {
-            _runtimeDiagnostics.value = engine.collectRuntimeDiagnostics(context)
+            val translationReport = engine.collectRuntimeDiagnostics(context)
+            val ocr = ocrMnnRuntime.capability()
+            _runtimeDiagnostics.value = buildString {
+                append(translationReport)
+                append("\\n\\nOCR MNN backend: ")
+                append(ocr.backend)
+                append("\\nOCR MNN available: ")
+                append(ocr.available)
+                append("\\nOCR MNN details: ")
+                append(ocr.detail)
+            }
         }
     }
 
