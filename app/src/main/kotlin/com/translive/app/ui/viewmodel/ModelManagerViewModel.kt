@@ -82,6 +82,7 @@ data class ModelManagerUiState(
     val cameraPack: CameraTranslationPackUiState? = null,
     val cameraLanguagePacks: List<CameraLanguagePackUiState> = emptyList(),
     val cameraLanguagePacksExpanded: Boolean = false,
+    val cameraPackagePair: CameraPackagePairUiState? = null,
     val error: String? = null,
     val successMessage: String? = null,
     /** Variant pending license confirmation before download */
@@ -106,6 +107,16 @@ data class CameraLanguagePackUiState(
     val languages: List<Language>,
     val isDownloaded: Boolean,
     val isDownloading: Boolean = false
+)
+
+/** A user-picked fast camera pair in the collapsed Models group. */
+data class CameraPackagePairUiState(
+    val sourceLanguage: Language,
+    val targetLanguage: Language,
+    val isReady: Boolean,
+    val isDownloading: Boolean = false,
+    val requiredPackageCount: Int = 0,
+    val downloadedPackageCount: Int = 0
 )
 
 @HiltViewModel
@@ -260,6 +271,10 @@ class ModelManagerViewModel @Inject constructor(
                     isDownloading = cameraTranslateEngine.isDownloading.value
                 )
             }
+            val existingPair = _uiState.value.cameraPackagePair
+            val pairSource = existingPair?.sourceLanguage ?: source
+            val pairTarget = existingPair?.targetLanguage ?: target
+            val pairStatus = cameraTranslateEngine.getPackageStatus(pairSource.code, pairTarget.code)
             _uiState.update {
                 it.copy(
                     cameraPack = CameraTranslationPackUiState(
@@ -274,7 +289,17 @@ class ModelManagerViewModel @Inject constructor(
                             it in status.requiredLanguageCodes
                         }
                     ),
-                    cameraLanguagePacks = languagePacks
+                    cameraLanguagePacks = languagePacks,
+                    cameraPackagePair = CameraPackagePairUiState(
+                        sourceLanguage = pairSource,
+                        targetLanguage = pairTarget,
+                        isReady = pairStatus.isReady,
+                        isDownloading = existingPair?.isDownloading == true || cameraTranslateEngine.isDownloading.value,
+                        requiredPackageCount = pairStatus.requiredLanguageCodes.size,
+                        downloadedPackageCount = pairStatus.downloadedLanguageCodes.count {
+                            it in pairStatus.requiredLanguageCodes
+                        }
+                    )
                 )
             }
         }
@@ -303,6 +328,52 @@ class ModelManagerViewModel @Inject constructor(
 
     fun toggleCameraLanguagePacks() {
         _uiState.update { it.copy(cameraLanguagePacksExpanded = !it.cameraLanguagePacksExpanded) }
+    }
+
+    fun selectCameraPackagePairSource(language: Language) {
+        val target = _uiState.value.cameraPackagePair?.targetLanguage
+            ?: settings.cameraTargetLanguage
+        _uiState.update {
+            it.copy(
+                cameraPackagePair = CameraPackagePairUiState(
+                    sourceLanguage = language,
+                    targetLanguage = if (target == language) Language.ENGLISH else target,
+                    isReady = false
+                )
+            )
+        }
+        refreshCameraTranslationPack()
+    }
+
+    fun selectCameraPackagePairTarget(language: Language) {
+        val source = _uiState.value.cameraPackagePair?.sourceLanguage
+            ?: if (settings.cameraSourceAuto) Language.RUSSIAN else settings.cameraSourceLanguage
+        _uiState.update {
+            it.copy(
+                cameraPackagePair = CameraPackagePairUiState(
+                    sourceLanguage = if (source == language) Language.ENGLISH else source,
+                    targetLanguage = language,
+                    isReady = false
+                )
+            )
+        }
+        refreshCameraTranslationPack()
+    }
+
+    fun downloadCameraPackagePair() {
+        val pair = _uiState.value.cameraPackagePair ?: return
+        if (pair.isReady || pair.isDownloading) return
+        _uiState.update { it.copy(cameraPackagePair = pair.copy(isDownloading = true)) }
+        viewModelScope.launch(Dispatchers.IO) {
+            val downloaded = cameraTranslateEngine.downloadPairPackages(
+                pair.sourceLanguage.code,
+                pair.targetLanguage.code
+            )
+            if (!downloaded) {
+                _uiState.update { it.copy(error = tr(R.string.camera_pack_download_failed)) }
+            }
+            refreshCameraTranslationPack()
+        }
     }
 
     fun downloadCameraLanguagePack(modelLanguageCode: String) {

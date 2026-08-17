@@ -22,6 +22,7 @@ import com.translive.app.data.model.Language
 fun LanguagePickerSheet(
     selectedLanguage: Language,
     excludeLanguage: Language? = null,
+    availableLanguages: List<Language> = Language.allLanguages,
     autoOptionLabel: String? = null,
     autoOptionDescription: String? = null,
     isAutoSelected: Boolean = false,
@@ -31,8 +32,8 @@ fun LanguagePickerSheet(
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    val filteredLanguages = remember(searchQuery, excludeLanguage) {
-        val all = Language.allLanguages.filter { it != excludeLanguage }
+    val filteredLanguages = remember(searchQuery, excludeLanguage, availableLanguages) {
+        val all = availableLanguages.filter { it != excludeLanguage }
         if (searchQuery.isBlank()) {
             all
         } else {
@@ -46,12 +47,12 @@ fun LanguagePickerSheet(
     }
 
     // Group: popular first, then rest
-    val popular = remember(excludeLanguage) {
+    val popular = remember(excludeLanguage, availableLanguages) {
         listOf(
             Language.ENGLISH, Language.RUSSIAN, Language.CHINESE_SIMPLIFIED,
             Language.JAPANESE, Language.KOREAN, Language.GERMAN,
             Language.FRENCH, Language.SPANISH
-        ).filter { it != excludeLanguage }
+        ).filter { it != excludeLanguage && it in availableLanguages }
     }
 
     ModalBottomSheet(

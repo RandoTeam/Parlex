@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.model.Language
 import com.translive.app.engine.DownloadState
 import com.translive.app.data.model.ModelFamily
 import com.translive.app.data.model.ModelRuntime
@@ -34,6 +35,8 @@ import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
+import com.translive.app.ui.components.LanguagePickerSheet
+import com.translive.app.ui.viewmodel.CameraPackagePairUiState
 import com.translive.app.ui.viewmodel.FamilyUiState
 import com.translive.app.ui.viewmodel.CameraTranslationPackUiState
 import com.translive.app.ui.viewmodel.ModelItemState
@@ -358,9 +361,13 @@ fun ModelManagerScreen(
                 item(key = "camera_language_packs", contentType = "camera_language_packs") {
                     CameraLanguagePacksGroup(
                         packs = uiState.cameraLanguagePacks,
+                        pair = uiState.cameraPackagePair,
                         expanded = uiState.cameraLanguagePacksExpanded,
                         onToggle = viewModel::toggleCameraLanguagePacks,
                         onDownload = viewModel::downloadCameraLanguagePack,
+                        onPairSourceSelected = viewModel::selectCameraPackagePairSource,
+                        onPairTargetSelected = viewModel::selectCameraPackagePairTarget,
+                        onPairDownload = viewModel::downloadCameraPackagePair,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                     )
                 }
@@ -1094,12 +1101,19 @@ private fun CameraTranslationPackCard(
 @Composable
 private fun CameraLanguagePacksGroup(
     packs: List<com.translive.app.ui.viewmodel.CameraLanguagePackUiState>,
+    pair: CameraPackagePairUiState?,
     expanded: Boolean,
     onToggle: () -> Unit,
     onDownload: (String) -> Unit,
+    onPairSourceSelected: (Language) -> Unit,
+    onPairTargetSelected: (Language) -> Unit,
+    onPairDownload: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val ready = packs.count { it.isDownloaded }
+    val supportedLanguages = remember(packs) { packs.flatMap { it.languages }.distinct() }
+    var selectingSource by remember { mutableStateOf(false) }
+    var selectingTarget by remember { mutableStateOf(false) }
     Card(
         onClick = onToggle,
         modifier = modifier.fillMaxWidth(),
@@ -1143,6 +1157,66 @@ private fun CameraLanguagePacksGroup(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                pair?.let { selectedPair ->
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = stringResource(R.string.models_camera_pair_download_title),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        AssistChip(
+                            onClick = { selectingSource = true },
+                            label = { Text(selectedPair.sourceLanguage.displayName, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "→",
+                            modifier = Modifier.padding(horizontal = 6.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        AssistChip(
+                            onClick = { selectingTarget = true },
+                            label = { Text(selectedPair.targetLanguage.displayName, maxLines = 1) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Text(
+                        text = stringResource(
+                            R.string.models_camera_package_progress,
+                            selectedPair.downloadedPackageCount,
+                            selectedPair.requiredPackageCount
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        if (selectedPair.isDownloading) {
+                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        } else if (selectedPair.isReady) {
+                            Text(
+                                text = stringResource(R.string.model_ready),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(vertical = 10.dp)
+                            )
+                        } else {
+                            FilledTonalButton(onClick = onPairDownload) {
+                                Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.models_camera_download_pair))
+                            }
+                        }
+                    }
+                }
                 packs.forEach { pack ->
                     val label = pack.languages.joinToString(", ") { it.displayName }
                     Row(
@@ -1176,6 +1250,31 @@ private fun CameraLanguagePacksGroup(
                 }
             }
         }
+    }
+
+    if (selectingSource && pair != null) {
+        LanguagePickerSheet(
+            selectedLanguage = pair.sourceLanguage,
+            excludeLanguage = pair.targetLanguage,
+            availableLanguages = supportedLanguages,
+            onLanguageSelected = {
+                onPairSourceSelected(it)
+                selectingSource = false
+            },
+            onDismiss = { selectingSource = false }
+        )
+    }
+    if (selectingTarget && pair != null) {
+        LanguagePickerSheet(
+            selectedLanguage = pair.targetLanguage,
+            excludeLanguage = pair.sourceLanguage,
+            availableLanguages = supportedLanguages,
+            onLanguageSelected = {
+                onPairTargetSelected(it)
+                selectingTarget = false
+            },
+            onDismiss = { selectingTarget = false }
+        )
     }
 }
 

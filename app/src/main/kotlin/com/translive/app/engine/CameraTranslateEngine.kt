@@ -230,6 +230,12 @@ class CameraTranslateEngine @Inject constructor() {
         }
     }
 
+    /** Downloads only the missing reusable packages for a pair without changing the active camera translator. */
+    suspend fun downloadPairPackages(sourceCode: String, targetCode: String): Boolean {
+        val status = getPackageStatus(sourceCode, targetCode)
+        return status.supported && downloadLanguagePackages(status.missingLanguageCodes)
+    }
+
     /**
      * Activates only an already installed pair. It never starts a download.
      */

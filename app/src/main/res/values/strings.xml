@@ -113,6 +113,8 @@
     <string name="models_camera_downloading">Downloading camera language packages…</string>
     <string name="models_camera_download_packages">Download packages</string>
     <string name="models_camera_all_language_packages">Fast camera language packages</string>
+    <string name="models_camera_pair_download_title">Download a language pair</string>
+    <string name="models_camera_download_pair">Download pair</string>
     <string name="models_camera_all_packages_progress">%1$d/%2$d installed • one package works in both directions</string>
     <string name="models_camera_all_packages_note">Download only the languages you use. Chinese variants share one Chinese package.</string>
     <string name="camera_open_model_packages">Open packages</string>

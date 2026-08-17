@@ -213,6 +213,8 @@
     <string name="models_camera_downloading">Загрузка языковых пакетов камеры…</string>
     <string name="models_camera_download_packages">Скачать пакеты</string>
     <string name="models_camera_all_language_packages">Языковые пакеты быстрой камеры</string>
+    <string name="models_camera_pair_download_title">Скачать языковую пару</string>
+    <string name="models_camera_download_pair">Скачать пару</string>
     <string name="models_camera_all_packages_progress">Установлено %1$d/%2$d • один пакет работает в обоих направлениях</string>
     <string name="models_camera_all_packages_note">Скачивайте только нужные языки. Варианты китайского используют один общий пакет.</string>
     <string name="camera_open_model_packages">Открыть пакеты</string>
