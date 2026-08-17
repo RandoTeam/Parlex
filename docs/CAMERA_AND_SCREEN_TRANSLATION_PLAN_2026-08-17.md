@@ -27,9 +27,9 @@
 - [x] Добавить загрузку текущей пары непосредственно из камеры.
 - [x] Исправить CJK-маршрутизацию: отдельные офлайн-recognizer'ы ML Kit для японского и корейского вместо китайского.
 - [ ] Список отсутствующих пакетов и точные имена языков в карточке текущей пары.
-- [ ] Автоисточник: определить письменность, ограничить кандидаты установленными пакетами, затем Language ID; не перебирать только русский/английский.
+- [ ] Автоисточник: ограничение кандидатов установленными пакетами уже добавлено для фото/скриншота. Осталось заменить эвристический выбор письменности на PP-OCR detector/classifier и распространить его на live-режим.
 - [x] Явные режимы камеры: `Быстро` (ML Kit) и `Качество` (фото/документ + HY-MT/TranslateGemma).
-- [ ] Заменить тяжёлый OCR фото/документов на проверенный PP-OCR mobile pipeline: detector + recognizer по письменности + ориентация + reading order. В live-режиме оставить keyframe OCR, трекинг блоков и кэш перевода.
+- [ ] Заменить тяжёлый OCR фото/документов на проверенный PP-OCR mobile pipeline: detector + recognizer по письменности + ориентация + reading order. В live-режиме оставить keyframe OCR, трекинг блоков и кэш перевода. Технический выбор: PP-OCRv6 models + MNN с проверяемыми CPU/OpenCL/Vulkan бэкендами; официальный ONNX Android demo использовать как эталон формата моделей и метрик, но не как GPU runtime.
 - [ ] Корпус OnePlus 13: русский, английский, китайский, арабский, тайский, постеры, страницы книг и смешанные надписи; сохранить метрики OCR, перевода и end-to-end latency.
 
 ## Перевод экрана
@@ -66,6 +66,10 @@
 5. Никакие текст, изображение, голос или экран не отправляются в сеть после того, как пакеты загружены.
 
 ## Источники
+
+- [PaddleOCR: официальный Android SDK](https://github.com/PaddlePaddle/PaddleOCR/blob/main/docs/version3.x/inference_deployment/cross_platform/android_deployment.en.md) — PP-OCRv6, разделение SDK/demo, API и измерение времени detector/recognizer.
+- [MNN](https://github.com/alibaba/MNN) — Android GPU inference через OpenCL/Vulkan; используется как runtime OCR в исследованном приложении.
+- [offline-translator](https://github.com/DavidVentura/offline-translator) — источник функциональных идей. Лицензия GPL-3.0, поэтому код не переносится.
 
 - https://developers.google.com/ml-kit/language/translation/android
 - https://developers.google.com/ml-kit/language/translation/translation-language-support

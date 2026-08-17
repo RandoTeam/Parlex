@@ -1175,17 +1175,24 @@ class CameraViewModel @Inject constructor(
     }
 
     private suspend fun recognizeAutoCaptureBitmap(bitmap: Bitmap): CaptureOcrPass {
-        val attempts = AUTO_CAPTURE_OCR_LANGUAGES.map { language ->
+        val candidates = autoCaptureOcrCandidates()
+        val attempts = candidates.map { language ->
             recognizeCaptureAttempt(bitmap, language)
         }
         val selectedAttempt = selectAutoOcrAttempt(attempts)
-        val mixedBlocks = buildMixedCaptureBlocks(attempts)
+        val mixedBlocks = buildMixedCaptureBlocks(attempts, candidates)
         val mixedLines = mixedBlocks.flatMap { it.lines }
         val detectedLanguages = mixedLines
             .map { it.sourceLanguage ?: selectedAttempt.language }
             .distinctBy { it.code }
             .ifEmpty {
-                listOf(detectSourceLanguageFromText(selectedAttempt.result, selectedAttempt.language))
+                listOf(
+                    restrictAutoLanguage(
+                        detectSourceLanguageFromText(selectedAttempt.result, selectedAttempt.language),
+                        selectedAttempt.language,
+                        candidates
+                    )
+                )
             }
         val detectedLanguage = dominantSourceLanguage(
             lines = mixedLines,
@@ -1219,13 +1226,20 @@ class CameraViewModel @Inject constructor(
         )
     }
 
-    private fun buildMixedCaptureBlocks(attempts: List<CaptureOcrAttempt>): List<PaintBlock> {
+    private fun buildMixedCaptureBlocks(
+        attempts: List<CaptureOcrAttempt>,
+        allowedLanguages: List<Language>
+    ): List<PaintBlock> {
         val selectedCandidates = mutableListOf<MixedLineCandidate>()
 
         attempts.forEachIndexed { attemptIndex, attempt ->
             val rawLines = extractRawCaptureLines(attempt.result)
             rawLines.forEach { line ->
-                val sourceLanguage = detectSourceLanguageForText(line.text, attempt.language)
+                val sourceLanguage = restrictAutoLanguage(
+                    detectSourceLanguageForText(line.text, attempt.language),
+                    attempt.language,
+                    allowedLanguages
+                )
                 val candidate = MixedLineCandidate(
                     line = line.copy(
                         id = "a$attemptIndex:${line.id}",
@@ -1263,6 +1277,78 @@ class CameraViewModel @Inject constructor(
 
     private fun detectSourceLanguageForText(text: String, ocrLanguage: Language): Language =
         languageDetectionEngine.detectLineFallback(text, ocrLanguage)
+
+    /**
+     * The auto mode may only choose a source whose reusable fast-translation
+     * package is already installed. It prevents an OCR guess from silently
+     * selecting an unprepared language and producing an empty overlay.
+     */
+    private fun restrictAutoLanguage(
+        detected: Language,
+        fallback: Language,
+        allowedLanguages: List<Language>
+    ): Language {
+        val allowedModelCodes = allowedLanguages.mapNotNull { language ->
+            cameraTranslateEngine.toMlKitLang(language.code)
+        }.toSet()
+        return when {
+            cameraTranslateEngine.toMlKitLang(detected.code) in allowedModelCodes -> detected
+            cameraTranslateEngine.toMlKitLang(fallback.code) in allowedModelCodes -> fallback
+            else -> allowedLanguages.firstOrNull() ?: fallback
+        }
+    }
+
+    /**
+     * One OCR pass per actual recognizer/script, never one pass per language
+     * pair. Latin and Cyrillic families share a recognizer; Chinese aliases
+     * share one model. Tesseract scripts remain available for still photos,
+     * where correctness is preferable to live-frame latency.
+     */
+    private suspend fun autoCaptureOcrCandidates(): List<Language> {
+        val downloadedModelCodes = cameraTranslateEngine.downloadedLanguageCodes()
+        val installed = Language.allLanguages.filter { language ->
+            cameraTranslateEngine.toMlKitLang(language.code) in downloadedModelCodes
+        }
+        val available = installed.ifEmpty { AUTO_CAPTURE_FALLBACK_LANGUAGES }
+        return available
+            .groupBy(::autoOcrBackendKey)
+            .values
+            .map(::preferredAutoOcrLanguage)
+            .sortedBy(::autoOcrCandidateOrder)
+    }
+
+    private fun autoOcrBackendKey(language: Language): String = when (language.code) {
+        "en", "fr", "de", "es", "pt", "it", "nl", "pl", "cs", "tr", "vi", "id", "ms", "fil" ->
+            "mlkit-latin"
+        "ru", "uk" -> "tesseract-cyrillic"
+        "zh", "zh-Hant", "yue", "nan" -> "mlkit-chinese"
+        "ja" -> "mlkit-japanese"
+        "ko" -> "mlkit-korean"
+        "hi", "mr" -> "mlkit-devanagari"
+        else -> "tesseract-${language.code}"
+    }
+
+    private fun preferredAutoOcrLanguage(candidates: List<Language>): Language {
+        val preference = listOf(
+            Language.ENGLISH,
+            Language.RUSSIAN,
+            Language.CHINESE_SIMPLIFIED,
+            Language.JAPANESE,
+            Language.KOREAN,
+            Language.HINDI,
+            Language.ARABIC
+        )
+        return preference.firstOrNull { it in candidates } ?: candidates.first()
+    }
+
+    private fun autoOcrCandidateOrder(language: Language): Int = when (autoOcrBackendKey(language)) {
+        "mlkit-latin" -> 0
+        "mlkit-chinese" -> 1
+        "mlkit-japanese" -> 2
+        "mlkit-korean" -> 3
+        "mlkit-devanagari" -> 4
+        else -> 10
+    }
 
     private fun scoreMixedLineCandidate(
         line: PaintLine,
@@ -2737,7 +2823,7 @@ private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 200L
 
-private val AUTO_CAPTURE_OCR_LANGUAGES = listOf(
+private val AUTO_CAPTURE_FALLBACK_LANGUAGES = listOf(
     Language.ENGLISH,
     Language.RUSSIAN,
     Language.CHINESE_SIMPLIFIED,
