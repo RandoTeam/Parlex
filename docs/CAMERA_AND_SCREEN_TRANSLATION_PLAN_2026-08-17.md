@@ -53,6 +53,30 @@
   recognizer inference test, checksum/model metadata validation, cold/warm
   timings, and graceful fallback when GPU initialization fails.
 
+### OCR package catalog and pair behavior
+
+- The camera language group remains the single user-facing entry point. It
+  contains the reusable fast translation packages, while OCR runtime assets
+  are shown as a separate compact subsection rather than one row per language.
+- The minimum OCR package set is:
+  - `ppocrv6_tiny_det`: text detector and geometry;
+  - `ppocrv6_tiny_rec_latin`: Latin/Cyrillic-compatible recognition path;
+  - `ppocrv6_tiny_rec_cjk`: Chinese/Japanese/Korean recognition path;
+  - script dictionaries/configuration and version metadata.
+- OCR packages are not language-pair packages. One detector/recognizer asset
+  can serve many translation pairs; the selected source and target only choose
+  OCR routing and the fast translation packages.
+- For `ru ↔ en` and any other ML Kit pair, the camera offers exactly the two
+  missing reusable language packages. Selecting another pair (for example
+  `zh → fr`) recomputes the missing set immediately and offers one action.
+- Languages without a fast ML Kit package remain selectable and use the local
+  LLM fallback. They must never produce a fake download entry or be counted as
+  an installed fast package.
+- The existing `ModelRuntime` enum currently represents only GGUF and LiteRT.
+  OCR assets need a dedicated runtime/package type before they can be wired to
+  the common downloader; this is an implementation prerequisite, not a UI-only
+  catalog addition.
+
 ## Перевод экрана
 
 1. [x] Первый релиз: `ACTION_PROCESS_TEXT` и `ACTION_SEND` — перевод выделенного или переданного текста из других приложений без захвата экрана.
