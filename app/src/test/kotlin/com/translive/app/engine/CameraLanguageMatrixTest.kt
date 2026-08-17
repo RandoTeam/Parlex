@@ -27,4 +27,25 @@ class CameraLanguageMatrixTest {
         assertEquals(CameraLanguageMatrix.Route.FAST_PACKAGE, pair.route)
         assertEquals(setOf("ru", "en"), pair.requiredFastPackages)
     }
+
+    @Test
+    fun `same language needs no package and unsupported languages keep local fallback`() {
+        val same = CameraLanguageMatrix.forPair(Language.RUSSIAN, Language.RUSSIAN) { "ru" }
+        assertTrue(same.isSameLanguage)
+        assertEquals(CameraLanguageMatrix.Route.FAST_PACKAGE, same.route)
+        assertTrue(same.requiredFastPackages.isEmpty())
+
+        Language.allLanguages
+            .filter { it !in setOf(Language.RUSSIAN, Language.ENGLISH) }
+            .forEach { language ->
+                val forward = CameraLanguageMatrix.forPair(Language.RUSSIAN, language) { code ->
+                    code.takeIf { it == "ru" || it == "en" }
+                }
+                val reverse = CameraLanguageMatrix.forPair(language, Language.RUSSIAN) { code ->
+                    code.takeIf { it == "ru" || it == "en" }
+                }
+                assertEquals(CameraLanguageMatrix.Route.LOCAL_LLM, forward.route)
+                assertEquals(CameraLanguageMatrix.Route.LOCAL_LLM, reverse.route)
+            }
+    }
 }
