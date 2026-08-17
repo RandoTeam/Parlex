@@ -76,6 +76,11 @@
   OCR assets need a dedicated runtime/package type before they can be wired to
   the common downloader; this is an implementation prerequisite, not a UI-only
   catalog addition.
+- The converted PP-OCRv6 tiny MNN package now has a strict local/import
+  contract in `PpOcrPackage`: detector, recognizer and dictionary are checked
+  by exact byte size and SHA-256 before use. No remote download URL is claimed
+  until a reproducible hosted MNN artifact is available; official model
+  sources publish ONNX, which cannot be passed directly to the MNN runtime.
 
 ## Перевод экрана
 
