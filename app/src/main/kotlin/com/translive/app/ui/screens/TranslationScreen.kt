@@ -42,6 +42,7 @@ fun TranslationScreen(
     incomingText: String? = null,
     onIncomingTextConsumed: () -> Unit = {},
     onRequestScreenCapture: () -> Unit = {},
+    onStartScreenOverlay: () -> Unit = {},
     onNavigateToDialogue: () -> Unit,
     onNavigateToCamera: () -> Unit = {},
     onNavigateToHistory: () -> Unit,
@@ -231,6 +232,16 @@ fun TranslationScreen(
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Text(stringResource(R.string.screen_translate_action))
+            }
+
+            OutlinedButton(
+                onClick = onStartScreenOverlay,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(stringResource(R.string.screen_translate_overlay_action))
             }
 
             // Model loading indicator

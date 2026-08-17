@@ -73,6 +73,7 @@
     <string name="translation_in_progress">Translating...</string>
     <string name="translate_action">Translate</string>
     <string name="screen_translate_action">Translate screen</string>
+    <string name="screen_translate_overlay_action">Floating screen translation button</string>
     <string name="screen_capture_notification_title">Preparing screen translation</string>
     <string name="screen_capture_notification_text">Capturing one screen for offline translation</string>
     <string name="translation_model_loading">Loading translation model...</string>

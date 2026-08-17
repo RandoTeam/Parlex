@@ -5,6 +5,7 @@ import android.content.Intent
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -15,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.translive.app.i18n.AppLocale
 import com.translive.app.service.ScreenCaptureService
+import com.translive.app.service.ScreenTranslateOverlayService
 import com.translive.app.ui.theme.TransLiveTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -58,7 +60,8 @@ class MainActivity : ComponentActivity() {
                     incomingImageUri = incomingImageUri,
                     onIncomingTextConsumed = { incomingTranslationText = null },
                     onIncomingImageConsumed = { incomingImageUri = null },
-                    onRequestScreenCapture = ::requestScreenCapture
+                onRequestScreenCapture = ::requestScreenCapture
+                , onStartScreenOverlay = ::startScreenOverlay
                 )
             }
         }
@@ -71,6 +74,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyIncomingIntent(intent: Intent?) {
+        if (intent?.action == ScreenTranslateOverlayService.ACTION_REQUEST_SCREEN_CAPTURE) {
+            requestScreenCapture()
+            return
+        }
         if (intent?.action == ScreenCaptureService.ACTION_CAPTURE_COMPLETE) {
             incomingTranslationText = null
             incomingImageUri = intent.data
@@ -83,6 +90,14 @@ class MainActivity : ComponentActivity() {
     private fun requestScreenCapture() {
         val manager = getSystemService(MediaProjectionManager::class.java)
         screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
+    }
+
+    private fun startScreenOverlay() {
+        if (!Settings.canDrawOverlays(this)) {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+        ScreenTranslateOverlayService.start(this)
     }
 
     private fun extractIncomingTranslationText(intent: Intent?): String? {
