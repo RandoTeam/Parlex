@@ -41,6 +41,7 @@ import com.translive.app.ui.viewmodel.TranslationViewModel
 fun TranslationScreen(
     incomingText: String? = null,
     onIncomingTextConsumed: () -> Unit = {},
+    onRequestScreenCapture: () -> Unit = {},
     onNavigateToDialogue: () -> Unit,
     onNavigateToCamera: () -> Unit = {},
     onNavigateToHistory: () -> Unit,
@@ -220,6 +221,16 @@ fun TranslationScreen(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.translate_action))
                 }
+            }
+
+            OutlinedButton(
+                onClick = onRequestScreenCapture,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Text(stringResource(R.string.screen_translate_action))
             }
 
             // Model loading indicator

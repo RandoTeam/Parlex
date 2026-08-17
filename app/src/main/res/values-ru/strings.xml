@@ -72,6 +72,9 @@
     <string name="cd_voice_input">Голосовой ввод</string>
     <string name="translation_in_progress">Перевод...</string>
     <string name="translate_action">Перевести</string>
+    <string name="screen_translate_action">Перевести экран</string>
+    <string name="screen_capture_notification_title">Подготавливаю перевод экрана</string>
+    <string name="screen_capture_notification_text">Сохраняю один снимок для офлайн-перевода</string>
     <string name="translation_model_loading">Загрузка модели перевода...</string>
     <string name="auto_language_desc">Определять язык по введенному тексту</string>
     <string name="dialogue_phase_listening">Слушаю...</string>

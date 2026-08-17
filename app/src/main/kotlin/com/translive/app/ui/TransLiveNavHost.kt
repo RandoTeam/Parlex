@@ -14,7 +14,8 @@ fun TransLiveNavHost(
     incomingText: String? = null,
     incomingImageUri: Uri? = null,
     onIncomingTextConsumed: () -> Unit = {},
-    onIncomingImageConsumed: () -> Unit = {}
+    onIncomingImageConsumed: () -> Unit = {},
+    onRequestScreenCapture: () -> Unit = {}
 ) {
     val navController = rememberNavController()
 
@@ -49,6 +50,7 @@ fun TransLiveNavHost(
             TranslationScreen(
                 incomingText = incomingText,
                 onIncomingTextConsumed = onIncomingTextConsumed,
+                onRequestScreenCapture = onRequestScreenCapture,
                 onNavigateToDialogue = { navigateTo("dialogue") },
                 onNavigateToCamera = { navigateTo("camera") },
                 onNavigateToHistory = { navigateTo("history") },

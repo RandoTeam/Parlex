@@ -2,9 +2,11 @@ package com.translive.app.ui
 
 import android.content.Context
 import android.content.Intent
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
@@ -12,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.translive.app.i18n.AppLocale
+import com.translive.app.service.ScreenCaptureService
 import com.translive.app.ui.theme.TransLiveTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -20,6 +23,17 @@ class MainActivity : ComponentActivity() {
 
     private var incomingTranslationText by mutableStateOf<String?>(null)
     private var incomingImageUri by mutableStateOf<Uri?>(null)
+
+    private val screenCaptureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val resultData = result.data ?: return@registerForActivityResult
+        if (result.resultCode == RESULT_OK) {
+            startForegroundService(
+                ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData)
+            )
+        }
+    }
 
     override fun attachBaseContext(newBase: Context) {
         val prefs = newBase.getSharedPreferences("parlex_settings", Context.MODE_PRIVATE)
@@ -43,7 +57,8 @@ class MainActivity : ComponentActivity() {
                     incomingText = incomingTranslationText,
                     incomingImageUri = incomingImageUri,
                     onIncomingTextConsumed = { incomingTranslationText = null },
-                    onIncomingImageConsumed = { incomingImageUri = null }
+                    onIncomingImageConsumed = { incomingImageUri = null },
+                    onRequestScreenCapture = ::requestScreenCapture
                 )
             }
         }
@@ -56,8 +71,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyIncomingIntent(intent: Intent?) {
-        incomingTranslationText = extractIncomingTranslationText(intent)
-        incomingImageUri = extractIncomingImageUri(intent)
+        if (intent?.action == ScreenCaptureService.ACTION_CAPTURE_COMPLETE) {
+            incomingTranslationText = null
+            incomingImageUri = intent.data
+        } else {
+            incomingTranslationText = extractIncomingTranslationText(intent)
+            incomingImageUri = extractIncomingImageUri(intent)
+        }
+    }
+
+    private fun requestScreenCapture() {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
     }
 
     private fun extractIncomingTranslationText(intent: Intent?): String? {
