@@ -372,7 +372,12 @@ class CameraViewModel @Inject constructor(
             if (!status.supported) {
                 _uiState.update {
                     it.copy(
-                        isNmtPairSupported = false,
+                        // ML Kit is intentionally only the fast path.  The
+                        // remaining model languages must still be usable in
+                        // camera mode through the already-installed local
+                        // translation model (Quality mode), rather than being
+                        // reported as an impossible camera pair.
+                        isNmtPairSupported = true,
                         isNmtReady = false,
                         nmtError = texts.text(R.string.models_camera_unsupported_pair)
                     )
@@ -2021,6 +2026,19 @@ class CameraViewModel @Inject constructor(
     ): List<String> {
         val texts = lines.map { it.text }
         if (sourceLanguage.code == targetLanguage.code) return texts
+
+        // ML Kit does not expose every language in the translation model
+        // catalog (notably several Hy-MT dialect entries).  Keep those
+        // languages supported in the camera workflow by using the local main
+        // model as a deterministic fallback.  It is slower than ML Kit, so
+        // the UI still reports that the fast package is unavailable.
+        if (!cameraTranslateEngine.getPackageStatus(sourceLanguage.code, targetLanguage.code).supported) {
+            return if (translationEngine.isLoaded) {
+                translateCaptureLinesWithMainModel(lines, sourceLanguage, targetLanguage)
+            } else {
+                texts
+            }
+        }
 
         prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
         return if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
