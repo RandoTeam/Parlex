@@ -2,6 +2,7 @@ package com.translive.app.ui
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -18,6 +19,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class MainActivity : ComponentActivity() {
 
     private var incomingTranslationText by mutableStateOf<String?>(null)
+    private var incomingImageUri by mutableStateOf<Uri?>(null)
 
     override fun attachBaseContext(newBase: Context) {
         val prefs = newBase.getSharedPreferences("parlex_settings", Context.MODE_PRIVATE)
@@ -33,13 +35,15 @@ class MainActivity : ComponentActivity() {
         val languageCode = prefs.getString("app_language", AppLocale.SYSTEM) ?: AppLocale.SYSTEM
         AppLocale.applyRuntimeLanguage(this, languageCode)
         enableEdgeToEdge()
-        incomingTranslationText = extractIncomingTranslationText(intent)
+        applyIncomingIntent(intent)
 
         setContent {
             TransLiveTheme {
                 TransLiveNavHost(
                     incomingText = incomingTranslationText,
-                    onIncomingTextConsumed = { incomingTranslationText = null }
+                    incomingImageUri = incomingImageUri,
+                    onIncomingTextConsumed = { incomingTranslationText = null },
+                    onIncomingImageConsumed = { incomingImageUri = null }
                 )
             }
         }
@@ -48,7 +52,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        applyIncomingIntent(intent)
+    }
+
+    private fun applyIncomingIntent(intent: Intent?) {
         incomingTranslationText = extractIncomingTranslationText(intent)
+        incomingImageUri = extractIncomingImageUri(intent)
     }
 
     private fun extractIncomingTranslationText(intent: Intent?): String? {
@@ -59,4 +68,12 @@ class MainActivity : ComponentActivity() {
         }?.toString()?.trim()
         return text?.takeIf { it.isNotBlank() }
     }
+
+    @Suppress("DEPRECATION")
+    private fun extractIncomingImageUri(intent: Intent?): Uri? =
+        if (intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        } else {
+            null
+        }
 }

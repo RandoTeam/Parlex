@@ -1,5 +1,6 @@
 package com.translive.app.ui
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.navigation.compose.NavHost
@@ -11,13 +12,19 @@ import com.translive.app.ui.screens.*
 @Composable
 fun TransLiveNavHost(
     incomingText: String? = null,
-    onIncomingTextConsumed: () -> Unit = {}
+    incomingImageUri: Uri? = null,
+    onIncomingTextConsumed: () -> Unit = {},
+    onIncomingImageConsumed: () -> Unit = {}
 ) {
     val navController = rememberNavController()
 
-    LaunchedEffect(incomingText) {
-        if (!incomingText.isNullOrBlank()) {
-            navController.navigate("translate") {
+    LaunchedEffect(incomingText, incomingImageUri) {
+        when {
+            incomingImageUri != null -> navController.navigate("camera") {
+                popUpTo("translate") { inclusive = false }
+                launchSingleTop = true
+            }
+            !incomingText.isNullOrBlank() -> navController.navigate("translate") {
                 popUpTo("translate") { inclusive = false }
                 launchSingleTop = true
             }
@@ -60,6 +67,8 @@ fun TransLiveNavHost(
         }
         composable("camera") {
             CameraScreen(
+                incomingImageUri = incomingImageUri,
+                onIncomingImageConsumed = onIncomingImageConsumed,
                 onNavigateToTranslate = { navigateTo("translate") },
                 onNavigateToDialogue = { navigateTo("dialogue") },
                 onNavigateToHistory = { navigateTo("history") },

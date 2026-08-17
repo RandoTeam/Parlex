@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.RectF
+import android.net.Uri
 import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
@@ -330,6 +331,8 @@ private const val MAIN_CAMERA_FOCAL_LENGTH_MM = 4.2f
 @androidx.camera.core.ExperimentalGetImage
 @Composable
 fun CameraScreen(
+    incomingImageUri: Uri? = null,
+    onIncomingImageConsumed: () -> Unit = {},
     onNavigateToTranslate: () -> Unit = {},
     onNavigateToDialogue: () -> Unit = {},
     onNavigateToHistory: () -> Unit = {},
@@ -339,6 +342,12 @@ fun CameraScreen(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
+    LaunchedEffect(incomingImageUri) {
+        incomingImageUri?.let { uri ->
+            viewModel.captureGalleryImage(uri)
+            onIncomingImageConsumed()
+        }
+    }
     val isDebugBuild = remember(context) {
         (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
     }
