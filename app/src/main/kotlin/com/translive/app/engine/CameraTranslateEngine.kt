@@ -1,6 +1,7 @@
 package com.translive.app.engine
 
 import android.util.Log
+import com.translive.app.data.model.Language
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.common.model.RemoteModelManager
 import com.google.mlkit.nl.translate.TranslateLanguage
@@ -60,10 +61,20 @@ class CameraTranslateEngine @Inject constructor() {
     }
 
     /**
+     * One downloadable ML Kit model. Some catalog choices deliberately share a
+     * model: simplified/traditional Chinese and the two Chinese dialect entries
+     * all use the same on-device Chinese package.
+     */
+    data class LanguagePackage(
+        val modelLanguageCode: String,
+        val languages: List<Language>
+    )
+
+    /**
      * Map our Language codes to ML Kit TranslateLanguage codes.
      * ML Kit supports 59 languages — most of ours are covered.
      */
-    private fun toMlKitLang(code: String): String? {
+    fun toMlKitLang(code: String): String? {
         return when (code) {
             "en" -> TranslateLanguage.ENGLISH
             "zh", "zh-Hant" -> TranslateLanguage.CHINESE
@@ -104,6 +115,34 @@ class CameraTranslateEngine @Inject constructor() {
     }
 
     /**
+     * Lists the actual downloadable language models, not every source-target
+     * pair. Once two language packages are installed, ML Kit translates in
+     * either direction without another download.
+     */
+    fun availableLanguagePackages(): List<LanguagePackage> =
+        Language.allLanguages
+            .mapNotNull { language ->
+                toMlKitLang(language.code)?.let { modelCode -> modelCode to language }
+            }
+            .groupBy({ it.first }, { it.second })
+            .map { (modelCode, languages) -> LanguagePackage(modelCode, languages) }
+            .sortedBy { it.languages.first().displayName }
+
+    suspend fun downloadedLanguageCodes(): Set<String> {
+        val manager = RemoteModelManager.getInstance()
+        return suspendCancellableCoroutine { cont ->
+            manager.getDownloadedModels(TranslateRemoteModel::class.java)
+                .addOnSuccessListener { models ->
+                    if (cont.isActive) cont.resume(models.mapTo(mutableSetOf()) { it.language })
+                }
+                .addOnFailureListener {
+                    Log.w(TAG, "Cannot read installed ML Kit language packs", it)
+                    if (cont.isActive) cont.resume(emptySet())
+                }
+        }
+    }
+
+    /**
      * Returns the exact on-device packages needed for a camera language pair.
      * This is intentionally separate from activation: opening the camera must
      * never make an implicit network request.
@@ -116,15 +155,7 @@ class CameraTranslateEngine @Inject constructor() {
         }
 
         val required = linkedSetOf(source, target)
-        val manager = RemoteModelManager.getInstance()
-        val downloaded = suspendCancellableCoroutine<Set<TranslateRemoteModel>> { cont ->
-            manager.getDownloadedModels(TranslateRemoteModel::class.java)
-                .addOnSuccessListener { models -> if (cont.isActive) cont.resume(models) }
-                .addOnFailureListener {
-                    Log.w(TAG, "Cannot read installed ML Kit language packs", it)
-                    if (cont.isActive) cont.resume(emptySet())
-                }
-        }.mapTo(mutableSetOf()) { it.language }
+        val downloaded = downloadedLanguageCodes()
 
         return PackageStatus(
             supported = true,
@@ -161,6 +192,38 @@ class CameraTranslateEngine @Inject constructor() {
             activateDownloadedPair(sourceCode, targetCode)
         } catch (error: Throwable) {
             Log.e(TAG, "ML Kit language pack download failed", error)
+            false
+        } finally {
+            _isDownloading.value = false
+        }
+    }
+
+    /** Download one or more language packages selected in the Models screen. */
+    suspend fun downloadLanguagePackages(modelLanguageCodes: Collection<String>): Boolean {
+        val supportedCodes = TranslateLanguage.getAllLanguages().toSet()
+        val requested = modelLanguageCodes.filter { it in supportedCodes }.toSet()
+        if (requested.isEmpty()) return false
+
+        val missing = requested - downloadedLanguageCodes()
+        if (missing.isEmpty()) return true
+
+        _isDownloading.value = true
+        return try {
+            val manager = RemoteModelManager.getInstance()
+            val conditions = DownloadConditions.Builder().build()
+            missing.forEach { language ->
+                val model = TranslateRemoteModel.Builder(language).build()
+                suspendCancellableCoroutine<Unit> { cont ->
+                    manager.download(model, conditions)
+                        .addOnSuccessListener { if (cont.isActive) cont.resume(Unit) }
+                        .addOnFailureListener { error ->
+                            if (cont.isActive) cont.resumeWith(Result.failure(error))
+                        }
+                }
+            }
+            true
+        } catch (error: Throwable) {
+            Log.e(TAG, "ML Kit language package download failed", error)
             false
         } finally {
             _isDownloading.value = false

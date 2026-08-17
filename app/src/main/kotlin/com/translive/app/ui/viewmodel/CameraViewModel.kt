@@ -191,6 +191,7 @@ data class CameraUiState(
     /** ML Kit model download status */
     val isNmtReady: Boolean = false,
     val isNmtDownloading: Boolean = false,
+    val isNmtPairSupported: Boolean = true,
     val nmtError: String? = null,
     val qualityWarnings: List<CameraQualityWarning> = emptyList()
 ) {
@@ -341,8 +342,23 @@ class CameraViewModel @Inject constructor(
             if (state.isSourceAuto) {
                 _uiState.update {
                     it.copy(
+                        isNmtPairSupported = true,
                         isNmtReady = isNmtReadyForState(it, cameraTranslateEngine.isReady.value),
                         nmtError = null
+                    )
+                }
+                return@launch
+            }
+            val status = cameraTranslateEngine.getPackageStatus(
+                state.sourceLanguage.code,
+                state.targetLanguage.code
+            )
+            if (!status.supported) {
+                _uiState.update {
+                    it.copy(
+                        isNmtPairSupported = false,
+                        isNmtReady = false,
+                        nmtError = texts.text(R.string.models_camera_unsupported_pair)
                     )
                 }
                 return@launch
@@ -352,9 +368,32 @@ class CameraViewModel @Inject constructor(
                 state.targetLanguage.code
             )
             if (!ok) {
-                _uiState.update { it.copy(nmtError = texts.text(R.string.error_camera_translation_model_missing)) }
+                _uiState.update {
+                    it.copy(
+                        isNmtPairSupported = true,
+                        nmtError = texts.text(R.string.error_camera_translation_model_missing)
+                    )
+                }
             } else {
-                _uiState.update { it.copy(nmtError = null) }
+                _uiState.update { it.copy(isNmtPairSupported = true, nmtError = null) }
+            }
+        }
+    }
+
+    /** Explicit user action from the camera: no live frame may start a download. */
+    fun downloadCurrentCameraPackages() {
+        val state = _uiState.value
+        if (state.isSourceAuto || !state.isNmtPairSupported) return
+        viewModelScope.launch(Dispatchers.IO) {
+            val ok = cameraTranslateEngine.downloadAndActivate(
+                state.sourceLanguage.code,
+                state.targetLanguage.code
+            )
+            _uiState.update {
+                it.copy(
+                    isNmtReady = ok,
+                    nmtError = if (ok) null else texts.text(R.string.camera_pack_download_failed)
+                )
             }
         }
     }

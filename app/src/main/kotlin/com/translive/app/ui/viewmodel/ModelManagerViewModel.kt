@@ -80,6 +80,8 @@ data class ModelManagerUiState(
     val qwen3Progress: Float = 0f,
     val selectedSpeechModel: String = SettingsRepository.SPEECH_MODEL_WHISPER_TINY,
     val cameraPack: CameraTranslationPackUiState? = null,
+    val cameraLanguagePacks: List<CameraLanguagePackUiState> = emptyList(),
+    val cameraLanguagePacksExpanded: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null,
     /** Variant pending license confirmation before download */
@@ -96,6 +98,14 @@ data class CameraTranslationPackUiState(
     val isDownloading: Boolean = false,
     val requiredPackageCount: Int = 0,
     val downloadedPackageCount: Int = 0
+)
+
+/** One reusable ML Kit language model for fast camera translation. */
+data class CameraLanguagePackUiState(
+    val modelLanguageCode: String,
+    val languages: List<Language>,
+    val isDownloaded: Boolean,
+    val isDownloading: Boolean = false
 )
 
 @HiltViewModel
@@ -241,6 +251,15 @@ class ModelManagerViewModel @Inject constructor(
         val isAutoSource = settings.cameraSourceAuto
         viewModelScope.launch(Dispatchers.IO) {
             val status = cameraTranslateEngine.getPackageStatus(source.code, target.code)
+            val downloadedCodes = cameraTranslateEngine.downloadedLanguageCodes()
+            val languagePacks = cameraTranslateEngine.availableLanguagePackages().map { pack ->
+                CameraLanguagePackUiState(
+                    modelLanguageCode = pack.modelLanguageCode,
+                    languages = pack.languages,
+                    isDownloaded = pack.modelLanguageCode in downloadedCodes,
+                    isDownloading = cameraTranslateEngine.isDownloading.value
+                )
+            }
             _uiState.update {
                 it.copy(
                     cameraPack = CameraTranslationPackUiState(
@@ -254,7 +273,8 @@ class ModelManagerViewModel @Inject constructor(
                         downloadedPackageCount = status.downloadedLanguageCodes.count {
                             it in status.requiredLanguageCodes
                         }
-                    )
+                    ),
+                    cameraLanguagePacks = languagePacks
                 )
             }
         }
@@ -276,6 +296,32 @@ class ModelManagerViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(error = tr(R.string.camera_pack_download_failed))
                 }
+            }
+            refreshCameraTranslationPack()
+        }
+    }
+
+    fun toggleCameraLanguagePacks() {
+        _uiState.update { it.copy(cameraLanguagePacksExpanded = !it.cameraLanguagePacksExpanded) }
+    }
+
+    fun downloadCameraLanguagePack(modelLanguageCode: String) {
+        val pack = _uiState.value.cameraLanguagePacks.firstOrNull {
+            it.modelLanguageCode == modelLanguageCode
+        } ?: return
+        if (pack.isDownloaded || pack.isDownloading) return
+
+        _uiState.update { state ->
+            state.copy(
+                cameraLanguagePacks = state.cameraLanguagePacks.map {
+                    if (it.modelLanguageCode == modelLanguageCode) it.copy(isDownloading = true) else it
+                }
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val downloaded = cameraTranslateEngine.downloadLanguagePackages(listOf(modelLanguageCode))
+            if (!downloaded) {
+                _uiState.update { it.copy(error = tr(R.string.camera_pack_download_failed)) }
             }
             refreshCameraTranslationPack()
         }

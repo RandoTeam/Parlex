@@ -353,6 +353,18 @@ fun ModelManagerScreen(
                     )
                 }
             }
+
+            if (uiState.cameraLanguagePacks.isNotEmpty()) {
+                item(key = "camera_language_packs", contentType = "camera_language_packs") {
+                    CameraLanguagePacksGroup(
+                        packs = uiState.cameraLanguagePacks,
+                        expanded = uiState.cameraLanguagePacksExpanded,
+                        onToggle = viewModel::toggleCameraLanguagePacks,
+                        onDownload = viewModel::downloadCameraLanguagePack,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                    )
+                }
+            }
         }
     }
 
@@ -1072,6 +1084,94 @@ private fun CameraTranslationPackCard(
                         Icon(Icons.Filled.Download, null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(stringResource(R.string.models_camera_download_packages))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraLanguagePacksGroup(
+    packs: List<com.translive.app.ui.viewmodel.CameraLanguagePackUiState>,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onDownload: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val ready = packs.count { it.isDownloaded }
+    Card(
+        onClick = onToggle,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Icon(
+                    Icons.Filled.Translate,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.models_camera_all_language_packages),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = stringResource(
+                            R.string.models_camera_all_packages_progress,
+                            ready,
+                            packs.size
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = null
+                )
+            }
+
+            if (expanded) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = stringResource(R.string.models_camera_all_packages_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                packs.forEach { pack ->
+                    val label = pack.languages.joinToString(", ") { it.displayName }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f)
+                        )
+                        when {
+                            pack.isDownloaded -> Text(
+                                text = stringResource(R.string.model_ready),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            pack.isDownloading -> CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            else -> TextButton(onClick = { onDownload(pack.modelLanguageCode) }) {
+                                Icon(Icons.Filled.Download, null, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(stringResource(R.string.model_download))
+                            }
+                        }
                     }
                 }
             }

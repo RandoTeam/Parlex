@@ -109,7 +109,11 @@
     <string name="models_camera_package_progress">Offline packages: %1$d/%2$d ready</string>
     <string name="models_camera_downloading">Downloading camera language packages…</string>
     <string name="models_camera_download_packages">Download packages</string>
+    <string name="models_camera_all_language_packages">Fast camera language packages</string>
+    <string name="models_camera_all_packages_progress">%1$d/%2$d installed • one package works in both directions</string>
+    <string name="models_camera_all_packages_note">Download only the languages you use. Chinese variants share one Chinese package.</string>
     <string name="camera_open_model_packages">Open packages</string>
+    <string name="camera_download_current_packages">Download current packages</string>
     <string name="camera_pack_download_failed">Could not download camera language packages</string>
     <string name="model_license_title">%1$s license</string>
     <string name="model_license_message">Model %1$s is distributed under %2$s. By downloading, you accept these terms. Continue?</string>

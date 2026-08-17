@@ -530,15 +530,28 @@ fun CameraScreen(
                                         Text(uiState.nmtError ?: "", color = Color.White,
                                             style = MaterialTheme.typography.labelSmall)
                                     }
-                                    TextButton(
-                                        onClick = onNavigateToModels,
-                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
-                                    ) {
-                                        Text(
-                                            text = stringResource(R.string.camera_open_model_packages),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Color.White
-                                        )
+                                    if (uiState.isNmtPairSupported && !uiState.isSourceAuto) {
+                                        TextButton(
+                                            onClick = viewModel::downloadCurrentCameraPackages,
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.camera_download_current_packages),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.White
+                                            )
+                                        }
+                                    } else {
+                                        TextButton(
+                                            onClick = onNavigateToModels,
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+                                        ) {
+                                            Text(
+                                                text = stringResource(R.string.camera_open_model_packages),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.White
+                                            )
+                                        }
                                     }
                                 }
                             }
