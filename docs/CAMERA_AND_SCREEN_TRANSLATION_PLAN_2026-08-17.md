@@ -130,3 +130,8 @@
   and exact normalization metadata remain part of the package manifest.
 - Both models complete a zero-filled Float32 MNN CPU session. Android GPU
   validation is still required on the target device.
+
+The PP-OCRv6 tiny recognizer dictionary contract is fixed at 6,904 UTF-8
+characters, 27,156 bytes, SHA-256
+`c5cbe34ef40c29c4df07ed012bf96569cb69a2d2a01a07027e9f13cb832bd9cd`, one
+character per line with a final newline. The runtime rejects any mismatch.
