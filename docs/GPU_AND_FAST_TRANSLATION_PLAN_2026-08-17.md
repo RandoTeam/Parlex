@@ -41,6 +41,34 @@
 Acceptance: Adreno 830 behaviour remains unchanged; every other supported
 Adreno has a deterministic OpenCL attempt and recorded benchmark result.
 
+### Snapdragon / Adreno registry
+
+Each row is a separate native compatibility and benchmark profile. The model
+catalogue remains shared; only the packaged OpenCL target/profile and runtime
+parameters differ. OEM driver version is part of the profile key.
+
+| Snapdragon platforms | Adreno family | Profile intent |
+| --- | --- | --- |
+| 845, 850 | 630 | OpenCL 2.0 baseline; conservative memory/context and legacy-driver validation |
+| 855, 855+, 860 | 640 | OpenCL 2.x compatibility profile |
+| 865, 865+, 870 | 650 | OpenCL 2.x profile; full/partial offload benchmark |
+| 888, 888+ | 660 | OpenCL 2.x/3.0 driver validation, thermal-stability test |
+| 8 Gen 1, 8+ Gen 1 | 730 | OpenCL 3.0 Adreno profile |
+| 7+ Gen 2 | 725 | Midrange-premium OpenCL profile; memory-constrained benchmark |
+| 8 Gen 2 | 740 | OpenCL 3.0 profile; independently measure full versus partial offload |
+| 7+ Gen 3 | 732 | Midrange-premium OpenCL profile |
+| 8s Gen 3 | 735 | Midrange-premium OpenCL profile |
+| 8 Gen 3 | 750 | Dedicated OpenCL 3.0 profile; regression target because generic GPU offload can lose to CPU |
+| 7 Gen 4 and later 7-series Adreno 7xx | runtime-detected | Driver-keyed compatibility profile; no false flagship assumption |
+| 8s Gen 4 | 825 | Sliced-architecture compatibility profile; measured offload selection |
+| 8 Elite / SM8750 ("Gen 4" generation) | 830 | **Reference OnePlus 13 profile — frozen, no regression permitted** |
+| 8 Gen 5 | current A8x Adreno family | Driver/API-keyed profile; Qualcomm product brief uses the Adreno family name rather than a public numeric GPU ID |
+| 8 Elite Gen 5 / SM8850 | current A8x sliced Adreno family | Driver/API-keyed profile, OpenCL 3.0 and new sliced-architecture validation |
+
+The registry also covers Snapdragon 6/7/7+ devices by observed `gpu_model`,
+OpenCL API and driver version. A midrange device never inherits an 8-series
+memory/offload setting merely because its Android version is recent.
+
 ## Phase 2 — compact fast offline translation packages
 
 The target architecture is based on the functional separation researched in
