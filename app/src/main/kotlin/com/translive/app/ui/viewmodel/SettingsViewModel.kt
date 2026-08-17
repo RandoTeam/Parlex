@@ -94,6 +94,7 @@ class SettingsViewModel @Inject constructor(
         return when (variant.runtime) {
             ModelRuntime.LITERT_LM -> variant.supportsGpu
             ModelRuntime.GGUF -> true
+            ModelRuntime.OCR -> false
         }
     }
 

@@ -25,6 +25,7 @@ data class ModelVariant(
 
     val backendLabel: String
         get() = when {
+            runtime == ModelRuntime.OCR -> "OCR (MNN OpenCL / Vulkan)"
             runtime == ModelRuntime.GGUF -> "CPU / GPU (OpenCL)"
             supportsCpu && supportsGpu -> "CPU / GPU"
             supportsGpu -> "GPU only"
