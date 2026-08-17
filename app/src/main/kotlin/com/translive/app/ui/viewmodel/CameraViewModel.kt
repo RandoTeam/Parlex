@@ -658,19 +658,18 @@ class CameraViewModel @Inject constructor(
     }
 
     private suspend fun recognizeAutoLiveBitmap(bitmap: Bitmap): LiveOcrPass {
-        val primaryLanguage = lastAutoLiveSourceLanguage ?: Language.ENGLISH
-        val attempts = mutableListOf(recognizeCaptureAttempt(bitmap, primaryLanguage))
-        val primaryScore = attempts.first().score
-        val fallbackLanguage = when {
-            primaryScore.isStrongForExpectedScript -> null
-            expectedScriptForLanguage(primaryLanguage.code) == OcrTextScript.LATIN -> Language.RUSSIAN
-            primaryLanguage == Language.RUSSIAN -> Language.ENGLISH
-            else -> Language.ENGLISH
-        }
-
-        if (fallbackLanguage != null && fallbackLanguage != primaryLanguage) {
-            attempts += recognizeCaptureAttempt(bitmap, fallbackLanguage)
-        }
+        val preferred = lastAutoLiveSourceLanguage
+        val candidates = autoCaptureOcrCandidates()
+            .let { available ->
+                if (preferred != null) listOf(preferred) + available.filter { it != preferred }
+                else available
+            }
+            // Live mode is latency-sensitive. One pass per recognizer family
+            // is enough; still-photo mode keeps the complete candidate list.
+            .distinctBy(::autoOcrBackendKey)
+            .take(3)
+            .ifEmpty { listOf(preferred ?: Language.ENGLISH) }
+        val attempts = candidates.map { recognizeCaptureAttempt(bitmap, it) }
 
         val selectedAttempt = selectAutoOcrAttempt(attempts)
         val detectedLanguage = detectSourceLanguageFromText(
@@ -1296,6 +1295,9 @@ class CameraViewModel @Inject constructor(
         val allowedModelCodes = allowedLanguages.mapNotNull { language ->
             cameraTranslateEngine.toMlKitLang(language.code)
         }.toSet()
+        // If the local main model is loaded, languages without an ML Kit
+        // package are valid camera sources through the quality fallback.
+        if (translationEngine.isLoaded) return detected.takeIf { it in Language.allLanguages } ?: fallback
         return when {
             cameraTranslateEngine.toMlKitLang(detected.code) in allowedModelCodes -> detected
             cameraTranslateEngine.toMlKitLang(fallback.code) in allowedModelCodes -> fallback
