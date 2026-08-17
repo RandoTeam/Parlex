@@ -38,6 +38,7 @@ if(EXISTS "${LLAMA_CPP_DIR}/CMakeLists.txt")
     # Our JNI bridge library
     add_library(translive SHARED
         translive_jni.cpp
+        ocr_mnn_jni.cpp
     )
 
     target_include_directories(translive PRIVATE
@@ -56,6 +57,7 @@ else()
     message(WARNING "llama.cpp not found at ${LLAMA_CPP_DIR}. Building stub.")
     add_library(translive SHARED
         translive_jni_stub.cpp
+        ocr_mnn_jni.cpp
     )
     target_link_libraries(translive android log)
 endif()
