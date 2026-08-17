@@ -33,9 +33,20 @@ class OcrMnnRuntime @Inject constructor() {
         Capability(false, "unavailable", "MNN OCR native library is not packaged")
     }
 
+    /** Backend selector: 0 CPU, 1 OpenCL, 2 Vulkan. Returns 0 on failure. */
+    fun loadModel(path: String, backend: Int): Long = runCatching {
+        nativeLoadModel(path, backend)
+    }.getOrDefault(0L)
+
+    fun releaseModel(handle: Long) {
+        if (handle != 0L) runCatching { nativeReleaseModel(handle) }
+    }
+
     private external fun nativeIsAvailable(): Boolean
     private external fun nativeBackendName(): String
     private external fun nativeDiagnostics(): String
+    private external fun nativeLoadModel(path: String, backend: Int): Long
+    private external fun nativeReleaseModel(handle: Long)
 
     companion object {
         private const val TAG = "OcrMnnRuntime"
