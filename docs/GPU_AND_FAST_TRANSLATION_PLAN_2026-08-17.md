@@ -69,7 +69,14 @@ operation. It applies to all product surfaces:
 
 ## Phase 3 — LLM improve action and visual transition
 
-1. Add translation policy setting: Fast; Fast + improve manually; LLM only.
+1. Add one app-wide translation policy setting with three equal modes:
+   - **Fast** — only the compact offline NMT package;
+   - **Fast + improve manually** — show compact NMT output immediately and
+     expose the magic-wand action;
+   - **LLM immediately** — skip the fast result and translate directly with
+     the selected local LLM.
+   The setting applies consistently to text, dialogue, camera/photo and
+   screen translation. It is not merely an "Improve" button preference.
 2. Fast + improve preserves source, languages and fast output. The LLM prompt
    revises semantics, terminology and naturalness rather than blindly
    retranslating a detached string.
