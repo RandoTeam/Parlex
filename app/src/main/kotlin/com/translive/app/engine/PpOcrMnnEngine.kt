@@ -65,7 +65,12 @@ class PpOcrMnnEngine @Inject constructor(
                     val shape = runtime.outputShape(recognizerHandle) ?: return@mapNotNull null
                     val time = if (shape.size >= 3) shape[shape.size - 2] else shape.firstOrNull() ?: 0
                     val classes = shape.lastOrNull() ?: 0
-                    if (time <= 0 || classes <= 1) return@mapNotNull null
+                    // CTC class 0 is blank; every remaining class must have a
+                    // dictionary entry. Never silently truncate an incompatible
+                    // language package and return plausible-looking garbage.
+                    if (time <= 0 || classes <= 1 || classes != dictionary.size + 1) {
+                        return@mapNotNull null
+                    }
                     val (text, score) = PpOcrPostProcessor.decodeCtc(
                         logits, time, classes, dictionary, config.recognizerThreshold
                     )
