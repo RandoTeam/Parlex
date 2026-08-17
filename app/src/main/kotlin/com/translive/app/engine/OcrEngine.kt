@@ -79,7 +79,8 @@ private enum class OcrBackend {
  */
 @Singleton
 class OcrEngine @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val ppOcrMnnEngine: PpOcrMnnEngine
 ) {
     companion object {
         private const val TAG = "OcrEngine"
@@ -162,6 +163,23 @@ class OcrEngine @Inject constructor(
         }
 
     suspend fun recognize(bitmap: Bitmap, sourceLanguageCode: String = "en"): OcrResult {
+        // Prefer the validated PP-OCR/MNN package when it has been imported or
+        // downloaded. This path is capability-gated and falls back to the
+        // existing recognizers if the package is absent or incompatible.
+        val ppOcrRoot = File(context.filesDir, "ocr/${PpOcrPackage.ID}")
+        val ppOcrValidation = PpOcrPackage.validate(ppOcrRoot)
+        if (ppOcrValidation.valid) {
+            val ppOcrResult = ppOcrMnnEngine.recognize(
+                bitmap = bitmap,
+                detectorPath = File(ppOcrRoot, PpOcrPackage.detector.fileName).absolutePath,
+                recognizerPath = File(ppOcrRoot, PpOcrPackage.recognizer.fileName).absolutePath,
+                dictionary = PpOcrDictionary.readValidated(
+                    File(ppOcrRoot, PpOcrPackage.dictionary.fileName)
+                ).orEmpty(),
+                config = PpOcrMnnEngine.Config(backend = 1)
+            )
+            if (ppOcrResult.blocks.isNotEmpty()) return ppOcrResult
+        }
         val backend = backendFor(sourceLanguageCode)
         val qualityStartedAt = SystemClock.elapsedRealtime()
         val quality = analyzeFrameQuality(bitmap)
