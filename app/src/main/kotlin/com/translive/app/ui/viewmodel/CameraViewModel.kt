@@ -377,7 +377,7 @@ class CameraViewModel @Inject constructor(
                         // camera mode through the already-installed local
                         // translation model (Quality mode), rather than being
                         // reported as an impossible camera pair.
-                        isNmtPairSupported = true,
+                        isNmtPairSupported = false,
                         isNmtReady = false,
                         nmtError = texts.text(R.string.models_camera_unsupported_pair)
                     )
