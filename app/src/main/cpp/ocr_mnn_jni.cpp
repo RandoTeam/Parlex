@@ -129,3 +129,21 @@ Java_com_translive_app_engine_OcrMnnRuntime_nativeRunFloat(
     return nullptr;
 #endif
 }
+
+extern "C" JNIEXPORT jintArray JNICALL
+Java_com_translive_app_engine_OcrMnnRuntime_nativeOutputShape(
+        JNIEnv *env, jobject, jlong handle) {
+#ifdef PARLEX_MNN_LINKED
+    auto* holder = reinterpret_cast<OcrMnnSession*>(handle);
+    if (holder == nullptr || holder->interpreter == nullptr || holder->session == nullptr) return nullptr;
+    auto* output = holder->interpreter->getSessionOutput(holder->session, nullptr);
+    if (output == nullptr) return nullptr;
+    const auto& dims = output->shape();
+    jintArray result = env->NewIntArray(static_cast<jsize>(dims.size()));
+    if (!dims.empty()) env->SetIntArrayRegion(result, 0, static_cast<jsize>(dims.size()), dims.data());
+    return result;
+#else
+    (void) env; (void) handle;
+    return nullptr;
+#endif
+}

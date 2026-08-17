@@ -46,12 +46,17 @@ class OcrMnnRuntime @Inject constructor() {
         nativeRunFloat(handle, input, shape)
     }.getOrNull()
 
+    fun outputShape(handle: Long): IntArray? = runCatching {
+        nativeOutputShape(handle)
+    }.getOrNull()
+
     private external fun nativeIsAvailable(): Boolean
     private external fun nativeBackendName(): String
     private external fun nativeDiagnostics(): String
     private external fun nativeLoadModel(path: String, backend: Int): Long
     private external fun nativeReleaseModel(handle: Long)
     private external fun nativeRunFloat(handle: Long, input: FloatArray, shape: IntArray): FloatArray?
+    private external fun nativeOutputShape(handle: Long): IntArray?
 
     companion object {
         private const val TAG = "OcrMnnRuntime"
