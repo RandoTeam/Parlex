@@ -24,6 +24,7 @@ import com.translive.app.engine.OcrResult
 import com.translive.app.engine.OcrEngine
 import com.translive.app.engine.SystemTtsEngine
 import com.translive.app.engine.TranslationEngine
+import com.translive.app.engine.camera.*
 import com.translive.app.i18n.LocalizedTextProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -198,7 +199,10 @@ data class CameraUiState(
     val isNmtDownloading: Boolean = false,
     val isNmtPairSupported: Boolean = true,
     val nmtError: String? = null,
-    val qualityWarnings: List<CameraQualityWarning> = emptyList()
+    val qualityWarnings: List<CameraQualityWarning> = emptyList(),
+    val bilingualParagraphs: List<BilingualParagraph> = emptyList(),
+    val selectedParagraph: BilingualParagraph? = null,
+    val isSpeaking: Boolean = false
 ) {
     val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
 }
@@ -354,7 +358,10 @@ class CameraViewModel @Inject constructor(
                 imageHeight = 0,
                 detectedSourceLanguage = null,
                 detectedSourceLanguages = emptyList(),
-                qualityWarnings = emptyList()
+                qualityWarnings = emptyList(),
+                bilingualParagraphs = emptyList(),
+                selectedParagraph = null,
+                isSpeaking = false
             )
         }
     }
@@ -1143,6 +1150,25 @@ class CameraViewModel @Inject constructor(
                 translatedParts
             )
 
+            val bilingualList = captureBlocks.mapIndexed { idx, block ->
+                val blockLines = block.lines
+                val blockBox = unionPaintLineBox(blockLines) ?: Rect()
+                val blockSourceText = blockLines.joinToString("\n") { it.text }
+                val blockTranslatedText = blockLines.map { line ->
+                    val globalIdx = allLines.indexOf(line)
+                    if (globalIdx in translatedParts.indices) translatedParts[globalIdx] else line.text
+                }.joinToString("\n")
+                BilingualParagraph(
+                    id = "para_$idx",
+                    sourceText = blockSourceText,
+                    translatedText = blockTranslatedText,
+                    boundingBox = blockBox,
+                    sourceLanguage = effectiveSourceLanguage,
+                    targetLanguage = targetLanguage,
+                    background = ColorSamplingAndLuminance.sampleBoxBackgroundAndContrast(bitmap, blockBox)
+                )
+            }
+
             _uiState.update {
                 it.copy(
                     paintedBitmap = painted,
@@ -1150,7 +1176,8 @@ class CameraViewModel @Inject constructor(
                     captureMessage = null,
                     detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
                     detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
-                    qualityWarnings = finalQualityWarnings
+                    qualityWarnings = finalQualityWarnings,
+                    bilingualParagraphs = bilingualList
                 )
             }
         } catch (e: Exception) {
@@ -1161,10 +1188,25 @@ class CameraViewModel @Inject constructor(
                     captureMessage = texts.text(R.string.camera_capture_processing_error),
                     detectedSourceLanguage = null,
                     detectedSourceLanguages = emptyList(),
-                    qualityWarnings = emptyList()
+                    qualityWarnings = emptyList(),
+                    bilingualParagraphs = emptyList()
                 )
             }
         }
+    }
+
+    fun selectParagraph(paragraph: BilingualParagraph?) {
+        _uiState.update { it.copy(selectedParagraph = paragraph) }
+    }
+
+    fun speakText(text: String, langCode: String) {
+        _uiState.update { it.copy(isSpeaking = true) }
+        systemTts.speak(text, langCode)
+    }
+
+    fun stopSpeech() {
+        _uiState.update { it.copy(isSpeaking = false) }
+        systemTts.stop()
     }
 
     private suspend fun recognizeCaptureBitmap(

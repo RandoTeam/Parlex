@@ -32,10 +32,13 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -61,9 +64,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -73,7 +77,9 @@ import androidx.compose.ui.zIndex
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
+import com.translive.app.engine.camera.BilingualParagraph
 import com.translive.app.ui.components.AppBottomNavigation
+import com.translive.app.ui.components.BilingualInspectBottomSheet
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.viewmodel.CameraMode
@@ -571,7 +577,13 @@ fun CameraScreen(
                     }
                     CameraMode.CAPTURE -> {
                         CaptureImageView(
-                            bitmap = uiState.paintedBitmap
+                            bitmap = uiState.paintedBitmap,
+                            paragraphs = uiState.bilingualParagraphs,
+                            selectedParagraph = uiState.selectedParagraph,
+                            onSelectParagraph = viewModel::selectParagraph,
+                            isSpeaking = uiState.isSpeaking,
+                            onSpeakText = viewModel::speakText,
+                            onStopSpeech = viewModel::stopSpeech
                         )
                         CameraCaptureStatusBadge(
                             status = uiState.captureStatus,
@@ -1523,36 +1535,257 @@ private fun overlayRect(
     )
 }
 
-/** Display the painted bitmap (with translations baked in) with pinch-to-zoom. */
+/** Display the painted bitmap with pinch-to-zoom, interactive paragraph tap, and side-by-side drawer. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CaptureImageView(bitmap: android.graphics.Bitmap?) {
+private fun CaptureImageView(
+    bitmap: android.graphics.Bitmap?,
+    paragraphs: List<BilingualParagraph>,
+    selectedParagraph: BilingualParagraph?,
+    onSelectParagraph: (BilingualParagraph?) -> Unit,
+    isSpeaking: Boolean,
+    onSpeakText: (String, String) -> Unit,
+    onStopSpeech: () -> Unit
+) {
     if (bitmap == null) return
 
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
+    var showSideBySideDrawer by remember { mutableStateOf(false) }
 
     val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
 
-    Image(
-        bitmap = imageBitmap,
-        contentDescription = "Captured translation",
-        contentScale = ContentScale.Fit,
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(0.5f, 5f)
-                    offsetX += pan.x
-                    offsetY += pan.y
+    ) {
+        val containerWidth = constraints.maxWidth.toFloat()
+        val containerHeight = constraints.maxHeight.toFloat()
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        scale = (scale * zoom).coerceIn(1f, 5f)
+                        val maxOffsetX = (containerWidth * (scale - 1f)) / 2f
+                        val maxOffsetY = (containerHeight * (scale - 1f)) / 2f
+                        offsetX = (offsetX + pan.x).coerceIn(-maxOffsetX, maxOffsetX)
+                        offsetY = (offsetY + pan.y).coerceIn(-maxOffsetY, maxOffsetY)
+                    }
+                }
+                .pointerInput(paragraphs, scale, offsetX, offsetY) {
+                    detectTapGestures { tapOffset ->
+                        val hit = findTappedParagraph(
+                            tapOffset = tapOffset,
+                            paragraphs = paragraphs,
+                            bitmapWidth = bitmap.width,
+                            bitmapHeight = bitmap.height,
+                            containerWidth = containerWidth,
+                            containerHeight = containerHeight,
+                            scale = scale,
+                            offsetX = offsetX,
+                            offsetY = offsetY
+                        )
+                        onSelectParagraph(hit)
+                    }
+                }
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offsetX
+                    translationY = offsetY
+                }
+        ) {
+            Image(
+                bitmap = imageBitmap,
+                contentDescription = "Captured translation",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+
+            // Selection highlight
+            if (selectedParagraph != null) {
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val rect = mapBitmapRectToScreen(
+                        box = selectedParagraph.boundingBox,
+                        bitmapWidth = bitmap.width,
+                        bitmapHeight = bitmap.height,
+                        containerWidth = containerWidth,
+                        containerHeight = containerHeight
+                    )
+                    drawRoundRect(
+                        color = Color(0xFF4CAF50).copy(alpha = 0.9f),
+                        topLeft = Offset(rect.left - 4f, rect.top - 2f),
+                        size = Size(rect.width() + 8f, rect.height() + 4f),
+                        cornerRadius = CornerRadius(8f),
+                        style = Stroke(width = 3.5f)
+                    )
                 }
             }
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationX = offsetX
-                translationY = offsetY
+        }
+
+        // Side-by-side reading button at top right
+        if (paragraphs.isNotEmpty()) {
+            FilledTonalButton(
+                onClick = { showSideBySideDrawer = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, end = 12.dp)
+                    .zIndex(10f),
+                colors = ButtonDefaults.filledTonalButtonColors(
+                    containerColor = Color.Black.copy(alpha = 0.65f),
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(20.dp),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Icon(Icons.Filled.MenuBook, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Построчно", style = MaterialTheme.typography.labelMedium)
             }
+        }
+    }
+
+    // Modal Bottom Sheet for single tapped paragraph
+    if (selectedParagraph != null) {
+        BilingualInspectBottomSheet(
+            paragraph = selectedParagraph,
+            isSpeaking = isSpeaking,
+            onSpeak = onSpeakText,
+            onStopSpeech = onStopSpeech,
+            onDismiss = { onSelectParagraph(null) }
+        )
+    }
+
+    // Side-by-Side Reading Sheet
+    if (showSideBySideDrawer) {
+        ModalBottomSheet(
+            onDismissRequest = { showSideBySideDrawer = false },
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(0.85f)
+                    .padding(horizontal = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Построчный перевод",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(onClick = { showSideBySideDrawer = false }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+                HorizontalDivider()
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 12.dp, bottom = 24.dp)
+                ) {
+                    items(paragraphs) { p ->
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (p.id == selectedParagraph?.id)
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                else
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSelectParagraph(p)
+                                    showSideBySideDrawer = false
+                                }
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = p.sourceText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (p.translatedText.isNotBlank()) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = p.translatedText,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun findTappedParagraph(
+    tapOffset: Offset,
+    paragraphs: List<BilingualParagraph>,
+    bitmapWidth: Int,
+    bitmapHeight: Int,
+    containerWidth: Float,
+    containerHeight: Float,
+    scale: Float,
+    offsetX: Float,
+    offsetY: Float
+): BilingualParagraph? {
+    if (bitmapWidth <= 0 || bitmapHeight <= 0 || containerWidth <= 0 || containerHeight <= 0) return null
+
+    val unscaledX = (tapOffset.x - containerWidth / 2f - offsetX) / scale + containerWidth / 2f
+    val unscaledY = (tapOffset.y - containerHeight / 2f - offsetY) / scale + containerHeight / 2f
+
+    val scaleFit = minOf(containerWidth / bitmapWidth, containerHeight / bitmapHeight)
+    val displayedW = bitmapWidth * scaleFit
+    val displayedH = bitmapHeight * scaleFit
+    val padX = (containerWidth - displayedW) / 2f
+    val padY = (containerHeight - displayedH) / 2f
+
+    val bitmapX = ((unscaledX - padX) / scaleFit).toInt()
+    val bitmapY = ((unscaledY - padY) / scaleFit).toInt()
+
+    return paragraphs.firstOrNull { p ->
+        val expanded = android.graphics.Rect(
+            p.boundingBox.left - 12,
+            p.boundingBox.top - 12,
+            p.boundingBox.right + 12,
+            p.boundingBox.bottom + 12
+        )
+        expanded.contains(bitmapX, bitmapY)
+    }
+}
+
+private fun mapBitmapRectToScreen(
+    box: android.graphics.Rect,
+    bitmapWidth: Int,
+    bitmapHeight: Int,
+    containerWidth: Float,
+    containerHeight: Float
+): RectF {
+    val scaleFit = minOf(containerWidth / bitmapWidth, containerHeight / bitmapHeight)
+    val padX = (containerWidth - bitmapWidth * scaleFit) / 2f
+    val padY = (containerHeight - bitmapHeight * scaleFit) / 2f
+
+    return RectF(
+        box.left * scaleFit + padX,
+        box.top * scaleFit + padY,
+        box.right * scaleFit + padX,
+        box.bottom * scaleFit + padY
     )
 }
