@@ -36,10 +36,12 @@ class ScreenCaptureService : Service() {
     private var projection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private var fromOverlay: Boolean = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE) ?: Int.MIN_VALUE
         val resultData = intent?.parcelableIntent(EXTRA_RESULT_DATA) ?: return stopWithFailure()
+        fromOverlay = intent?.getBooleanExtra(EXTRA_FROM_OVERLAY, false) ?: false
         if (resultCode != Activity.RESULT_OK) return stopWithFailure()
 
         ensureChannel()
@@ -98,11 +100,18 @@ class ScreenCaptureService : Service() {
                 check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
             }
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-            val openApp = Intent(this, MainActivity::class.java)
-                .setAction(ACTION_CAPTURE_COMPLETE)
-                .setData(uri)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(openApp)
+            if (fromOverlay) {
+                val overlayIntent = Intent(this, ScreenTranslateOverlayService::class.java)
+                    .setAction(ScreenTranslateOverlayService.ACTION_SHOW_TRANSLATION)
+                    .setData(uri)
+                androidx.core.content.ContextCompat.startForegroundService(this, overlayIntent)
+            } else {
+                val openApp = Intent(this, MainActivity::class.java)
+                    .setAction(ACTION_CAPTURE_COMPLETE)
+                    .setData(uri)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                startActivity(openApp)
+            }
         } catch (_: Exception) {
             // The foreground notification disappears; the app remains usable if capture fails.
         } finally {
@@ -169,16 +178,18 @@ class ScreenCaptureService : Service() {
 
     companion object {
         const val ACTION_CAPTURE_COMPLETE = "com.translive.app.action.SCREEN_CAPTURE_COMPLETE"
+        const val EXTRA_FROM_OVERLAY = "from_overlay"
         private const val EXTRA_RESULT_CODE = "result_code"
         private const val EXTRA_RESULT_DATA = "result_data"
         private const val CHANNEL_ID = "screen_capture"
         private const val NOTIFICATION_ID = 7101
         private const val CAPTURE_TIMEOUT_MS = 5_000L
 
-        fun newCaptureIntent(context: Context, resultCode: Int, resultData: Intent) =
+        fun newCaptureIntent(context: Context, resultCode: Int, resultData: Intent, fromOverlay: Boolean = false) =
             Intent(context, ScreenCaptureService::class.java)
                 .putExtra(EXTRA_RESULT_CODE, resultCode)
                 .putExtra(EXTRA_RESULT_DATA, resultData)
+                .putExtra(EXTRA_FROM_OVERLAY, fromOverlay)
 
         @Suppress("DEPRECATION")
         private fun Intent.parcelableIntent(key: String): Intent? =

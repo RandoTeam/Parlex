@@ -224,4 +224,15 @@
     <string name="settings_tts_engine_value">Android System TTS</string>
     <string name="stt_combined_description">Silero VAD (2 MB) + Whisper Tiny (40 MB)</string>
     <string name="stt_qwen3_description">Quality offline ASR. CPU mode; download is about 0.88 GB and language is checked before translation.</string>
+    <string name="screen_overlay_channel_name">Screen translation overlay</string>
+    <string name="screen_overlay_notification_title">Parlex screen translation</string>
+    <string name="screen_overlay_notification_text">Floating translation button is active</string>
+    <string name="screen_overlay_menu_translate">Translate screen</string>
+    <string name="screen_overlay_menu_close">Close button</string>
+    <string name="screen_overlay_copy_action">Copy</string>
+    <string name="screen_overlay_open_app_action">Open in app</string>
+    <string name="screen_overlay_close_action">Close</string>
+    <string name="screen_overlay_copied">Copied to clipboard</string>
+    <string name="screen_overlay_processing">Translating screen…</string>
+    <string name="screen_overlay_no_text">No text found on screen</string>
 </resources>

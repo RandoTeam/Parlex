@@ -25,15 +25,21 @@ class MainActivity : ComponentActivity() {
 
     private var incomingTranslationText by mutableStateOf<String?>(null)
     private var incomingImageUri by mutableStateOf<Uri?>(null)
+    private var isOverlayCaptureRequest: Boolean = false
 
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val resultData = result.data ?: return@registerForActivityResult
         if (result.resultCode == RESULT_OK) {
+            val fromOverlay = isOverlayCaptureRequest
+            isOverlayCaptureRequest = false
             startForegroundService(
-                ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData)
+                ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData, fromOverlay)
             )
+            if (fromOverlay) {
+                moveTaskToBack(true)
+            }
         }
     }
 
@@ -75,6 +81,7 @@ class MainActivity : ComponentActivity() {
 
     private fun applyIncomingIntent(intent: Intent?) {
         if (intent?.action == ScreenTranslateOverlayService.ACTION_REQUEST_SCREEN_CAPTURE) {
+            isOverlayCaptureRequest = true
             requestScreenCapture()
             return
         }

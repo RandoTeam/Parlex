@@ -224,4 +224,15 @@
     <string name="camera_translation_mode_quality">Качество</string>
     <string name="camera_translation_mode_quality_note">Сделайте фото для качественного перевода выбранной основной моделью.</string>
     <string name="camera_pack_download_failed">Не удалось скачать языковые пакеты камеры</string>
+    <string name="screen_overlay_channel_name">Оверлей перевода экрана</string>
+    <string name="screen_overlay_notification_title">Перевод экрана Parlex</string>
+    <string name="screen_overlay_notification_text">Плавающая кнопка перевода активна</string>
+    <string name="screen_overlay_menu_translate">Перевести экран</string>
+    <string name="screen_overlay_menu_close">Закрыть кнопку</string>
+    <string name="screen_overlay_copy_action">Копировать</string>
+    <string name="screen_overlay_open_app_action">Открыть в приложении</string>
+    <string name="screen_overlay_close_action">Закрыть</string>
+    <string name="screen_overlay_copied">Скопировано в буфер обмена</string>
+    <string name="screen_overlay_processing">Перевожу экран…</string>
+    <string name="screen_overlay_no_text">Текст на экране не найден</string>
 </resources>
