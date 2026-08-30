@@ -25,7 +25,9 @@ data class DialogueUiMessage(
     val sourceText: String,
     val translatedText: String,
     val sourceLang: String,  // "ru" or "en"
-    val targetLang: String
+    val targetLang: String,
+    val sourceTransliteration: String? = null,
+    val targetTransliteration: String? = null
 )
 
 enum class DialoguePhase {
@@ -54,6 +56,7 @@ data class DialogueUiState(
 class DialogueViewModel @Inject constructor(
     private val app: Application,
     private val fastTranslateEngine: FastTranslateEngine,
+    private val transliterationEngine: TransliterationEngine,
     private val engine: TranslationEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
     private val modelRepository: ModelRepository,
@@ -339,11 +342,16 @@ class DialogueViewModel @Inject constructor(
                     target = toLang
                 ).trim()
 
+                val srcTrans = if (settings.showTransliteration) transliterationEngine.transliterate(result.text, fromLang) else null
+                val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(translated, toLang) else null
+
                 val uiMessage = DialogueUiMessage(
                     sourceText = result.text,
                     translatedText = translated,
                     sourceLang = fromLang.code,
-                    targetLang = toLang.code
+                    targetLang = toLang.code,
+                    sourceTransliteration = srcTrans,
+                    targetTransliteration = tgtTrans
                 )
 
                 _uiState.update {
@@ -385,6 +393,8 @@ class DialogueViewModel @Inject constructor(
             }
         }
     }
+
+    fun shouldShowTransliteration(): Boolean = settings.showTransliteration
 
     fun speakMessage(text: String, langCode: String) {
         systemTts.speak(text, langCode)

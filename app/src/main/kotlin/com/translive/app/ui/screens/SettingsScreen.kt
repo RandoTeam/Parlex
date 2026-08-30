@@ -47,6 +47,7 @@ fun SettingsScreen(
     val backend by viewModel.backend.collectAsState()
     val hideKeyboardOnTextTranslate by viewModel.hideKeyboardOnTextTranslate.collectAsState()
     val showTechnicalTranslationStats by viewModel.showTechnicalTranslationStats.collectAsState()
+    val showTransliteration by viewModel.showTransliteration.collectAsState()
     val translationPolicy by viewModel.translationPolicy.collectAsState()
     val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
 
@@ -336,6 +337,27 @@ fun SettingsScreen(
                     Switch(
                         checked = hideKeyboardOnTextTranslate,
                         onCheckedChange = viewModel::setHideKeyboardOnTextTranslate
+                    )
+                }
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Транслитерация (романизация)", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Показывать латинскую транслитерацию для нелатинских языков",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = showTransliteration,
+                        onCheckedChange = viewModel::setShowTransliteration
                     )
                 }
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))

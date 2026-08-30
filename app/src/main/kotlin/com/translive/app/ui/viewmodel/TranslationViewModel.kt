@@ -15,6 +15,7 @@ import com.translive.app.data.model.TranslationEntry
 import com.translive.app.engine.LanguageDetectionEngine
 import com.translive.app.engine.LiteRtTranslationEngine
 import com.translive.app.engine.FastTranslateEngine
+import com.translive.app.engine.TransliterationEngine
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.engine.SystemTtsEngine
 import com.translive.app.i18n.LocalizedTextProvider
@@ -50,7 +51,9 @@ data class TranslationUiState(
     val canImproveWithLlm: Boolean = false,
     val isImprovingWithLlm: Boolean = false,
     val fastTranslationText: String = "",
-    val fastNmtMissing: Boolean = false
+    val fastNmtMissing: Boolean = false,
+    val sourceTransliteration: String? = null,
+    val targetTransliteration: String? = null
 )
 
 @HiltViewModel
@@ -60,6 +63,7 @@ class TranslationViewModel @Inject constructor(
     private val languageDetectionEngine: LanguageDetectionEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
     private val fastTranslateEngine: FastTranslateEngine,
+    private val transliterationEngine: TransliterationEngine,
     private val translationDao: TranslationDao,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
@@ -157,7 +161,8 @@ class TranslationViewModel @Inject constructor(
     }
 
     fun setSourceText(text: String) {
-        _uiState.update { it.copy(sourceText = text) }
+        val srcTrans = if (settings.showTransliteration) transliterationEngine.transliterate(text, _uiState.value.sourceLanguage) else null
+        _uiState.update { it.copy(sourceText = text, sourceTransliteration = srcTrans) }
         savedStateHandle["sourceText"] = text
         scheduleSourceLanguageDetection(text)
     }
@@ -166,10 +171,14 @@ class TranslationViewModel @Inject constructor(
 
     fun shouldShowTechnicalTranslationStats(): Boolean = settings.showTechnicalTranslationStats
 
+    fun shouldShowTransliteration(): Boolean = settings.showTransliteration
+
     fun setSourceLanguage(lang: Language) {
+        val srcTrans = if (settings.showTransliteration) transliterationEngine.transliterate(_uiState.value.sourceText, lang) else null
         _uiState.update {
             it.copy(
                 sourceLanguage = lang,
+                sourceTransliteration = srcTrans,
                 isSourceAuto = false,
                 detectedSourceLanguage = null,
                 isDetectingSourceLanguage = false
@@ -196,7 +205,8 @@ class TranslationViewModel @Inject constructor(
     }
 
     fun setTargetLanguage(lang: Language) {
-        _uiState.update { it.copy(targetLanguage = lang) }
+        val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(_uiState.value.translatedText, lang) else null
+        _uiState.update { it.copy(targetLanguage = lang, targetTransliteration = tgtTrans) }
         savedStateHandle["tgtLang"] = lang.code
         settings.textTargetLanguage = lang
     }
@@ -204,12 +214,18 @@ class TranslationViewModel @Inject constructor(
     fun swapLanguages() {
         if (_uiState.value.isSourceAuto) return
 
+        val oldState = _uiState.value
+        val newSrcTrans = if (settings.showTransliteration) transliterationEngine.transliterate(oldState.translatedText, oldState.targetLanguage) else null
+        val newTgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(oldState.sourceText, oldState.sourceLanguage) else null
+
         _uiState.update {
             it.copy(
                 sourceLanguage = it.targetLanguage,
                 targetLanguage = it.sourceLanguage,
                 sourceText = it.translatedText,
-                translatedText = it.sourceText
+                translatedText = it.sourceText,
+                sourceTransliteration = newSrcTrans,
+                targetTransliteration = newTgtTrans
             )
         }
         val state = _uiState.value
@@ -241,7 +257,7 @@ class TranslationViewModel @Inject constructor(
         _uiState.update {
             it.copy(isTranslating = true, error = null, stats = null, translatedText = "",
                 isFastResult = false, canImproveWithLlm = false, isImprovingWithLlm = false,
-                fastTranslationText = "", fastNmtMissing = false)
+                fastTranslationText = "", fastNmtMissing = false, targetTransliteration = null)
         }
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -259,8 +275,9 @@ class TranslationViewModel @Inject constructor(
                 val startTime = System.currentTimeMillis()
                 val result = fastTranslateEngine.translate(state.sourceText)
                 val elapsed = System.currentTimeMillis() - startTime
+                val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(result, state.targetLanguage) else null
                 _uiState.update {
-                    it.copy(translatedText = result, isTranslating = false,
+                    it.copy(translatedText = result, targetTransliteration = tgtTrans, isTranslating = false,
                         isFastResult = true, canImproveWithLlm = false,
                         stats = TranslationStats(totalTimeMs = elapsed))
                 }
@@ -298,8 +315,9 @@ class TranslationViewModel @Inject constructor(
                     val startTime = System.currentTimeMillis()
                     val fastResult = fastTranslateEngine.translate(state.sourceText)
                     val elapsed = System.currentTimeMillis() - startTime
+                    val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(fastResult, state.targetLanguage) else null
                     _uiState.update {
-                        it.copy(translatedText = fastResult, isTranslating = false,
+                        it.copy(translatedText = fastResult, targetTransliteration = tgtTrans, isTranslating = false,
                             isFastResult = true, canImproveWithLlm = true,
                             fastTranslationText = fastResult,
                             stats = TranslationStats(totalTimeMs = elapsed))
@@ -385,10 +403,12 @@ class TranslationViewModel @Inject constructor(
                 val promptTokens = streamResult?.promptTokens ?: 0
                 val genTokens = streamResult?.generatedTokens ?: 0
                 val tps = if (elapsed > 0) genTokens * 1000f / elapsed else 0f
+                val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(result, state.targetLanguage) else null
 
                 _uiState.update {
                     it.copy(
                         translatedText = result,
+                        targetTransliteration = tgtTrans,
                         isImprovingWithLlm = false,
                         isFastResult = false,
                         canImproveWithLlm = false,
@@ -478,6 +498,7 @@ class TranslationViewModel @Inject constructor(
                 val promptTokens = streamResult?.promptTokens ?: 0
                 val genTokens = streamResult?.generatedTokens ?: 0
                 val tps = if (elapsed > 0) genTokens * 1000f / elapsed else 0f
+                val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(result, state.targetLanguage) else null
 
                 val stats = TranslationStats(
                     promptTokens = promptTokens,
@@ -493,7 +514,7 @@ class TranslationViewModel @Inject constructor(
                 )
 
                 _uiState.update {
-                    it.copy(translatedText = result, isTranslating = false, stats = stats)
+                    it.copy(translatedText = result, targetTransliteration = tgtTrans, isTranslating = false, stats = stats)
                 }
                 savedStateHandle["translatedText"] = result
 

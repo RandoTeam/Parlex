@@ -169,6 +169,14 @@ fun TranslationScreen(
                             capitalization = KeyboardCapitalization.Sentences
                         )
                     )
+                    uiState.sourceTransliteration?.takeIf { viewModel.shouldShowTransliteration() }?.let { trans ->
+                        Text(
+                            text = trans,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End,
@@ -323,6 +331,14 @@ fun TranslationScreen(
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface
                         )
+                        uiState.targetTransliteration?.takeIf { viewModel.shouldShowTransliteration() }?.let { trans ->
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = trans,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+                            )
+                        }
 
                         // Stats bar
                         uiState.stats?.takeIf { viewModel.shouldShowTechnicalTranslationStats() }?.let { stats ->

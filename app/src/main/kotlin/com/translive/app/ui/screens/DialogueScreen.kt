@@ -527,12 +527,21 @@ private fun DialogueBubble(
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.widthIn(max = 280.dp)
             ) {
-                Text(
-                    text = message.sourceText,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(12.dp)
-                )
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = message.sourceText,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    message.sourceTransliteration?.let { trans ->
+                        Text(
+                            text = trans,
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
             }
         }
 
@@ -549,12 +558,21 @@ private fun DialogueBubble(
                 color = MaterialTheme.colorScheme.secondaryContainer,
                 modifier = Modifier.widthIn(max = 280.dp)
             ) {
-                Text(
-                    text = message.translatedText,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(12.dp)
-                )
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = message.translatedText,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    message.targetTransliteration?.let { trans ->
+                        Text(
+                            text = trans,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.75f),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
             }
             Text(
                 text = targetLabel,

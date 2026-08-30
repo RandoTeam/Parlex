@@ -46,6 +46,9 @@ class SettingsViewModel @Inject constructor(
     private val _showTechnicalTranslationStats = MutableStateFlow(settings.showTechnicalTranslationStats)
     val showTechnicalTranslationStats: StateFlow<Boolean> = _showTechnicalTranslationStats.asStateFlow()
 
+    private val _showTransliteration = MutableStateFlow(settings.showTransliteration)
+    val showTransliteration: StateFlow<Boolean> = _showTransliteration.asStateFlow()
+
     private val _translationPolicy = MutableStateFlow(settings.translationPolicy)
     val translationPolicy: StateFlow<TranslationPolicy> = _translationPolicy.asStateFlow()
 
@@ -90,6 +93,11 @@ class SettingsViewModel @Inject constructor(
     fun setShowTechnicalTranslationStats(value: Boolean) {
         settings.showTechnicalTranslationStats = value
         _showTechnicalTranslationStats.value = value
+    }
+
+    fun setShowTransliteration(value: Boolean) {
+        settings.showTransliteration = value
+        _showTransliteration.value = value
     }
 
     fun setTranslationPolicy(value: TranslationPolicy) {
