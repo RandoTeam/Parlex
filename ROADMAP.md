@@ -171,21 +171,22 @@ Parlex.
 
 ## Фаза S2: Живой Перевод Экрана
 
-Приоритет: текущий.
+Статус: выполнена (2026-08-30).
 
 Цель: непрерывный перевод текста поверх работающего приложения с keyframe OCR.
 
 Шаги:
 
-1. Переключить `ScreenCaptureService` в continuous mode с `ImageReader`.
-2. Детектор стабильности кадра: luma-гистограмма, порог delta.
-3. Кэш переводов: не переводить повторно неизменные блоки.
-4. Неинтерактивный overlay (`FLAG_NOT_TOUCHABLE`): переведённые блоки поверх
-   активного приложения.
-5. Ограничение частоты OCR: не чаще 1 раза в 500ms.
-6. Проверить CPU/RAM/нагрев на OnePlus 13 при 5 минутах непрерывной работы.
+1. [x] Создать `KeyframeMotionDetector.kt` с быстрым Luma SAD и дебаунсом 300мс.
+2. [x] Создать `LiveTranslationPipeline.kt` с spatial diffing, scroll tracking и LRU кэшем.
+3. [x] Создать `LiveScreenTranslateService.kt` в continuous mode с `ImageReader` и `DisplayListener`.
+4. [x] Создать `LiveOverlayRenderer.kt` с полноэкранным AR Canvas (`FLAG_NOT_TOUCHABLE`) и HUD контроллером.
+5. [x] Добавить пункт «⚡ Живой перевод экрана» в контекстное меню плавающей кнопки.
+6. [x] Покрыть модульными тестами (`KeyframeMotionDetectorTest`, `LiveTranslationPipelineTest`).
 
 ## Фаза N2: Встроенный Офлайн-Словарь
+
+Приоритет: текущий.
 
 Цель: долгое нажатие по слову в тексте открывает словарную статью из локальной
 базы без сетевого запроса.

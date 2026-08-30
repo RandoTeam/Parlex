@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.translive.app.i18n.AppLocale
+import com.translive.app.service.LiveScreenTranslateService
 import com.translive.app.service.ScreenCaptureService
 import com.translive.app.service.ScreenTranslateOverlayService
 import com.translive.app.ui.theme.TransLiveTheme
@@ -26,19 +27,28 @@ class MainActivity : ComponentActivity() {
     private var incomingTranslationText by mutableStateOf<String?>(null)
     private var incomingImageUri by mutableStateOf<Uri?>(null)
     private var isOverlayCaptureRequest: Boolean = false
+    private var isLiveTranslateRequest: Boolean = false
 
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val resultData = result.data ?: return@registerForActivityResult
         if (result.resultCode == RESULT_OK) {
+            val isLive = isLiveTranslateRequest
             val fromOverlay = isOverlayCaptureRequest
+            isLiveTranslateRequest = false
             isOverlayCaptureRequest = false
-            startForegroundService(
-                ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData, fromOverlay)
-            )
-            if (fromOverlay) {
+
+            if (isLive) {
+                LiveScreenTranslateService.start(this, result.resultCode, resultData)
                 moveTaskToBack(true)
+            } else {
+                startForegroundService(
+                    ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData, fromOverlay)
+                )
+                if (fromOverlay) {
+                    moveTaskToBack(true)
+                }
             }
         }
     }
@@ -80,6 +90,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applyIncomingIntent(intent: Intent?) {
+        if (intent?.action == ScreenTranslateOverlayService.ACTION_REQUEST_LIVE_TRANSLATE) {
+            isLiveTranslateRequest = true
+            requestScreenCapture()
+            return
+        }
         if (intent?.action == ScreenTranslateOverlayService.ACTION_REQUEST_SCREEN_CAPTURE) {
             isOverlayCaptureRequest = true
             requestScreenCapture()

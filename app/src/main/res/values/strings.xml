@@ -228,6 +228,7 @@
     <string name="screen_overlay_notification_title">Parlex screen translation</string>
     <string name="screen_overlay_notification_text">Floating translation button is active</string>
     <string name="screen_overlay_menu_translate">Translate screen</string>
+    <string name="screen_overlay_menu_live_translate">Live screen translate</string>
     <string name="screen_overlay_menu_close">Close button</string>
     <string name="screen_overlay_copy_action">Copy</string>
     <string name="screen_overlay_open_app_action">Open in app</string>

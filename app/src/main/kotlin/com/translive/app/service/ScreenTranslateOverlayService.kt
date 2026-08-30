@@ -266,6 +266,14 @@ class ScreenTranslateOverlayService : Service() {
         )
     }
 
+    private fun triggerLiveScreenTranslate() {
+        startActivity(
+            Intent(this, MainActivity::class.java)
+                .setAction(ACTION_REQUEST_LIVE_TRANSLATE)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        )
+    }
+
     // =========================================================================
     // 2. Long-press Context Menu Popup
     // =========================================================================
@@ -303,7 +311,7 @@ class ScreenTranslateOverlayService : Service() {
             elevation = 12 * density
         }
 
-        // 1. Action: Translate Screen
+        // 1. Action: Translate Screen (Screenshot)
         val translateItem = createMenuItem("📸 " + getString(R.string.screen_overlay_menu_translate), density) {
             dismissContextMenu()
             triggerScreenCapture()
@@ -313,7 +321,17 @@ class ScreenTranslateOverlayService : Service() {
         // Divider
         container.addView(createDivider(density))
 
-        // 2. Language Info: RU -> EN
+        // 2. Action: Live Screen Translate (Continuous AR)
+        val liveTranslateItem = createMenuItem("⚡ " + getString(R.string.screen_overlay_menu_live_translate), density) {
+            dismissContextMenu()
+            triggerLiveScreenTranslate()
+        }
+        container.addView(liveTranslateItem)
+
+        // Divider
+        container.addView(createDivider(density))
+
+        // 3. Language Info: RU -> EN
         val src = settings.textSourceLanguage
         val tgt = settings.textTargetLanguage
         val langInfo = createMenuItem("🌐 ${src.displayName} → ${tgt.displayName}", density) {
@@ -624,6 +642,7 @@ class ScreenTranslateOverlayService : Service() {
 
     companion object {
         const val ACTION_REQUEST_SCREEN_CAPTURE = "com.translive.app.action.REQUEST_SCREEN_CAPTURE"
+        const val ACTION_REQUEST_LIVE_TRANSLATE = "com.translive.app.action.REQUEST_LIVE_TRANSLATE"
         const val ACTION_SHOW_TRANSLATION = "com.translive.app.action.SHOW_SCREEN_TRANSLATION"
 
         private const val CHANNEL_ID = "screen_translation_overlay"
