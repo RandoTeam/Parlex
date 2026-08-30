@@ -370,23 +370,77 @@ fun ModelManagerScreen(
                 }
             }
 
-            if (uiState.cameraLanguagePacks.isNotEmpty()) {
-                item(key = "camera_language_packs", contentType = "camera_language_packs") {
-                    CameraLanguagePacksGroup(
-                        packs = uiState.cameraLanguagePacks,
-                        pair = uiState.cameraPackagePair,
-                        expanded = uiState.cameraLanguagePacksExpanded,
-                        onToggle = viewModel::toggleCameraLanguagePacks,
-                        onDownload = viewModel::downloadCameraLanguagePack,
-                        onPairSourceSelected = viewModel::selectCameraPackagePairSource,
-                        onPairTargetSelected = viewModel::selectCameraPackagePairTarget,
-                        onPairDownload = viewModel::downloadCameraPackagePair,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                if (uiState.cameraLanguagePacks.isNotEmpty()) {
+                    item(key = "camera_language_packs", contentType = "camera_language_packs") {
+                        CameraLanguagePacksGroup(
+                            packs = uiState.cameraLanguagePacks,
+                            pair = uiState.cameraPackagePair,
+                            expanded = uiState.cameraLanguagePacksExpanded,
+                            onToggle = viewModel::toggleCameraLanguagePacks,
+                            onDownload = viewModel::downloadCameraLanguagePack,
+                            onPairSourceSelected = viewModel::selectCameraPackagePairSource,
+                            onPairTargetSelected = viewModel::selectCameraPackagePairTarget,
+                            onPairDownload = viewModel::downloadCameraPackagePair,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                item(key = "dictionaries_header", contentType = "section_header") {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Офлайн-словари",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
                     )
+                }
+
+                item(key = "dictionaries_card", contentType = "dictionaries_card") {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "📖 Встроенный словарь RU ↔ EN",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Статей в базе: ${uiState.dictionaryEntriesCount} • Мгновенный поиск",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "Готов",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
-    }
 
     // License confirmation dialog
     uiState.pendingLicenseVariant?.let { variant ->

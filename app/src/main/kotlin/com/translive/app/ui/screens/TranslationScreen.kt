@@ -32,6 +32,7 @@ import com.translive.app.R
 import com.translive.app.data.model.Language
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
+import com.translive.app.ui.components.DictionaryPopup
 import com.translive.app.ui.components.LanguagePickerSheet
 import com.translive.app.ui.theme.Teal
 import com.translive.app.ui.viewmodel.TranslationViewModel
@@ -194,6 +195,17 @@ fun TranslationScreen(
                         }
                     }
                 }
+            }
+
+            // Built-in Offline Dictionary popup for single words
+            if (uiState.dictionaryEntries.isNotEmpty()) {
+                DictionaryPopup(
+                    entries = uiState.dictionaryEntries,
+                    onSpeak = { word, lang -> viewModel.speakDictionaryWord(word, lang) },
+                    onToggleFavorite = { entry -> viewModel.toggleDictionaryFavorite(entry) },
+                    onDismiss = { viewModel.dismissDictionaryPopup() },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))

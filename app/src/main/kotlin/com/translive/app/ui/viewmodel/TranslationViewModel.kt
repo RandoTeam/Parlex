@@ -24,6 +24,9 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import javax.inject.Inject
 
+import com.translive.app.data.DictionaryRepository
+import com.translive.app.data.model.DictionaryEntry
+
 data class TranslationStats(
     val promptTokens: Int = 0,
     val generatedTokens: Int = 0,
@@ -53,7 +56,8 @@ data class TranslationUiState(
     val fastTranslationText: String = "",
     val fastNmtMissing: Boolean = false,
     val sourceTransliteration: String? = null,
-    val targetTransliteration: String? = null
+    val targetTransliteration: String? = null,
+    val dictionaryEntries: List<DictionaryEntry> = emptyList()
 )
 
 @HiltViewModel
@@ -64,9 +68,10 @@ class TranslationViewModel @Inject constructor(
     private val liteRtEngine: LiteRtTranslationEngine,
     private val fastTranslateEngine: FastTranslateEngine,
     private val transliterationEngine: TransliterationEngine,
-    private val translationDao: TranslationDao,
+    private val dictionaryRepository: DictionaryRepository,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
+    private val translationDao: TranslationDao,
     val systemTts: SystemTtsEngine,
     private val texts: LocalizedTextProvider,
     private val savedStateHandle: SavedStateHandle
@@ -165,6 +170,49 @@ class TranslationViewModel @Inject constructor(
         _uiState.update { it.copy(sourceText = text, sourceTransliteration = srcTrans) }
         savedStateHandle["sourceText"] = text
         scheduleSourceLanguageDetection(text)
+
+        val trimmed = text.trim()
+        if (trimmed.isNotBlank() && !trimmed.contains(" ") && trimmed.length <= 40) {
+            viewModelScope.launch {
+                val entries = dictionaryRepository.lookupWord(
+                    rawWord = trimmed,
+                    sourceLang = _uiState.value.sourceLanguage.code,
+                    targetLang = _uiState.value.targetLanguage.code
+                )
+                _uiState.update { it.copy(dictionaryEntries = entries) }
+            }
+        } else {
+            _uiState.update { it.copy(dictionaryEntries = emptyList()) }
+        }
+    }
+
+    fun lookupDictionaryWord(word: String) {
+        viewModelScope.launch {
+            val entries = dictionaryRepository.lookupWord(
+                rawWord = word,
+                sourceLang = _uiState.value.targetLanguage.code,
+                targetLang = _uiState.value.sourceLanguage.code
+            )
+            _uiState.update { it.copy(dictionaryEntries = entries) }
+        }
+    }
+
+    fun dismissDictionaryPopup() {
+        _uiState.update { it.copy(dictionaryEntries = emptyList()) }
+    }
+
+    fun toggleDictionaryFavorite(entry: DictionaryEntry) {
+        viewModelScope.launch {
+            dictionaryRepository.toggleFavorite(entry)
+            val updated = _uiState.value.dictionaryEntries.map {
+                if (it.id == entry.id) it.copy(isFavorite = !it.isFavorite) else it
+            }
+            _uiState.update { it.copy(dictionaryEntries = updated) }
+        }
+    }
+
+    fun speakDictionaryWord(word: String, langCode: String) {
+        systemTts.speak(word, langCode)
     }
 
     fun shouldHideKeyboardOnTranslate(): Boolean = settings.hideKeyboardOnTextTranslate

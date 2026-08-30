@@ -91,6 +91,7 @@ data class ModelManagerUiState(
     val ocrPackageBusy: Boolean = false,
     val error: String? = null,
     val successMessage: String? = null,
+    val dictionaryEntriesCount: Int = 0,
     /** Variant pending license confirmation before download */
     val pendingLicenseVariant: ModelVariant? = null
 )
@@ -136,6 +137,7 @@ class ModelManagerViewModel @Inject constructor(
     private val liteRtEngine: LiteRtTranslationEngine,
     private val speechEngine: SpeechEngine,
     private val FastTranslateEngine: FastTranslateEngine,
+    private val dictionaryRepository: com.translive.app.data.DictionaryRepository,
     private val settings: SettingsRepository,
     private val texts: LocalizedTextProvider
 ) : ViewModel() {
@@ -266,6 +268,11 @@ class ModelManagerViewModel @Inject constructor(
     fun refreshModels() {
         updateDownloadStates(downloadManager.activeDownloads.value)
         refreshCameraTranslationPack()
+        viewModelScope.launch(Dispatchers.IO) {
+            dictionaryRepository.ensureSeeded()
+            val count = dictionaryRepository.getTotalEntryCount()
+            _uiState.update { it.copy(dictionaryEntriesCount = count) }
+        }
     }
 
     private fun refreshCameraTranslationPack() {

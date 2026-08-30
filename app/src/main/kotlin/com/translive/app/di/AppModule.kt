@@ -35,6 +35,9 @@ object AppModule {
     fun provideDialogueDao(db: TransLiveDatabase): DialogueDao = db.dialogueDao()
 
     @Provides
+    fun provideDictionaryDao(db: TransLiveDatabase): com.translive.app.data.db.DictionaryDao = db.dictionaryDao()
+
+    @Provides
     @Singleton
     fun provideTranslationEngine(modelRepository: ModelRepository): TranslationEngine {
         return TranslationEngine().also { it.modelRepository = modelRepository }

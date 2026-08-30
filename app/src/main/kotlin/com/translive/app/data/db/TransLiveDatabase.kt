@@ -1,6 +1,7 @@
 package com.translive.app.data.db
 
 import androidx.room.*
+import com.translive.app.data.model.DictionaryEntry
 import com.translive.app.data.model.DialogueMessage
 import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.TranslationEntry
@@ -93,11 +94,17 @@ interface DialogueDao {
 }
 
 @Database(
-    entities = [TranslationEntry::class, DialogueSession::class, DialogueMessage::class],
-    version = 2,
+    entities = [
+        TranslationEntry::class,
+        DialogueSession::class,
+        DialogueMessage::class,
+        DictionaryEntry::class
+    ],
+    version = 3,
     exportSchema = false
 )
 abstract class TransLiveDatabase : RoomDatabase() {
     abstract fun translationDao(): TranslationDao
     abstract fun dialogueDao(): DialogueDao
+    abstract fun dictionaryDao(): DictionaryDao
 }
