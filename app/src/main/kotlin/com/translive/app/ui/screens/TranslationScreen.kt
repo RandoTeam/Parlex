@@ -46,6 +46,7 @@ fun TranslationScreen(
     onStartScreenOverlay: () -> Unit = {},
     onNavigateToDialogue: () -> Unit,
     onNavigateToCamera: () -> Unit = {},
+    onNavigateToDocument: () -> Unit = {},
     onNavigateToHistory: () -> Unit,
     onNavigateToModels: () -> Unit,
     onNavigateToSettings: () -> Unit,
@@ -262,6 +263,18 @@ fun TranslationScreen(
                 shape = RoundedCornerShape(14.dp)
             ) {
                 Text(stringResource(R.string.screen_translate_overlay_action))
+            }
+
+            OutlinedButton(
+                onClick = onNavigateToDocument,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) {
+                Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Перевод документов (PDF)")
             }
 
             // Model loading indicator

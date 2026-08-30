@@ -200,18 +200,32 @@ Parlex.
 
 ## Фаза N3: Перевод Документов (PDF)
 
-Приоритет: текущий.
+Статус: выполнена (2026-08-31).
 
 Цель: импорт PDF, постраничный OCR, перевод блоков, side-by-side просмотр
 оригинала и перевода.
 
 Шаги:
 
-1. Создать `DocumentTranslateScreen.kt` с импортом через `ACTION_OPEN_DOCUMENT`.
-2. `PdfRenderer` → Bitmap → OCR (ML Kit / PP-OCR) → перевод (Fast NMT / LLM).
-3. Side-by-side просмотр: оригинал + перевод.
-4. Прогресс по страницам и кэширование.
-5. Экспорт переведённого текста.
+1. [x] Создать `PdfModels.kt` и `PdfRendererManager.kt` с 200 DPI рендерингом и LRU кэшем.
+2. [x] Создать `PdfDocumentProcessor.kt` (семантическая группировка параграфов, удаление дефисов) и `PdfExportManager.kt`.
+3. [x] Создать `DocumentTranslateViewModel.kt` с постраничной конвейерной обработкой.
+4. [x] Создать `DocumentTranslateScreen.kt` с поддержкой Zoom/Pan, переключением режимов (Оверлей/Сплит/Оригинал) и экспортом.
+5. [x] Проверить модульными тестами (`PdfDocumentProcessorTest.kt`).
+
+## Фаза S3: Мультиязычный Автоперевод Экрана и Живой Конвертер Валют
+
+Приоритет: текущий.
+
+Цель: автоопределение языка для каждого текстового блока на экране с переводом на язык пользователя + автоматическое определение цен/валют в тексте с выводом эквивалента в домашней валюте пользователя без API-ключей.
+
+Шаги:
+
+1. Создать `ExchangeRateEntity`, `ExchangeRateDao`, `ExchangeRateBaseline` (35+ валют) и `ExchangeRateRepository` с каскадом FloatRates / OpenER / Frankfurter.
+2. Создать `CurrencyParser.kt` и `CurrencyAugmentor.kt` для распознавания и вычисления эквивалентов в скобках `(≈ 4 580 ₽)`.
+3. Добавить выбор домашней валюты и тумблер конвертации в `SettingsRepository` и `SettingsScreen`.
+4. Интегрировать автоопределение языков и конвертер валют в `LiveTranslationPipeline.kt`, `LiveOverlayRenderer.kt` и `TranslationViewModel.kt`.
+5. Покрыть модульными тестами (`CurrencyParserTest.kt`, `CurrencyAugmentorTest.kt`).
 
 ## Governance
 

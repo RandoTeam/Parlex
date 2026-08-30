@@ -55,9 +55,15 @@ fun TransLiveNavHost(
                 onStartScreenOverlay = onStartScreenOverlay,
                 onNavigateToDialogue = { navigateTo("dialogue") },
                 onNavigateToCamera = { navigateTo("camera") },
+                onNavigateToDocument = { navigateTo("document_translate") },
                 onNavigateToHistory = { navigateTo("history") },
                 onNavigateToModels = { navigateTo("models") },
                 onNavigateToSettings = { navigateTo("settings") }
+            )
+        }
+        composable("document_translate") {
+            DocumentTranslateScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
         composable("dialogue") {

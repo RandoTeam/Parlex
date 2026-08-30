@@ -84,6 +84,10 @@ android {
         compose = true
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // libOpenCL.so is a link-time stub only. The manifest declares the public
     // Android system library, so packaging this stub would mask the Adreno
     // driver on the device.
