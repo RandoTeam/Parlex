@@ -215,17 +215,17 @@ Parlex.
 
 ## Фаза S3: Мультиязычный Автоперевод Экрана и Живой Конвертер Валют
 
-Приоритет: текущий.
+Статус: выполнена (2026-08-31).
 
 Цель: автоопределение языка для каждого текстового блока на экране с переводом на язык пользователя + автоматическое определение цен/валют в тексте с выводом эквивалента в домашней валюте пользователя без API-ключей.
 
 Шаги:
 
-1. Создать `ExchangeRateEntity`, `ExchangeRateDao`, `ExchangeRateBaseline` (35+ валют) и `ExchangeRateRepository` с каскадом FloatRates / OpenER / Frankfurter.
-2. Создать `CurrencyParser.kt` и `CurrencyAugmentor.kt` для распознавания и вычисления эквивалентов в скобках `(≈ 4 580 ₽)`.
-3. Добавить выбор домашней валюты и тумблер конвертации в `SettingsRepository` и `SettingsScreen`.
-4. Интегрировать автоопределение языков и конвертер валют в `LiveTranslationPipeline.kt`, `LiveOverlayRenderer.kt` и `TranslationViewModel.kt`.
-5. Покрыть модульными тестами (`CurrencyParserTest.kt`, `CurrencyAugmentorTest.kt`).
+1. [x] Создать `ExchangeRateEntity`, `ExchangeRateDao`, `ExchangeRateBaseline` (35+ валют) и `ExchangeRateRepository` с каскадом FloatRates / OpenER / Frankfurter.
+2. [x] Создать `CurrencyParser.kt` и `CurrencyAugmentor.kt` для распознавания и вычисления эквивалентов в скобках `(≈ 4 580 ₽)`.
+3. [x] Добавить выбор домашней валюты и тумблер конвертации в `SettingsRepository` и `SettingsScreen`.
+4. [x] Интегрировать автоопределение языков и конвертер валют в `LiveTranslationPipeline.kt`, `LiveOverlayRenderer.kt` и `TranslationViewModel.kt`.
+5. [x] Покрыть модульными тестами (`CurrencyParserTest.kt`, `CurrencyAugmentorTest.kt`).
 
 ## Governance
 

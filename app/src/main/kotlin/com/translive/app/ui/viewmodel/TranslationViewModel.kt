@@ -18,6 +18,7 @@ import com.translive.app.engine.FastTranslateEngine
 import com.translive.app.engine.TransliterationEngine
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.engine.SystemTtsEngine
+import com.translive.app.engine.CurrencyAugmentor
 import com.translive.app.i18n.LocalizedTextProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.*
@@ -69,6 +70,7 @@ class TranslationViewModel @Inject constructor(
     private val fastTranslateEngine: FastTranslateEngine,
     private val transliterationEngine: TransliterationEngine,
     private val dictionaryRepository: DictionaryRepository,
+    private val currencyAugmentor: CurrencyAugmentor,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
     private val translationDao: TranslationDao,
@@ -321,7 +323,8 @@ class TranslationViewModel @Inject constructor(
                     return@launch
                 }
                 val startTime = System.currentTimeMillis()
-                val result = fastTranslateEngine.translate(state.sourceText)
+                val rawResult = fastTranslateEngine.translate(state.sourceText)
+                val result = currencyAugmentor.augment(rawResult, effectiveSource)
                 val elapsed = System.currentTimeMillis() - startTime
                 val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(result, state.targetLanguage) else null
                 _uiState.update {
@@ -361,7 +364,8 @@ class TranslationViewModel @Inject constructor(
                 )
                 if (activated) {
                     val startTime = System.currentTimeMillis()
-                    val fastResult = fastTranslateEngine.translate(state.sourceText)
+                    val rawResult = fastTranslateEngine.translate(state.sourceText)
+                    val fastResult = currencyAugmentor.augment(rawResult, effectiveSource)
                     val elapsed = System.currentTimeMillis() - startTime
                     val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(fastResult, state.targetLanguage) else null
                     _uiState.update {

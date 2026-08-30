@@ -52,8 +52,24 @@ class SettingsViewModel @Inject constructor(
     private val _translationPolicy = MutableStateFlow(settings.translationPolicy)
     val translationPolicy: StateFlow<TranslationPolicy> = _translationPolicy.asStateFlow()
 
+    private val _homeCurrency = MutableStateFlow(settings.homeCurrencyCode)
+    val homeCurrency: StateFlow<String> = _homeCurrency.asStateFlow()
+
+    private val _enableCurrencyConversion = MutableStateFlow(settings.enableCurrencyConversion)
+    val enableCurrencyConversion: StateFlow<Boolean> = _enableCurrencyConversion.asStateFlow()
+
     private val _runtimeDiagnostics = MutableStateFlow<String?>(null)
     val runtimeDiagnostics: StateFlow<String?> = _runtimeDiagnostics.asStateFlow()
+
+    fun setHomeCurrency(value: String) {
+        settings.homeCurrencyCode = value
+        _homeCurrency.value = value
+    }
+
+    fun setEnableCurrencyConversion(value: Boolean) {
+        settings.enableCurrencyConversion = value
+        _enableCurrencyConversion.value = value
+    }
 
     fun setAppLanguage(value: String) {
         settings.appLanguageCode = value

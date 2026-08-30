@@ -4,6 +4,7 @@ import androidx.room.*
 import com.translive.app.data.model.DictionaryEntry
 import com.translive.app.data.model.DialogueMessage
 import com.translive.app.data.model.DialogueSession
+import com.translive.app.data.model.ExchangeRateEntity
 import com.translive.app.data.model.TranslationEntry
 import kotlinx.coroutines.flow.Flow
 
@@ -98,13 +99,15 @@ interface DialogueDao {
         TranslationEntry::class,
         DialogueSession::class,
         DialogueMessage::class,
-        DictionaryEntry::class
+        DictionaryEntry::class,
+        ExchangeRateEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class TransLiveDatabase : RoomDatabase() {
     abstract fun translationDao(): TranslationDao
     abstract fun dialogueDao(): DialogueDao
     abstract fun dictionaryDao(): DictionaryDao
+    abstract fun exchangeRateDao(): ExchangeRateDao
 }

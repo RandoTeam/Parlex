@@ -38,6 +38,9 @@ object AppModule {
     fun provideDictionaryDao(db: TransLiveDatabase): com.translive.app.data.db.DictionaryDao = db.dictionaryDao()
 
     @Provides
+    fun provideExchangeRateDao(db: TransLiveDatabase): com.translive.app.data.db.ExchangeRateDao = db.exchangeRateDao()
+
+    @Provides
     @Singleton
     fun provideTranslationEngine(modelRepository: ModelRepository): TranslationEngine {
         return TranslationEngine().also { it.modelRepository = modelRepository }

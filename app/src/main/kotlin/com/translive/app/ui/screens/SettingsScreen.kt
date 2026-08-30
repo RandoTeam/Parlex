@@ -1,6 +1,10 @@
 package com.translive.app.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -12,14 +16,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -49,6 +50,8 @@ fun SettingsScreen(
     val showTechnicalTranslationStats by viewModel.showTechnicalTranslationStats.collectAsState()
     val showTransliteration by viewModel.showTransliteration.collectAsState()
     val translationPolicy by viewModel.translationPolicy.collectAsState()
+    val homeCurrency by viewModel.homeCurrency.collectAsState()
+    val enableCurrencyConversion by viewModel.enableCurrencyConversion.collectAsState()
     val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
 
     Scaffold(
@@ -380,6 +383,83 @@ fun SettingsScreen(
                         checked = showTechnicalTranslationStats,
                         onCheckedChange = viewModel::setShowTechnicalTranslationStats
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // --- Currency conversion section ---
+            SectionHeader(icon = Icons.Outlined.Payments, title = "Конвертер валют")
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Автоконвертация цен", style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "Распознавать иностранные валюты на экране и в тексте, добавляя эквивалент в скобках (≈ 4 580 ₽)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = enableCurrencyConversion,
+                        onCheckedChange = viewModel::setEnableCurrencyConversion
+                    )
+                }
+
+                if (enableCurrencyConversion) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                    Text("Домашняя валюта", style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Валюта, в которую переводятся все найденные цены:",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val majorCurrencies = listOf(
+                        "AUTO" to "⚡ Авто (по языку)",
+                        "RUB" to "🇷🇺 RUB (₽)",
+                        "USD" to "🇺🇸 USD ($)",
+                        "EUR" to "🇪🇺 EUR (€)",
+                        "VND" to "🇻🇳 VND (₫)",
+                        "CNY" to "🇨🇳 CNY (¥)",
+                        "KZT" to "🇰🇿 KZT (₸)",
+                        "TRY" to "🇹🇷 TRY (₺)",
+                        "AED" to "🇦🇪 AED (د.إ)",
+                        "THB" to "🇹🇭 THB (฿)",
+                        "GBP" to "🇬🇧 GBP (£)"
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        majorCurrencies.forEach { (code, label) ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.setHomeCurrency(code) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (homeCurrency == code) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = homeCurrency == code,
+                                        onClick = { viewModel.setHomeCurrency(code) }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(label, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
                 }
             }
 

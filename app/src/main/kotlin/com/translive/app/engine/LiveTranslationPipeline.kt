@@ -51,21 +51,22 @@ data class LiveTextBlock(
     val rawText: String,
     val bounds: LiveBoundingBox,
     val translatedText: String? = null,
-    val transliteration: String? = null
+    val transliteration: String? = null,
+    val detectedLanguage: Language? = null
 )
 
 data class LiveTranslationFrame(
     val blocks: List<LiveTextBlock>,
-    val timestampMs: Long = System.currentTimeMillis(),
+    val timestampMs: Long,
     val sourceLang: String,
     val targetLang: String,
-    val processingTimeMs: Long = 0L
+    val processingTimeMs: Long
 )
 
-data class TranslationCacheKey(
+private data class TranslationCacheKey(
     val sourceLang: String,
     val targetLang: String,
-    val rawText: String
+    val text: String
 )
 
 data class CachedTranslation(
@@ -73,13 +74,10 @@ data class CachedTranslation(
     val transliteration: String? = null
 )
 
-/**
- * Thread-safe LRU cache for live translation results.
- */
-class LiveTranslationCache(private val maxEntries: Int = 1000) {
-    private val cache = object : LinkedHashMap<TranslationCacheKey, CachedTranslation>(maxEntries, 0.75f, true) {
+class LiveTranslationCache(private val maxSize: Int = 1000) {
+    private val cache = object : LinkedHashMap<TranslationCacheKey, CachedTranslation>(maxSize, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<TranslationCacheKey, CachedTranslation>?): Boolean {
-            return size > maxEntries
+            return size > maxSize
         }
     }
 
@@ -100,13 +98,16 @@ class LiveTranslationCache(private val maxEntries: Int = 1000) {
 }
 
 /**
- * Incremental OCR and Fast NMT translation pipeline with spatial diffing and LRU caching.
+ * Incremental OCR and Fast NMT translation pipeline with spatial diffing,
+ * per-block multi-language auto-detection, zero-key currency augmentation, and LRU caching.
  */
 @Singleton
 class LiveTranslationPipeline @Inject constructor(
     private val ocrEngine: OcrEngine,
     private val fastTranslateEngine: FastTranslateEngine,
-    private val transliterationEngine: TransliterationEngine
+    private val transliterationEngine: TransliterationEngine,
+    private val languageDetectionEngine: LanguageDetectionEngine,
+    private val currencyAugmentor: CurrencyAugmentor
 ) {
 
     val cache = LiveTranslationCache(1000)
@@ -152,7 +153,7 @@ class LiveTranslationPipeline @Inject constructor(
         val translatedNewBlocks = if (newOrModifiedBlocks.isNotEmpty()) {
             translateAndCacheBlocks(
                 blocks = newOrModifiedBlocks,
-                sourceLanguage = sourceLanguage,
+                defaultSourceLanguage = sourceLanguage,
                 targetLanguage = targetLanguage,
                 showTransliteration = showTransliteration
             )
@@ -176,48 +177,71 @@ class LiveTranslationPipeline @Inject constructor(
 
     private suspend fun translateAndCacheBlocks(
         blocks: List<LiveTextBlock>,
-        sourceLanguage: Language,
+        defaultSourceLanguage: Language,
         targetLanguage: Language,
         showTransliteration: Boolean
     ): List<LiveTextBlock> = withContext(Dispatchers.IO) {
-        val pendingTranslationBlocks = mutableListOf<LiveTextBlock>()
-        val pendingTexts = mutableListOf<String>()
         val resolvedBlocks = mutableListOf<LiveTextBlock>()
 
-        // Check cache first
-        for (block in blocks) {
-            val cached = cache.get(sourceLanguage.code, targetLanguage.code, block.rawText)
-            if (cached != null) {
-                resolvedBlocks.add(
-                    block.copy(
-                        translatedText = cached.translatedText,
-                        transliteration = cached.transliteration
-                    )
-                )
+        // 1. Detect language per block if source is AUTO or fallback
+        val blocksWithLang = blocks.map { block ->
+            val detected = if (defaultSourceLanguage.code.equals("auto", ignoreCase = true)) {
+                languageDetectionEngine.detect(block.rawText) ?: Language.ENGLISH
             } else {
-                pendingTranslationBlocks.add(block)
-                pendingTexts.add(block.rawText)
+                defaultSourceLanguage
             }
+            block.copy(detectedLanguage = detected)
         }
 
-        if (pendingTexts.isNotEmpty()) {
-            fastTranslateEngine.activateDownloadedPair(sourceLanguage.code, targetLanguage.code)
-            val freshTranslations = fastTranslateEngine.translateLines(pendingTexts)
+        // 2. Group by effective source language for batch translation
+        val groupedByLang = blocksWithLang.groupBy { it.detectedLanguage ?: defaultSourceLanguage }
 
-            pendingTranslationBlocks.forEachIndexed { index, block ->
-                val translated = freshTranslations.getOrElse(index) { block.rawText }
-                val transliteration = if (showTransliteration) {
-                    transliterationEngine.transliterate(translated, targetLanguage)
-                } else null
+        for ((srcLang, group) in groupedByLang) {
+            val pendingBlocks = mutableListOf<LiveTextBlock>()
+            val pendingTexts = mutableListOf<String>()
 
-                cache.put(sourceLanguage.code, targetLanguage.code, block.rawText, translated, transliteration)
-
-                resolvedBlocks.add(
-                    block.copy(
-                        translatedText = translated,
-                        transliteration = transliteration
+            for (block in group) {
+                val cached = cache.get(srcLang.code, targetLanguage.code, block.rawText)
+                if (cached != null) {
+                    resolvedBlocks.add(
+                        block.copy(
+                            translatedText = cached.translatedText,
+                            transliteration = cached.transliteration
+                        )
                     )
-                )
+                } else if (srcLang == targetLanguage) {
+                    // Already in target language, augment currency only
+                    val augmented = currencyAugmentor.augment(block.rawText, srcLang)
+                    cache.put(srcLang.code, targetLanguage.code, block.rawText, augmented, null)
+                    resolvedBlocks.add(block.copy(translatedText = augmented))
+                } else {
+                    pendingBlocks.add(block)
+                    pendingTexts.add(block.rawText)
+                }
+            }
+
+            if (pendingTexts.isNotEmpty()) {
+                fastTranslateEngine.activateDownloadedPair(srcLang.code, targetLanguage.code)
+                val freshTranslations = fastTranslateEngine.translateLines(pendingTexts)
+
+                pendingBlocks.forEachIndexed { index, block ->
+                    val rawTranslated = freshTranslations.getOrElse(index) { block.rawText }
+                    // Apply live currency converter augmentation (e.g. $50 -> 50 $ (≈ 4,580 ₽))
+                    val augmentedTranslated = currencyAugmentor.augment(rawTranslated, srcLang)
+
+                    val transliteration = if (showTransliteration) {
+                        transliterationEngine.transliterate(augmentedTranslated, targetLanguage)
+                    } else null
+
+                    cache.put(srcLang.code, targetLanguage.code, block.rawText, augmentedTranslated, transliteration)
+
+                    resolvedBlocks.add(
+                        block.copy(
+                            translatedText = augmentedTranslated,
+                            transliteration = transliteration
+                        )
+                    )
+                }
             }
         }
 
