@@ -222,10 +222,30 @@ Parlex.
 Шаги:
 
 1. [x] Создать `ExchangeRateEntity`, `ExchangeRateDao`, `ExchangeRateBaseline` (35+ валют) и `ExchangeRateRepository` с каскадом FloatRates / OpenER / Frankfurter.
-2. [x] Создать `CurrencyParser.kt` и `CurrencyAugmentor.kt` для распознавания и вычисления эквивалентов в скобках `(≈ 4 580 ₽)`.
+2. [x] Создать `CurrencyParser.kt` and `CurrencyAugmentor.kt` для распознавания и вычисления эквивалентов в скобках `(≈ 4 580 ₽)`.
 3. [x] Добавить выбор домашней валюты и тумблер конвертации в `SettingsRepository` и `SettingsScreen`.
 4. [x] Интегрировать автоопределение языков и конвертер валют в `LiveTranslationPipeline.kt`, `LiveOverlayRenderer.kt` и `TranslationViewModel.kt`.
 5. [x] Покрыть модульными тестами (`CurrencyParserTest.kt`, `CurrencyAugmentorTest.kt`).
+
+## Фаза S4: Непрерывный Автоперевод Экрана и Плавающий HUD-Контроллер
+
+Статус: выполнена (2026-08-31).
+
+Цель: переключение между одиночными снимками (`SINGLE_SHOT`) и непрерывным AR-автопереводом (`AUTO_LIVE`), плавающий компактный HUD с пульсирующим статус-кольцом, мини-пикером языков прямо на экране (`Auto` / выбор языка / `⇄`), интерактивным режимом касания (копирование + TTS) и кнопкой одиночного снимка.
+
+Шаги:
+
+1. [x] Создать `ScreenTranslateModels.kt` (`ScreenTranslateMode`, `HudStatus`, `HudUiState`, `HudAction`).
+2. [x] Доработать `LiveOverlayRenderer.kt`:
+   - Анимированное пульсирующее кольцо (`ValueAnimator`) с цветовой индикацией статуса (Зеленый = Live/Мониторинг, Янтарный = Стабилизация, Голубой = Перевод, Оранжевый = Пауза).
+   - Переключатель режимов `⚡ Auto` vs `📸 Single`.
+   - Плавающий мини-диалог выбора языков со свопом `⇄` и режимом `Auto-Detect`.
+   - Интерактивный режим с поддержкой TTS-озвучивания и копирования в буфер обмена.
+3. [x] Доработать `LiveScreenTranslateService.kt`:
+   - Состояние `HudUiState` с реакцией на действия пользователя (`HudAction`).
+   - Уменьшение окна детектора стабилизации до 180 мс для быстрого отклика.
+   - Поддержка одиночного снимка по требованию (`TriggerSingleShot`).
+4. [x] Покрыть модульными тестами (`ScreenTranslateModelsTest.kt`).
 
 ## Governance
 

@@ -33,6 +33,11 @@ import kotlinx.coroutines.*
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 
+import com.translive.app.service.model.HudAction
+import com.translive.app.service.model.HudStatus
+import com.translive.app.service.model.HudUiState
+import com.translive.app.service.model.ScreenTranslateMode
+
 @AndroidEntryPoint
 class LiveScreenTranslateService : Service() {
 
@@ -52,16 +57,21 @@ class LiveScreenTranslateService : Service() {
 
     private val motionDetector = KeyframeMotionDetector(
         motionThreshold = 0.025f,
-        stableDurationMs = 300L,
+        stableDurationMs = 180L,
         gridDimension = 32
     )
 
     private var overlayRenderer: LiveOverlayRenderer? = null
     private val isProcessingFrame = AtomicBoolean(false)
-    private var isPaused = false
+    private val singleShotPending = AtomicBoolean(false)
 
-    private var sourceLanguage = Language.ENGLISH
-    private var targetLanguage = Language.RUSSIAN
+    private var hudState = HudUiState(
+        mode = ScreenTranslateMode.AUTO_LIVE,
+        status = HudStatus.MONITORING,
+        sourceLanguage = Language.ENGLISH,
+        isSourceAuto = true,
+        targetLanguage = Language.RUSSIAN
+    )
 
     private val displayListener = object : DisplayManager.DisplayListener {
         override fun onDisplayAdded(displayId: Int) {}
@@ -112,17 +122,67 @@ class LiveScreenTranslateService : Service() {
     private fun setupOverlay() {
         overlayRenderer = LiveOverlayRenderer(
             context = this,
-            onPauseResume = { paused ->
-                isPaused = paused
-                if (paused) {
+            onAction = { action -> handleHudAction(action) }
+        )
+        overlayRenderer?.show(hudState)
+    }
+
+    private fun handleHudAction(action: HudAction) {
+        when (action) {
+            is HudAction.SetMode -> {
+                hudState = hudState.copy(mode = action.mode)
+                if (action.mode == ScreenTranslateMode.SINGLE_SHOT) {
+                    overlayRenderer?.clearArOverlay()
+                }
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.TriggerSingleShot -> {
+                singleShotPending.set(true)
+            }
+            is HudAction.TogglePause -> {
+                val nextPaused = !hudState.isPaused
+                hudState = hudState.copy(
+                    isPaused = nextPaused,
+                    status = if (nextPaused) HudStatus.PAUSED else HudStatus.MONITORING
+                )
+                if (nextPaused) {
                     motionDetector.reset()
                 }
-            },
-            onClose = {
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.ToggleInteractiveMode -> {
+                hudState = hudState.copy(isInteractiveMode = !hudState.isInteractiveMode)
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.ToggleMiniLangPicker -> {
+                hudState = hudState.copy(isMiniLangPickerVisible = !hudState.isMiniLangPickerVisible)
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.SelectSourceLanguage -> {
+                hudState = hudState.copy(
+                    sourceLanguage = action.language,
+                    isSourceAuto = action.isAuto
+                )
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.SelectTargetLanguage -> {
+                hudState = hudState.copy(targetLanguage = action.language)
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.SwapLanguages -> {
+                val oldSrc = hudState.sourceLanguage
+                val oldTgt = hudState.targetLanguage
+                hudState = hudState.copy(
+                    sourceLanguage = oldTgt,
+                    targetLanguage = oldSrc,
+                    isSourceAuto = false
+                )
+                overlayRenderer?.updateState(hudState)
+            }
+            is HudAction.CloseService -> {
                 stopSelf()
             }
-        )
-        overlayRenderer?.show(sourceLanguage, targetLanguage)
+        }
     }
 
     private fun setupVirtualDisplay() {
@@ -141,7 +201,7 @@ class LiveScreenTranslateService : Service() {
         }, mainHandler)
 
         reader.setOnImageAvailableListener({ source ->
-            if (isPaused) {
+            if (hudState.isPaused) {
                 source.acquireLatestImage()?.close()
                 return@setOnImageAvailableListener
             }
@@ -174,6 +234,16 @@ class LiveScreenTranslateService : Service() {
 
     private fun handleScreenImage(image: Image, width: Int, height: Int) {
         try {
+            if (hudState.mode == ScreenTranslateMode.SINGLE_SHOT) {
+                if (singleShotPending.compareAndSet(true, false)) {
+                    if (isProcessingFrame.compareAndSet(false, true)) {
+                        val bitmap = imageToBitmap(image, width, height)
+                        processFrameBitmap(bitmap)
+                    }
+                }
+                return
+            }
+
             val plane = image.planes[0]
             val buffer = plane.buffer
             val rowStride = plane.rowStride
@@ -187,28 +257,53 @@ class LiveScreenTranslateService : Service() {
                 pixelStride = pixelStride
             )
 
-            if (detection is KeyframeMotionDetector.DetectionResult.KeyframeTriggered) {
-                if (isProcessingFrame.compareAndSet(false, true)) {
-                    val bitmap = imageToBitmap(image, width, height)
-                    serviceScope.launch {
-                        try {
-                            val frame = liveTranslationPipeline.processKeyframe(
-                                bitmap = bitmap,
-                                sourceLanguage = sourceLanguage,
-                                targetLanguage = targetLanguage,
-                                showTransliteration = settingsRepository.showTransliteration
-                            )
-                            overlayRenderer?.updateFrame(frame)
-                        } catch (_: Exception) {
-                        } finally {
-                            isProcessingFrame.set(false)
-                        }
+            when (detection) {
+                is KeyframeMotionDetector.DetectionResult.Stabilizing -> {
+                    if (hudState.status != HudStatus.STABILIZING && !isProcessingFrame.get()) {
+                        hudState = hudState.copy(status = HudStatus.STABILIZING)
+                        overlayRenderer?.updateState(hudState)
+                    }
+                }
+                is KeyframeMotionDetector.DetectionResult.KeyframeTriggered -> {
+                    if (isProcessingFrame.compareAndSet(false, true)) {
+                        val bitmap = imageToBitmap(image, width, height)
+                        processFrameBitmap(bitmap)
+                    }
+                }
+                else -> {
+                    if (hudState.status != HudStatus.MONITORING && !isProcessingFrame.get()) {
+                        hudState = hudState.copy(status = HudStatus.MONITORING)
+                        overlayRenderer?.updateState(hudState)
                     }
                 }
             }
         } catch (_: Exception) {
         } finally {
             image.close()
+        }
+    }
+
+    private fun processFrameBitmap(bitmap: Bitmap) {
+        hudState = hudState.copy(status = HudStatus.TRANSLATING)
+        overlayRenderer?.updateState(hudState)
+
+        serviceScope.launch {
+            try {
+                val frame = liveTranslationPipeline.processKeyframe(
+                    bitmap = bitmap,
+                    sourceLanguage = hudState.sourceLanguage,
+                    targetLanguage = hudState.targetLanguage,
+                    showTransliteration = settingsRepository.showTransliteration
+                )
+                overlayRenderer?.updateFrame(frame)
+            } catch (_: Exception) {
+            } finally {
+                isProcessingFrame.set(false)
+                hudState = hudState.copy(
+                    status = if (hudState.isPaused) HudStatus.PAUSED else HudStatus.MONITORING
+                )
+                overlayRenderer?.updateState(hudState)
+            }
         }
     }
 

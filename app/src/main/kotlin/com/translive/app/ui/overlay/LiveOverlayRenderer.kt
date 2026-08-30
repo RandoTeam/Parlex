@@ -6,33 +6,33 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.*
+import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.speech.tts.TextToSpeech
 import android.view.*
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.ContextCompat
-import com.translive.app.R
 import com.translive.app.data.model.Language
 import com.translive.app.engine.LiveTextBlock
 import com.translive.app.engine.LiveTranslationFrame
+import com.translive.app.service.model.HudAction
+import com.translive.app.service.model.HudStatus
+import com.translive.app.service.model.HudUiState
+import com.translive.app.service.model.ScreenTranslateMode
+import java.util.*
 import kotlin.math.abs
-import kotlin.math.max
 
 /**
- * High-performance, zero-flicker floating AR overlay renderer for live screen translation.
- *
- * Manages:
- * 1. Full-screen touch-through AR Canvas view (translates bounding boxes in-place).
- * 2. Floating draggable compact HUD pill (controls status, interactive mode, language, and closing).
+ * High-performance, zero-flicker floating AR overlay and interactive HUD controller
+ * for continuous live screen auto-translation and on-demand single shot captures.
  */
 class LiveOverlayRenderer(
     private val context: Context,
-    private val onPauseResume: (isPaused: Boolean) -> Unit,
-    private val onClose: () -> Unit
+    private val onAction: (HudAction) -> Unit
 ) {
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -40,22 +40,44 @@ class LiveOverlayRenderer(
 
     private var arOverlayView: ArOverlayCanvasView? = null
     private var hudPillView: View? = null
-
-    private var isInteractiveMode = false
-    private var isPaused = false
-    private var sourceLanguage: Language = Language.RUSSIAN
-    private var targetLanguage: Language = Language.ENGLISH
+    private var miniPickerView: View? = null
 
     private var arLayoutParams: WindowManager.LayoutParams? = null
     private var hudLayoutParams: WindowManager.LayoutParams? = null
+
+    private var currentState = HudUiState()
+
+    private var statusDotView: View? = null
+    private var statusHaloView: View? = null
+    private var modeButton: TextView? = null
+    private var singleShotButton: TextView? = null
     private var langTextView: TextView? = null
+    private var pauseBtn: TextView? = null
+    private var interactiveBtn: TextView? = null
 
-    fun show(source: Language, target: Language) {
-        this.sourceLanguage = source
-        this.targetLanguage = target
+    private var haloAnimator: ValueAnimator? = null
+    private var tts: TextToSpeech? = null
 
+    init {
+        tts = TextToSpeech(context.applicationContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale.getDefault()
+            }
+        }
+    }
+
+    fun show(initialState: HudUiState) {
+        this.currentState = initialState
         createArOverlay()
         createHudPill()
+        startPulseAnimation()
+    }
+
+    fun updateState(state: HudUiState) {
+        this.currentState = state
+        mainHandler.post {
+            updateHudVisuals()
+        }
     }
 
     fun updateFrame(frame: LiveTranslationFrame) {
@@ -64,16 +86,23 @@ class LiveOverlayRenderer(
         }
     }
 
-    fun updateLanguages(source: Language, target: Language) {
-        this.sourceLanguage = source
-        this.targetLanguage = target
+    fun clearArOverlay() {
         mainHandler.post {
-            langTextView?.text = "${source.flag} → ${target.flag}"
+            arOverlayView?.updateBlocks(emptyList())
         }
     }
 
     fun dismiss() {
         mainHandler.post {
+            haloAnimator?.cancel()
+            haloAnimator = null
+
+            tts?.stop()
+            tts?.shutdown()
+            tts = null
+
+            dismissMiniPicker()
+
             arOverlayView?.let {
                 try {
                     windowManager.removeView(it)
@@ -96,16 +125,16 @@ class LiveOverlayRenderer(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
             PixelFormat.TRANSLUCENT
         )
         arLayoutParams = params
 
         val canvasView = ArOverlayCanvasView(context) { clickedBlock ->
-            if (isInteractiveMode) {
-                copyToClipboard(clickedBlock)
+            if (currentState.isInteractiveMode) {
+                showBlockActionToast(clickedBlock)
             }
         }
         arOverlayView = canvasView
@@ -123,7 +152,7 @@ class LiveOverlayRenderer(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
@@ -139,61 +168,101 @@ class LiveOverlayRenderer(
             elevation = 16f
         }
 
-        // 1. Status Indicator (Live dot)
-        val statusDot = View(context).apply {
-            val size = (10 * dp).toInt()
+        // 1. Status Indicator Dot + Pulsing Halo Container
+        val statusBox = FrameLayout(context).apply {
+            val size = (18 * dp).toInt()
             layoutParams = LinearLayout.LayoutParams(size, size).apply {
                 marginEnd = (8 * dp).toInt()
             }
-            background = createDotDrawable(Color.parseColor("#00E676"))
         }
 
-        // 2. Language Tag
-        val langText = TextView(context).apply {
-            text = "${sourceLanguage.flag} → ${targetLanguage.flag}"
+        val halo = View(context).apply {
+            layoutParams = FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+            background = createDotDrawable(Color.parseColor("#00E676"))
+            alpha = 0.4f
+        }
+        statusHaloView = halo
+
+        val dot = View(context).apply {
+            val dotSize = (10 * dp).toInt()
+            layoutParams = FrameLayout.LayoutParams(dotSize, dotSize, Gravity.CENTER)
+            background = createDotDrawable(Color.parseColor("#00E676"))
+        }
+        statusDotView = dot
+
+        statusBox.addView(halo)
+        statusBox.addView(dot)
+
+        // 2. Mode Switch Button (Auto-Live vs Single)
+        val modeToggle = TextView(context).apply {
+            text = if (currentState.mode == ScreenTranslateMode.AUTO_LIVE) "⚡ Auto" else "📸 Single"
             textSize = 12f
             setTextColor(Color.WHITE)
             setTypeface(null, Typeface.BOLD)
-            setPadding(0, 0, (10 * dp).toInt(), 0)
+            setPadding((6 * dp).toInt(), (3 * dp).toInt(), (8 * dp).toInt(), (3 * dp).toInt())
+            background = createChipBackground(dp, Color.parseColor("#33FFFFFF"))
+            setOnClickListener {
+                val nextMode = if (currentState.mode == ScreenTranslateMode.AUTO_LIVE) {
+                    ScreenTranslateMode.SINGLE_SHOT
+                } else {
+                    ScreenTranslateMode.AUTO_LIVE
+                }
+                onAction(HudAction.SetMode(nextMode))
+            }
+        }
+        modeButton = modeToggle
+
+        // 3. Single Shot Capture Action Button (Visible only in SINGLE_SHOT mode)
+        val shotBtn = TextView(context).apply {
+            text = "🎯"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding((6 * dp).toInt(), (2 * dp).toInt(), (6 * dp).toInt(), (2 * dp).toInt())
+            visibility = if (currentState.mode == ScreenTranslateMode.SINGLE_SHOT) View.VISIBLE else View.GONE
+            setOnClickListener {
+                onAction(HudAction.TriggerSingleShot)
+            }
+        }
+        singleShotButton = shotBtn
+
+        // 4. Language Selector Chip
+        val langText = TextView(context).apply {
+            text = formatLangLabel()
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            setPadding((6 * dp).toInt(), 0, (8 * dp).toInt(), 0)
+            setOnClickListener {
+                toggleMiniPicker(params.x, params.y + (48 * dp).toInt())
+            }
         }
         langTextView = langText
 
-        // 3. Pause / Play button
-        val pauseBtn = TextView(context).apply {
-            text = "⏸"
+        // 5. Pause / Play button
+        val pause = TextView(context).apply {
+            text = if (currentState.isPaused) "▶" else "⏸"
             textSize = 14f
             setTextColor(Color.WHITE)
-            setPadding((4 * dp).toInt(), 0, (8 * dp).toInt(), 0)
+            setPadding((4 * dp).toInt(), 0, (6 * dp).toInt(), 0)
             setOnClickListener {
-                isPaused = !isPaused
-                text = if (isPaused) "▶" else "⏸"
-                statusDot.background = createDotDrawable(
-                    if (isPaused) Color.parseColor("#FFA000") else Color.parseColor("#00E676")
-                )
-                onPauseResume(isPaused)
+                onAction(HudAction.TogglePause)
             }
         }
+        pauseBtn = pause
 
-        // 4. Interactive Mode toggle (Touch-through vs Touch-to-copy)
-        val modeBtn = TextView(context).apply {
-            text = "👆"
+        // 6. Interactive Mode Toggle (Touch-through vs Touch-to-copy)
+        val modeTouch = TextView(context).apply {
+            text = if (currentState.isInteractiveMode) "✋" else "👆"
             textSize = 14f
             setTextColor(Color.WHITE)
-            setPadding((4 * dp).toInt(), 0, (8 * dp).toInt(), 0)
+            setPadding((4 * dp).toInt(), 0, (6 * dp).toInt(), 0)
             setOnClickListener {
-                isInteractiveMode = !isInteractiveMode
-                text = if (isInteractiveMode) "✋" else "👆"
-                toggleInteractiveMode(isInteractiveMode)
-                Toast.makeText(
-                    context,
-                    if (isInteractiveMode) "Интерактивный режим (нажмите на блок для копирования)"
-                    else "Режим прозрачного касания",
-                    Toast.LENGTH_SHORT
-                ).show()
+                onAction(HudAction.ToggleInteractiveMode)
             }
         }
+        interactiveBtn = modeTouch
 
-        // 5. Close button
+        // 7. Close button
         val closeBtn = TextView(context).apply {
             text = "✕"
             textSize = 14f
@@ -201,17 +270,18 @@ class LiveOverlayRenderer(
             setTypeface(null, Typeface.BOLD)
             setPadding((6 * dp).toInt(), 0, (2 * dp).toInt(), 0)
             setOnClickListener {
-                onClose()
+                onAction(HudAction.CloseService)
             }
         }
 
-        pillLayout.addView(statusDot)
+        pillLayout.addView(statusBox)
+        pillLayout.addView(modeToggle)
+        pillLayout.addView(shotBtn)
         pillLayout.addView(langText)
-        pillLayout.addView(pauseBtn)
-        pillLayout.addView(modeBtn)
+        pillLayout.addView(pause)
+        pillLayout.addView(modeTouch)
         pillLayout.addView(closeBtn)
 
-        // Dragging support for HUD Pill
         setupPillDragging(pillLayout, params)
 
         hudPillView = pillLayout
@@ -220,7 +290,52 @@ class LiveOverlayRenderer(
         } catch (_: Exception) {}
     }
 
-    private fun toggleInteractiveMode(interactive: Boolean) {
+    private fun formatLangLabel(): String {
+        val src = if (currentState.isSourceAuto) "🌐 Auto" else currentState.sourceLanguage.flag
+        return "$src → ${currentState.targetLanguage.flag}"
+    }
+
+    private fun updateHudVisuals() {
+        modeButton?.text = if (currentState.mode == ScreenTranslateMode.AUTO_LIVE) "⚡ Auto" else "📸 Single"
+        singleShotButton?.visibility = if (currentState.mode == ScreenTranslateMode.SINGLE_SHOT) View.VISIBLE else View.GONE
+        langTextView?.text = formatLangLabel()
+        pauseBtn?.text = if (currentState.isPaused) "▶" else "⏸"
+        interactiveBtn?.text = if (currentState.isInteractiveMode) "✋" else "👆"
+
+        val statusColor = when (currentState.status) {
+            HudStatus.IDLE -> Color.parseColor("#9E9E9E")
+            HudStatus.MONITORING -> Color.parseColor("#00E676")
+            HudStatus.STABILIZING -> Color.parseColor("#FFA000")
+            HudStatus.TRANSLATING -> Color.parseColor("#80D8FF")
+            HudStatus.PAUSED -> Color.parseColor("#FF9100")
+            HudStatus.ERROR -> Color.parseColor("#FF1744")
+        }
+
+        statusDotView?.background = createDotDrawable(statusColor)
+        statusHaloView?.background = createDotDrawable(statusColor)
+
+        applyTouchMode(currentState.isInteractiveMode)
+    }
+
+    private fun startPulseAnimation() {
+        haloAnimator?.cancel()
+        haloAnimator = ValueAnimator.ofFloat(1.0f, 1.4f).apply {
+            duration = 900L
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener { anim ->
+                val scale = anim.animatedValue as Float
+                val alpha = (1.4f - scale) * 1.5f
+                statusHaloView?.scaleX = scale
+                statusHaloView?.scaleY = scale
+                statusHaloView?.alpha = alpha.coerceIn(0.1f, 0.6f)
+            }
+            start()
+        }
+    }
+
+    private fun applyTouchMode(interactive: Boolean) {
         val params = arLayoutParams ?: return
         val view = arOverlayView ?: return
 
@@ -234,11 +349,144 @@ class LiveOverlayRenderer(
         } catch (_: Exception) {}
     }
 
-    private fun copyToClipboard(block: LiveTextBlock) {
+    private fun showBlockActionToast(block: LiveTextBlock) {
         val textToCopy = block.translatedText ?: block.rawText
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Parlex Live Translate", textToCopy))
-        Toast.makeText(context, "Скопировано: $textToCopy", Toast.LENGTH_SHORT).show()
+        clipboard.setPrimaryClip(ClipData.newPlainText("Parlex Translation", textToCopy))
+
+        tts?.speak(textToCopy, TextToSpeech.QUEUE_FLUSH, null, "live_trans_${System.currentTimeMillis()}")
+        Toast.makeText(context, "Copied: $textToCopy", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun toggleMiniPicker(hudX: Int, hudY: Int) {
+        if (miniPickerView != null) {
+            dismissMiniPicker()
+        } else {
+            showMiniPicker(hudX, hudY)
+        }
+    }
+
+    private fun dismissMiniPicker() {
+        miniPickerView?.let {
+            try {
+                windowManager.removeView(it)
+            } catch (_: Exception) {}
+        }
+        miniPickerView = null
+    }
+
+    private fun showMiniPicker(x: Int, y: Int) {
+        val dp = context.resources.displayMetrics.density
+        val screenWidth = context.resources.displayMetrics.widthPixels
+
+        val pickerParams = WindowManager.LayoutParams(
+            (260 * dp).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            this.x = x.coerceIn((10 * dp).toInt(), screenWidth - (270 * dp).toInt())
+            this.y = y
+        }
+
+        val container = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((12 * dp).toInt(), (10 * dp).toInt(), (12 * dp).toInt(), (10 * dp).toInt())
+            background = createPillBackground(dp)
+            elevation = 20f
+        }
+
+        val headerRow = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val autoBtn = TextView(context).apply {
+            text = if (currentState.isSourceAuto) "✓ Auto-Detect" else "Auto-Detect"
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setTypeface(null, Typeface.BOLD)
+            setPadding((8 * dp).toInt(), (4 * dp).toInt(), (8 * dp).toInt(), (4 * dp).toInt())
+            background = createChipBackground(dp, if (currentState.isSourceAuto) Color.parseColor("#4CAF50") else Color.parseColor("#33FFFFFF"))
+            setOnClickListener {
+                onAction(HudAction.SelectSourceLanguage(currentState.sourceLanguage, isAuto = true))
+                dismissMiniPicker()
+            }
+        }
+
+        val swapBtn = TextView(context).apply {
+            text = "⇄"
+            textSize = 16f
+            setTextColor(Color.WHITE)
+            setPadding((10 * dp).toInt(), 0, (10 * dp).toInt(), 0)
+            setOnClickListener {
+                onAction(HudAction.SwapLanguages)
+                dismissMiniPicker()
+            }
+        }
+
+        headerRow.addView(autoBtn)
+        headerRow.addView(swapBtn)
+        container.addView(headerRow)
+
+        val pinned = listOf(
+            Language.RUSSIAN, Language.ENGLISH, Language.CHINESE_SIMPLIFIED,
+            Language.JAPANESE, Language.KOREAN, Language.VIETNAMESE,
+            Language.GERMAN, Language.FRENCH, Language.SPANISH
+        )
+
+        val targetLabel = TextView(context).apply {
+            text = "Target Language:"
+            textSize = 11f
+            setTextColor(Color.LTGRAY)
+            setPadding(0, (8 * dp).toInt(), 0, (4 * dp).toInt())
+        }
+        container.addView(targetLabel)
+
+        val grid = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+        }
+
+        var row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        for ((index, lang) in pinned.withIndex()) {
+            val isSelected = currentState.targetLanguage == lang
+            val chip = TextView(context).apply {
+                text = "${lang.flag} ${lang.displayName}"
+                textSize = 11f
+                setTextColor(Color.WHITE)
+                setPadding((6 * dp).toInt(), (4 * dp).toInt(), (6 * dp).toInt(), (4 * dp).toInt())
+                background = createChipBackground(dp, if (isSelected) Color.parseColor("#3F51B5") else Color.parseColor("#22FFFFFF"))
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    setMargins((2 * dp).toInt(), (2 * dp).toInt(), (2 * dp).toInt(), (2 * dp).toInt())
+                }
+                setOnClickListener {
+                    onAction(HudAction.SelectTargetLanguage(lang))
+                    dismissMiniPicker()
+                }
+            }
+            row.addView(chip)
+
+            if ((index + 1) % 3 == 0 || index == pinned.size - 1) {
+                grid.addView(row)
+                row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+            }
+        }
+        container.addView(grid)
+
+        container.setOnTouchListener { _, event ->
+            if (event.action == MotionEvent.ACTION_OUTSIDE) {
+                dismissMiniPicker()
+                true
+            } else false
+        }
+
+        miniPickerView = container
+        try {
+            windowManager.addView(container, pickerParams)
+        } catch (_: Exception) {}
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -269,6 +517,7 @@ class LiveOverlayRenderer(
                     if (isMoving) {
                         params.x = initialX + dx
                         params.y = initialY + dy
+                        dismissMiniPicker()
                         try {
                             windowManager.updateViewLayout(view, params)
                         } catch (_: Exception) {}
@@ -280,19 +529,26 @@ class LiveOverlayRenderer(
         }
     }
 
-    private fun createPillBackground(dp: Float): android.graphics.drawable.Drawable {
-        val shape = android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.RECTANGLE
+    private fun createPillBackground(dp: Float): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
             cornerRadius = 24 * dp
-            setColor(Color.parseColor("#E61E1E2C")) // Frosted dark
+            setColor(Color.parseColor("#E61E1E2C"))
             setStroke((1 * dp).toInt(), Color.parseColor("#44FFFFFF"))
         }
-        return shape
     }
 
-    private fun createDotDrawable(color: Int): android.graphics.drawable.Drawable {
-        return android.graphics.drawable.GradientDrawable().apply {
-            shape = android.graphics.drawable.GradientDrawable.OVAL
+    private fun createChipBackground(dp: Float, color: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 12 * dp
+            setColor(color)
+        }
+    }
+
+    private fun createDotDrawable(color: Int): GradientDrawable {
+        return GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
             setColor(color)
         }
     }
