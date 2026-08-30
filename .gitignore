@@ -40,7 +40,8 @@ app/src/main/cpp/llama.cpp/
 app/src/main/cpp/whisper.cpp/
 app/src/main/cpp/MNN/
 
-# Local planning and release scratch
+# Local planning, research and release scratch
+/.research/
 /plans/
 /scratch/
 /tmp/

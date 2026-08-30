@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.TranslationPolicy
 import com.translive.app.i18n.AppLocale
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
@@ -46,6 +47,7 @@ fun SettingsScreen(
     val backend by viewModel.backend.collectAsState()
     val hideKeyboardOnTextTranslate by viewModel.hideKeyboardOnTextTranslate.collectAsState()
     val showTechnicalTranslationStats by viewModel.showTechnicalTranslationStats.collectAsState()
+    val translationPolicy by viewModel.translationPolicy.collectAsState()
     val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
 
     Scaffold(
@@ -137,6 +139,35 @@ fun SettingsScreen(
                     onClick = {
                         applyAppLanguage(context, viewModel, AppLocale.CHINESE_TRADITIONAL)
                     }
+                )
+            }
+
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text("Режим перевода", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Быстрый результат через компактный офлайн-пакет или перевод сразу локальной LLM.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TranslationPolicyOption(
+                    label = "Быстрый",
+                    description = "Только быстрый офлайн-перевод",
+                    selected = translationPolicy == TranslationPolicy.FAST,
+                    onClick = { viewModel.setTranslationPolicy(TranslationPolicy.FAST) }
+                )
+                TranslationPolicyOption(
+                    label = "Быстрый + улучшить",
+                    description = "Быстрый результат и кнопка улучшения через LLM",
+                    selected = translationPolicy == TranslationPolicy.FAST_WITH_LLM_IMPROVE,
+                    onClick = { viewModel.setTranslationPolicy(TranslationPolicy.FAST_WITH_LLM_IMPROVE) }
+                )
+                TranslationPolicyOption(
+                    label = "Сразу через LLM",
+                    description = "Качественный перевод без промежуточного результата",
+                    selected = translationPolicy == TranslationPolicy.LLM_ONLY,
+                    onClick = { viewModel.setTranslationPolicy(TranslationPolicy.LLM_ONLY) }
                 )
             }
 
@@ -407,6 +438,8 @@ private fun SectionHeader(icon: ImageVector, title: String) {
             icon, null,
             modifier = Modifier.size(18.dp),
             tint = MaterialTheme.colorScheme.primary
+
+
         )
         Spacer(modifier = Modifier.width(8.dp))
         Text(
@@ -493,6 +526,37 @@ private fun BackendOption(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
                     alpha = if (enabled) 1f else 0.4f
                 )
+            )
+        }
+    }
+}
+
+@Composable
+private fun TranslationPolicyOption(
+    label: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        RadioButton(
+            selected = selected,
+            onClick = onClick
+        )
+        Column(modifier = Modifier.padding(start = 4.dp)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

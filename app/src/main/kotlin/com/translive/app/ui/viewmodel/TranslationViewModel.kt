@@ -7,12 +7,14 @@ import androidx.lifecycle.viewModelScope
 import com.translive.app.R
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.TranslationPolicy
 import com.translive.app.data.db.TranslationDao
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.TranslationEntry
 import com.translive.app.engine.LanguageDetectionEngine
 import com.translive.app.engine.LiteRtTranslationEngine
+import com.translive.app.engine.FastTranslateEngine
 import com.translive.app.engine.TranslationEngine
 import com.translive.app.engine.SystemTtsEngine
 import com.translive.app.i18n.LocalizedTextProvider
@@ -43,7 +45,12 @@ data class TranslationUiState(
     val isModelLoading: Boolean = false,
     val activeModelName: String? = null,
     val error: String? = null,
-    val stats: TranslationStats? = null
+    val stats: TranslationStats? = null,
+    val isFastResult: Boolean = false,
+    val canImproveWithLlm: Boolean = false,
+    val isImprovingWithLlm: Boolean = false,
+    val fastTranslationText: String = "",
+    val fastNmtMissing: Boolean = false
 )
 
 @HiltViewModel
@@ -52,6 +59,7 @@ class TranslationViewModel @Inject constructor(
     private val engine: TranslationEngine,
     private val languageDetectionEngine: LanguageDetectionEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
+    private val fastTranslateEngine: FastTranslateEngine,
     private val translationDao: TranslationDao,
     private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
@@ -214,7 +222,198 @@ class TranslationViewModel @Inject constructor(
         settings.textSourceAuto = false
     }
 
+
     fun translate() {
+        val state = _uiState.value
+        if (state.sourceText.isBlank() || state.isTranslating) return
+
+        val policy = settings.translationPolicy
+
+        when (policy) {
+            TranslationPolicy.FAST -> translateFast()
+            TranslationPolicy.FAST_WITH_LLM_IMPROVE -> translateFastWithImproveOption()
+            TranslationPolicy.LLM_ONLY -> translateWithLlm()
+        }
+    }
+
+    private fun translateFast() {
+        val state = _uiState.value
+        _uiState.update {
+            it.copy(isTranslating = true, error = null, stats = null, translatedText = "",
+                isFastResult = false, canImproveWithLlm = false, isImprovingWithLlm = false,
+                fastTranslationText = "", fastNmtMissing = false)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val effectiveSource = resolveSourceLanguageForTranslation(state)
+                val activated = fastTranslateEngine.activateDownloadedPair(
+                    effectiveSource.code, state.targetLanguage.code
+                )
+                if (!activated) {
+                    _uiState.update {
+                        it.copy(isTranslating = false, fastNmtMissing = true,
+                            error = "Install fast translation packages for this language pair in Models")
+                    }
+                    return@launch
+                }
+                val startTime = System.currentTimeMillis()
+                val result = fastTranslateEngine.translate(state.sourceText)
+                val elapsed = System.currentTimeMillis() - startTime
+                _uiState.update {
+                    it.copy(translatedText = result, isTranslating = false,
+                        isFastResult = true, canImproveWithLlm = false,
+                        stats = TranslationStats(totalTimeMs = elapsed))
+                }
+                savedStateHandle["translatedText"] = result
+                translationDao.insertTranslation(
+                    TranslationEntry(
+                        sourceLanguage = effectiveSource.code,
+                        targetLanguage = state.targetLanguage.code,
+                        sourceText = state.sourceText,
+                        translatedText = result
+                    )
+                )
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isTranslating = false, error = "Fast translation error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun translateFastWithImproveOption() {
+        val state = _uiState.value
+        _uiState.update {
+            it.copy(isTranslating = true, error = null, stats = null, translatedText = "",
+                isFastResult = false, canImproveWithLlm = false, isImprovingWithLlm = false,
+                fastTranslationText = "", fastNmtMissing = false)
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val effectiveSource = resolveSourceLanguageForTranslation(state)
+                val activated = fastTranslateEngine.activateDownloadedPair(
+                    effectiveSource.code, state.targetLanguage.code
+                )
+                if (activated) {
+                    val startTime = System.currentTimeMillis()
+                    val fastResult = fastTranslateEngine.translate(state.sourceText)
+                    val elapsed = System.currentTimeMillis() - startTime
+                    _uiState.update {
+                        it.copy(translatedText = fastResult, isTranslating = false,
+                            isFastResult = true, canImproveWithLlm = true,
+                            fastTranslationText = fastResult,
+                            stats = TranslationStats(totalTimeMs = elapsed))
+                    }
+                    savedStateHandle["translatedText"] = fastResult
+                    translationDao.insertTranslation(
+                        TranslationEntry(
+                            sourceLanguage = effectiveSource.code,
+                            targetLanguage = state.targetLanguage.code,
+                            sourceText = state.sourceText,
+                            translatedText = fastResult
+                        )
+                    )
+                } else {
+                    // NMT not available — fall through to LLM directly
+                    translateWithLlm()
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isTranslating = false, error = "Translation error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun improveWithLlm() {
+        val state = _uiState.value
+        if (state.isImprovingWithLlm || state.sourceText.isBlank()) return
+
+        _uiState.update { it.copy(isImprovingWithLlm = true, canImproveWithLlm = false, error = null) }
+
+        val runtime = modelRepository.getActiveRuntime()
+        val loaded = if (runtime == ModelRuntime.LITERT_LM) liteRtEngine.isLoaded else engine.isLoaded
+
+        if (!loaded) {
+            loadModel()
+            viewModelScope.launch {
+                _uiState.first { !it.isModelLoading }
+                if (_uiState.value.isModelLoaded) {
+                    improveWithLlm()
+                } else {
+                    _uiState.update { it.copy(isImprovingWithLlm = false, canImproveWithLlm = true) }
+                }
+            }
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val effectiveSourceLanguage = resolveSourceLanguageForTranslation(state)
+                val startTime = System.currentTimeMillis()
+                val textBuilder = StringBuilder()
+                var streamResult: TranslationEngine.StreamResult? = null
+
+                if (runtime == ModelRuntime.LITERT_LM) {
+                    liteRtEngine.translateStreaming(
+                        sourceText = state.sourceText,
+                        source = effectiveSourceLanguage,
+                        target = state.targetLanguage
+                    ).collect { token ->
+                        textBuilder.append(token)
+                        _uiState.update { it.copy(translatedText = textBuilder.toString().trim()) }
+                    }
+                } else {
+                    engine.inferenceMutex.lock()
+                    try {
+                        engine.translateStreaming(
+                            sourceText = state.sourceText,
+                            source = effectiveSourceLanguage,
+                            target = state.targetLanguage,
+                            onComplete = { streamResult = it }
+                        ).collect { token ->
+                            textBuilder.append(token)
+                            _uiState.update { it.copy(translatedText = textBuilder.toString().trim()) }
+                        }
+                    } finally {
+                        engine.inferenceMutex.unlock()
+                    }
+                }
+
+                val elapsed = System.currentTimeMillis() - startTime
+                val result = textBuilder.toString().trim()
+                val promptTokens = streamResult?.promptTokens ?: 0
+                val genTokens = streamResult?.generatedTokens ?: 0
+                val tps = if (elapsed > 0) genTokens * 1000f / elapsed else 0f
+
+                _uiState.update {
+                    it.copy(
+                        translatedText = result,
+                        isImprovingWithLlm = false,
+                        isFastResult = false,
+                        canImproveWithLlm = false,
+                        stats = TranslationStats(
+                            promptTokens = promptTokens,
+                            generatedTokens = genTokens,
+                            totalTimeMs = elapsed,
+                            tokensPerSecond = tps,
+                            backend = if (runtime == ModelRuntime.LITERT_LM) liteRtEngine.currentBackend else engine.currentBackend,
+                            hasNativeTokenMetrics = runtime != ModelRuntime.LITERT_LM
+                        )
+                    )
+                }
+                savedStateHandle["translatedText"] = result
+                resetIdleTimer()
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isImprovingWithLlm = false, canImproveWithLlm = true,
+                        error = "LLM improvement error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun translateWithLlm() {
         val state = _uiState.value
         if (state.sourceText.isBlank() || state.isTranslating) return
 
@@ -236,7 +435,8 @@ class TranslationViewModel @Inject constructor(
             return
         }
 
-        _uiState.update { it.copy(isTranslating = true, error = null, stats = null, translatedText = "") }
+        _uiState.update { it.copy(isTranslating = true, error = null, stats = null, translatedText = "",
+            isFastResult = false, canImproveWithLlm = false, isImprovingWithLlm = false, fastTranslationText = "", fastNmtMissing = false) }
 
         viewModelScope.launch(Dispatchers.IO) {
             try {

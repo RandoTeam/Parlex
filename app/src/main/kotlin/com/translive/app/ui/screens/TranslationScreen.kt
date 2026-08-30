@@ -203,7 +203,7 @@ fun TranslationScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .height(52.dp),
-                enabled = uiState.sourceText.isNotBlank() && !uiState.isTranslating && !uiState.isModelLoading,
+                enabled = uiState.sourceText.isNotBlank() && !uiState.isTranslating && !uiState.isModelLoading && !uiState.isImprovingWithLlm,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
@@ -299,6 +299,25 @@ fun TranslationScreen(
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
+                        // Mode badge
+                        if (uiState.isFastResult) {
+                            Row(
+                                modifier = Modifier.padding(bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "⚡ NMT",
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                }
+                            }
+                        }
                         Text(
                             text = uiState.translatedText,
                             style = MaterialTheme.typography.bodyLarge,
@@ -340,6 +359,27 @@ fun TranslationScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.End
                         ) {
+                            // Magic Wand: improve with LLM
+                            if (uiState.canImproveWithLlm || uiState.isImprovingWithLlm) {
+                                IconButton(
+                                    onClick = { viewModel.improveWithLlm() },
+                                    enabled = !uiState.isImprovingWithLlm
+                                ) {
+                                    if (uiState.isImprovingWithLlm) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.Filled.AutoFixHigh,
+                                            contentDescription = "Improve with LLM",
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
+                            }
                             IconButton(onClick = {
                                 clipboardManager.setText(AnnotatedString(uiState.translatedText))
                             }) {

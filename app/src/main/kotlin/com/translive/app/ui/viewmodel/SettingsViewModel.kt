@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.TranslationPolicy
 import com.translive.app.data.model.ModelRuntime
 import com.translive.app.engine.LiteRtTranslationEngine
 import com.translive.app.engine.OcrMnnRuntime
@@ -44,6 +45,9 @@ class SettingsViewModel @Inject constructor(
 
     private val _showTechnicalTranslationStats = MutableStateFlow(settings.showTechnicalTranslationStats)
     val showTechnicalTranslationStats: StateFlow<Boolean> = _showTechnicalTranslationStats.asStateFlow()
+
+    private val _translationPolicy = MutableStateFlow(settings.translationPolicy)
+    val translationPolicy: StateFlow<TranslationPolicy> = _translationPolicy.asStateFlow()
 
     private val _runtimeDiagnostics = MutableStateFlow<String?>(null)
     val runtimeDiagnostics: StateFlow<String?> = _runtimeDiagnostics.asStateFlow()
@@ -86,6 +90,11 @@ class SettingsViewModel @Inject constructor(
     fun setShowTechnicalTranslationStats(value: Boolean) {
         settings.showTechnicalTranslationStats = value
         _showTechnicalTranslationStats.value = value
+    }
+
+    fun setTranslationPolicy(value: TranslationPolicy) {
+        settings.translationPolicy = value
+        _translationPolicy.value = value
     }
 
     fun activeModelSupportsCpu(): Boolean = modelRepository.getActiveVariant()?.supportsCpu ?: true

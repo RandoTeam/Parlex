@@ -10,6 +10,7 @@ import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.TranslationPolicy
 import com.translive.app.engine.*
 import com.translive.app.i18n.LocalizedTextProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -52,6 +53,7 @@ data class DialogueUiState(
 @HiltViewModel
 class DialogueViewModel @Inject constructor(
     private val app: Application,
+    private val fastTranslateEngine: FastTranslateEngine,
     private val engine: TranslationEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
     private val modelRepository: ModelRepository,
@@ -99,12 +101,21 @@ class DialogueViewModel @Inject constructor(
         sourceText: String,
         source: Language,
         target: Language
-    ): String =
-        if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+    ): String {
+        val policy = settings.translationPolicy
+        if (policy == TranslationPolicy.FAST || policy == TranslationPolicy.FAST_WITH_LLM_IMPROVE) {
+            val activated = fastTranslateEngine.activateDownloadedPair(source.code, target.code)
+            if (activated) {
+                return fastTranslateEngine.translate(sourceText)
+            }
+        }
+        
+        return if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
             liteRtEngine.translateSafe(sourceText, source, target)
         } else {
             engine.translateSafe(sourceText, source, target)
         }
+    }
 
     init {
         // Initialize system TTS immediately — no download needed

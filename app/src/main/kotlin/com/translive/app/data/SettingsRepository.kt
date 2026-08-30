@@ -25,6 +25,7 @@ class SettingsRepository @Inject constructor(
         private const val KEY_TEXT_TARGET_LANGUAGE = "text_target_language"
         private const val KEY_HIDE_KEYBOARD_ON_TEXT_TRANSLATE = "hide_keyboard_on_text_translate"
         private const val KEY_SHOW_TECHNICAL_TRANSLATION_STATS = "show_technical_translation_stats"
+        private const val KEY_TRANSLATION_POLICY = "translation_policy"
         private const val KEY_CAMERA_SOURCE_LANGUAGE = "camera_source_language"
         private const val KEY_CAMERA_SOURCE_AUTO = "camera_source_auto"
         private const val KEY_CAMERA_TARGET_LANGUAGE = "camera_target_language"
@@ -84,6 +85,10 @@ class SettingsRepository @Inject constructor(
     var showTechnicalTranslationStats: Boolean
         get() = prefs.getBoolean(KEY_SHOW_TECHNICAL_TRANSLATION_STATS, false)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_TECHNICAL_TRANSLATION_STATS, value).apply()
+
+    var translationPolicy: TranslationPolicy
+        get() = TranslationPolicy.fromPersisted(prefs.getString(KEY_TRANSLATION_POLICY, null))
+        set(value) = prefs.edit().putString(KEY_TRANSLATION_POLICY, value.persistedValue).apply()
 
     var cameraSourceLanguage: Language
         get() = getLanguage(KEY_CAMERA_SOURCE_LANGUAGE, Language.RUSSIAN)

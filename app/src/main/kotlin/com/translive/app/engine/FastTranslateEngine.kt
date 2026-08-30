@@ -23,19 +23,19 @@ import javax.inject.Singleton
 import kotlin.coroutines.resume
 
 /**
- * Fast on-device NMT for camera translation (~20ms per sentence).
+ * Fast on-device NMT for fast translation (~20ms per sentence).
  * Uses Google ML Kit Translation API — small models (~30MB per language pair).
  *
  * This is separate from the main TranslationEngine (HY-MT LLM) because:
- * - Camera needs realtime speed (~100ms total pipeline)
- * - HY-MT is too slow for camera (2-5 seconds per translation)
+ * - Some surfaces need realtime speed (~100ms total pipeline)
+ * - HY-MT is too slow for these surfaces (2-5 seconds per translation)
  * - ML Kit quality is lower but sufficient for visual context
  */
 @Singleton
-class CameraTranslateEngine @Inject constructor() {
+class FastTranslateEngine @Inject constructor() {
 
     companion object {
-        private const val TAG = "CameraTranslateEngine"
+        private const val TAG = "FastTranslateEngine"
     }
 
     private var currentTranslator: Translator? = null
@@ -50,7 +50,7 @@ class CameraTranslateEngine @Inject constructor() {
 
     data class PackageStatus(
         val supported: Boolean,
-        /** ML Kit language codes required for the current camera pair. */
+        /** ML Kit language codes required for the current language pair. */
         val requiredLanguageCodes: Set<String> = emptySet(),
         val downloadedLanguageCodes: Set<String> = emptySet()
     ) {
@@ -148,8 +148,8 @@ class CameraTranslateEngine @Inject constructor() {
     }
 
     /**
-     * Returns the exact on-device packages needed for a camera language pair.
-     * This is intentionally separate from activation: opening the camera must
+     * Returns the exact on-device packages needed for a language pair.
+     * This is intentionally separate from activation: opening a fast translation surface must
      * never make an implicit network request.
      */
     suspend fun getPackageStatus(sourceCode: String, targetCode: String): PackageStatus {
@@ -239,7 +239,7 @@ class CameraTranslateEngine @Inject constructor() {
         }
     }
 
-    /** Downloads only the missing reusable packages for a pair without changing the active camera translator. */
+    /** Downloads only the missing reusable packages for a pair without changing the active fast translator. */
     suspend fun downloadPairPackages(sourceCode: String, targetCode: String): Boolean {
         val status = getPackageStatus(sourceCode, targetCode)
         return status.supported && downloadLanguagePackages(status.missingLanguageCodes)
@@ -344,3 +344,4 @@ class CameraTranslateEngine @Inject constructor() {
         currentTargetLang = ""
     }
 }
+

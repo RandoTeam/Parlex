@@ -15,8 +15,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
 import com.translive.app.data.SettingsRepository
+import com.translive.app.data.TranslationPolicy
 import com.translive.app.data.model.Language
-import com.translive.app.engine.CameraTranslateEngine
+import com.translive.app.engine.FastTranslateEngine
 import com.translive.app.engine.LanguageDetectionEngine
 import com.translive.app.engine.OcrLine
 import com.translive.app.engine.OcrResult
@@ -208,17 +209,23 @@ class CameraViewModel @Inject constructor(
     private val ocrEngine: OcrEngine,
     private val languageDetectionEngine: LanguageDetectionEngine,
     private val translationEngine: TranslationEngine,
-    private val cameraTranslateEngine: CameraTranslateEngine,
+    private val fastTranslateEngine: FastTranslateEngine,
     private val settings: SettingsRepository,
     val systemTts: SystemTtsEngine,
     private val texts: LocalizedTextProvider
 ) : ViewModel() {
 
+    val initialCameraMode = when (settings.translationPolicy) {
+        TranslationPolicy.LLM_ONLY -> CameraTranslationMode.QUALITY
+        else -> CameraTranslationMode.FAST
+    }
+
     private val _uiState = MutableStateFlow(
         CameraUiState(
             sourceLanguage = settings.cameraSourceLanguage,
             isSourceAuto = settings.cameraSourceAuto,
-            targetLanguage = settings.cameraTargetLanguage
+            targetLanguage = settings.cameraTargetLanguage,
+            translationMode = initialCameraMode
         )
     )
     val uiState: StateFlow<CameraUiState> = _uiState.asStateFlow()
@@ -252,12 +259,12 @@ class CameraViewModel @Inject constructor(
     init {
         // Observe ML Kit translation readiness
         viewModelScope.launch {
-            cameraTranslateEngine.isReady.collect { ready ->
+            fastTranslateEngine.isReady.collect { ready ->
                 _uiState.update { it.copy(isNmtReady = isNmtReadyForState(it, ready)) }
             }
         }
         viewModelScope.launch {
-            cameraTranslateEngine.isDownloading.collect { downloading ->
+            fastTranslateEngine.isDownloading.collect { downloading ->
                 _uiState.update { it.copy(isNmtDownloading = downloading) }
             }
         }
@@ -359,13 +366,13 @@ class CameraViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isNmtPairSupported = true,
-                        isNmtReady = isNmtReadyForState(it, cameraTranslateEngine.isReady.value),
+                        isNmtReady = isNmtReadyForState(it, fastTranslateEngine.isReady.value),
                         nmtError = null
                     )
                 }
                 return@launch
             }
-            val status = cameraTranslateEngine.getPackageStatus(
+            val status = fastTranslateEngine.getPackageStatus(
                 state.sourceLanguage.code,
                 state.targetLanguage.code
             )
@@ -384,7 +391,7 @@ class CameraViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val ok = cameraTranslateEngine.activateDownloadedPair(
+            val ok = fastTranslateEngine.activateDownloadedPair(
                 state.sourceLanguage.code,
                 state.targetLanguage.code
             )
@@ -406,7 +413,7 @@ class CameraViewModel @Inject constructor(
         val state = _uiState.value
         if (state.isSourceAuto || !state.isNmtPairSupported) return
         viewModelScope.launch(Dispatchers.IO) {
-            val ok = cameraTranslateEngine.downloadAndActivate(
+            val ok = fastTranslateEngine.downloadAndActivate(
                 state.sourceLanguage.code,
                 state.targetLanguage.code
             )
@@ -423,7 +430,7 @@ class CameraViewModel @Inject constructor(
         val source = if (state.isSourceAuto) state.detectedSourceLanguage else state.sourceLanguage
         if (source == null) return false
         if (source.code == state.targetLanguage.code) return true
-        return engineReady && cameraTranslateEngine.isReadyFor(source.code, state.targetLanguage.code)
+        return engineReady && fastTranslateEngine.isReadyFor(source.code, state.targetLanguage.code)
     }
 
     fun startFullResolutionCapture() {
@@ -570,7 +577,7 @@ class CameraViewModel @Inject constructor(
                     lineBoxes = rawLines.map { it.boundingBox },
                     sourceLanguage = liveOcr.sourceLanguage,
                     canTranslate = liveOcr.sourceLanguage.code == state.targetLanguage.code ||
-                        cameraTranslateEngine.isReadyFor(liveOcr.sourceLanguage.code, state.targetLanguage.code)
+                        fastTranslateEngine.isReadyFor(liveOcr.sourceLanguage.code, state.targetLanguage.code)
                 )
 
                 if (rawLines.isEmpty()) {
@@ -752,7 +759,7 @@ class CameraViewModel @Inject constructor(
      */
     private fun reportLiveTranslationReadiness(sourceLanguage: Language, targetLanguage: Language) {
         if (sourceLanguage.code == targetLanguage.code) return
-        if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
+        if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
         val key = "${sourceLanguage.code}:${targetLanguage.code}"
         if (lastLivePairWarningKey == key) return
         lastLivePairWarningKey = key
@@ -763,10 +770,10 @@ class CameraViewModel @Inject constructor(
 
     private suspend fun prepareCaptureTranslateModel(sourceLanguage: Language, targetLanguage: Language) {
         if (sourceLanguage.code == targetLanguage.code) return
-        if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
-        if (cameraTranslateEngine.isPreparingFor(sourceLanguage.code, targetLanguage.code)) return
+        if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
+        if (fastTranslateEngine.isPreparingFor(sourceLanguage.code, targetLanguage.code)) return
 
-        val ok = cameraTranslateEngine.activateDownloadedPair(
+        val ok = fastTranslateEngine.activateDownloadedPair(
             sourceLanguage.code,
             targetLanguage.code
         )
@@ -789,7 +796,7 @@ class CameraViewModel @Inject constructor(
             .distinctBy { it.code }
             .all { sourceLanguage ->
                 sourceLanguage.code == targetLanguage.code ||
-                    cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)
+                    fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)
             }
 
     private fun canTranslateCapture(
@@ -816,7 +823,7 @@ class CameraViewModel @Inject constructor(
             }
         }
 
-        if (!cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+        if (!fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
             // ML Kit is only the realtime accelerator. Languages which do not
             // have an ML Kit package must still work offline through the
             // already loaded local translation model. Keep this fallback
@@ -858,7 +865,7 @@ class CameraViewModel @Inject constructor(
         }
 
         if (missingTexts.isNotEmpty()) {
-            val freshTranslations = cameraTranslateEngine.translateLines(missingTexts)
+            val freshTranslations = fastTranslateEngine.translateLines(missingTexts)
             missingKeys.forEachIndexed { index, key ->
                 val translated = freshTranslations.getOrElse(index) { missingTexts[index] }
                 liveTranslationCache[key] = translated
@@ -1311,14 +1318,14 @@ class CameraViewModel @Inject constructor(
         allowedLanguages: List<Language>
     ): Language {
         val allowedModelCodes = allowedLanguages.mapNotNull { language ->
-            cameraTranslateEngine.toMlKitLang(language.code)
+            fastTranslateEngine.toMlKitLang(language.code)
         }.toSet()
         // If the local main model is loaded, languages without an ML Kit
         // package are valid camera sources through the quality fallback.
         if (translationEngine.isLoaded) return detected.takeIf { it in Language.allLanguages } ?: fallback
         return when {
-            cameraTranslateEngine.toMlKitLang(detected.code) in allowedModelCodes -> detected
-            cameraTranslateEngine.toMlKitLang(fallback.code) in allowedModelCodes -> fallback
+            fastTranslateEngine.toMlKitLang(detected.code) in allowedModelCodes -> detected
+            fastTranslateEngine.toMlKitLang(fallback.code) in allowedModelCodes -> fallback
             else -> allowedLanguages.firstOrNull() ?: fallback
         }
     }
@@ -1330,9 +1337,9 @@ class CameraViewModel @Inject constructor(
      * where correctness is preferable to live-frame latency.
      */
     private suspend fun autoCaptureOcrCandidates(): List<Language> {
-        val downloadedModelCodes = cameraTranslateEngine.downloadedLanguageCodes()
+        val downloadedModelCodes = fastTranslateEngine.downloadedLanguageCodes()
         val installed = Language.allLanguages.filter { language ->
-            cameraTranslateEngine.toMlKitLang(language.code) in downloadedModelCodes
+            fastTranslateEngine.toMlKitLang(language.code) in downloadedModelCodes
         }
         val available = installed.ifEmpty { AUTO_CAPTURE_FALLBACK_LANGUAGES }
         return available
@@ -1930,8 +1937,8 @@ class CameraViewModel @Inject constructor(
         if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) return sourceText
 
         prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
-        return if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
-            cameraTranslateEngine.translateLines(listOf(sourceText))
+        return if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+            fastTranslateEngine.translateLines(listOf(sourceText))
                 .firstOrNull()
                 ?.let { sanitizeDocumentTranslation(it) }
                 ?.takeIf { it.isNotBlank() }
@@ -2052,7 +2059,7 @@ class CameraViewModel @Inject constructor(
         // languages supported in the camera workflow by using the local main
         // model as a deterministic fallback.  It is slower than ML Kit, so
         // the UI still reports that the fast package is unavailable.
-        if (!cameraTranslateEngine.getPackageStatus(sourceLanguage.code, targetLanguage.code).supported) {
+        if (!fastTranslateEngine.getPackageStatus(sourceLanguage.code, targetLanguage.code).supported) {
             return if (translationEngine.isLoaded) {
                 translateCaptureLinesWithMainModel(lines, sourceLanguage, targetLanguage)
             } else {
@@ -2061,8 +2068,8 @@ class CameraViewModel @Inject constructor(
         }
 
         prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
-        return if (cameraTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
-            cameraTranslateEngine.translateLines(texts)
+        return if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+            fastTranslateEngine.translateLines(texts)
         } else {
             texts
         }
@@ -2827,7 +2834,7 @@ class CameraViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        cameraTranslateEngine.release()
+        fastTranslateEngine.release()
     }
 }
 

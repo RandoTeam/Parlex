@@ -17,7 +17,7 @@ import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
 import com.translive.app.engine.DownloadState
 import com.translive.app.engine.LiteRtTranslationEngine
-import com.translive.app.engine.CameraTranslateEngine
+import com.translive.app.engine.FastTranslateEngine
 import com.translive.app.engine.ModelDownloadManager
 import com.translive.app.engine.SpeechEngine
 import com.translive.app.engine.TranslationEngine
@@ -135,7 +135,7 @@ class ModelManagerViewModel @Inject constructor(
     private val engine: TranslationEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
     private val speechEngine: SpeechEngine,
-    private val cameraTranslateEngine: CameraTranslateEngine,
+    private val FastTranslateEngine: FastTranslateEngine,
     private val settings: SettingsRepository,
     private val texts: LocalizedTextProvider
 ) : ViewModel() {
@@ -171,7 +171,7 @@ class ModelManagerViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            cameraTranslateEngine.isDownloading.collect { downloading ->
+            FastTranslateEngine.isDownloading.collect { downloading ->
                 _uiState.update { state ->
                     state.copy(cameraPack = state.cameraPack?.copy(isDownloading = downloading))
                 }
@@ -273,21 +273,21 @@ class ModelManagerViewModel @Inject constructor(
         val target = settings.cameraTargetLanguage
         val isAutoSource = settings.cameraSourceAuto
         viewModelScope.launch(Dispatchers.IO) {
-            val status = cameraTranslateEngine.getPackageStatus(source.code, target.code)
-            val downloadedCodes = cameraTranslateEngine.downloadedLanguageCodes()
-            val languagePacks = cameraTranslateEngine.availableLanguagePackages().map { pack ->
+            val status = FastTranslateEngine.getPackageStatus(source.code, target.code)
+            val downloadedCodes = FastTranslateEngine.downloadedLanguageCodes()
+            val languagePacks = FastTranslateEngine.availableLanguagePackages().map { pack ->
                 CameraLanguagePackUiState(
                     modelLanguageCode = pack.modelLanguageCode,
                     languages = pack.languages,
                     fastSupported = pack.fastSupported,
                     isDownloaded = pack.modelLanguageCode in downloadedCodes,
-                    isDownloading = cameraTranslateEngine.isDownloading.value
+                    isDownloading = FastTranslateEngine.isDownloading.value
                 )
             }
             val existingPair = _uiState.value.cameraPackagePair
             val pairSource = existingPair?.sourceLanguage ?: source
             val pairTarget = existingPair?.targetLanguage ?: target
-            val pairStatus = cameraTranslateEngine.getPackageStatus(pairSource.code, pairTarget.code)
+            val pairStatus = FastTranslateEngine.getPackageStatus(pairSource.code, pairTarget.code)
             _uiState.update {
                 it.copy(
                     cameraPack = CameraTranslationPackUiState(
@@ -296,7 +296,7 @@ class ModelManagerViewModel @Inject constructor(
                         isAutoSource = isAutoSource,
                         supported = status.supported,
                         isReady = status.isReady,
-                        isDownloading = cameraTranslateEngine.isDownloading.value,
+                        isDownloading = FastTranslateEngine.isDownloading.value,
                         requiredPackageCount = status.requiredLanguageCodes.size,
                         downloadedPackageCount = status.downloadedLanguageCodes.count {
                             it in status.requiredLanguageCodes
@@ -308,7 +308,7 @@ class ModelManagerViewModel @Inject constructor(
                         targetLanguage = pairTarget,
                         fastSupported = pairStatus.supported,
                         isReady = pairStatus.isReady,
-                        isDownloading = existingPair?.isDownloading == true || cameraTranslateEngine.isDownloading.value,
+                        isDownloading = existingPair?.isDownloading == true || FastTranslateEngine.isDownloading.value,
                         requiredPackageCount = pairStatus.requiredLanguageCodes.size,
                         downloadedPackageCount = pairStatus.downloadedLanguageCodes.count {
                             it in pairStatus.requiredLanguageCodes
@@ -327,7 +327,7 @@ class ModelManagerViewModel @Inject constructor(
             state.copy(cameraPack = pack.copy(isDownloading = true))
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val activated = cameraTranslateEngine.downloadAndActivate(
+            val activated = FastTranslateEngine.downloadAndActivate(
                 pack.sourceLanguage.code,
                 pack.targetLanguage.code
             )
@@ -381,7 +381,7 @@ class ModelManagerViewModel @Inject constructor(
         if (pair.isReady || pair.isDownloading) return
         _uiState.update { it.copy(cameraPackagePair = pair.copy(isDownloading = true)) }
         viewModelScope.launch(Dispatchers.IO) {
-            val downloaded = cameraTranslateEngine.downloadPairPackages(
+            val downloaded = FastTranslateEngine.downloadPairPackages(
                 pair.sourceLanguage.code,
                 pair.targetLanguage.code
             )
@@ -406,7 +406,7 @@ class ModelManagerViewModel @Inject constructor(
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
-            val downloaded = cameraTranslateEngine.downloadLanguagePackages(listOf(modelLanguageCode))
+            val downloaded = FastTranslateEngine.downloadLanguagePackages(listOf(modelLanguageCode))
             if (!downloaded) {
                 _uiState.update { it.copy(error = tr(R.string.camera_pack_download_failed)) }
             }
@@ -867,3 +867,4 @@ class ModelManagerViewModel @Inject constructor(
         Log.i(TAG, "Extraction complete")
     }
 }
+
