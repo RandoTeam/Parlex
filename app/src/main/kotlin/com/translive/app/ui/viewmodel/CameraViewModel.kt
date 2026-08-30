@@ -14,9 +14,12 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
+import com.translive.app.data.DictionaryRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.TranslationPolicy
+import com.translive.app.data.model.DictionaryEntry
 import com.translive.app.data.model.Language
+import com.translive.app.engine.CurrencyAugmentor
 import com.translive.app.engine.FastTranslateEngine
 import com.translive.app.engine.LanguageDetectionEngine
 import com.translive.app.engine.OcrLine
@@ -202,6 +205,8 @@ data class CameraUiState(
     val qualityWarnings: List<CameraQualityWarning> = emptyList(),
     val bilingualParagraphs: List<BilingualParagraph> = emptyList(),
     val selectedParagraph: BilingualParagraph? = null,
+    val selectedParagraphCurrency: String? = null,
+    val selectedWordDictionaryEntries: List<DictionaryEntry> = emptyList(),
     val isSpeaking: Boolean = false
 ) {
     val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
@@ -214,6 +219,8 @@ class CameraViewModel @Inject constructor(
     private val languageDetectionEngine: LanguageDetectionEngine,
     private val translationEngine: TranslationEngine,
     private val fastTranslateEngine: FastTranslateEngine,
+    private val dictionaryRepository: DictionaryRepository,
+    private val currencyAugmentor: CurrencyAugmentor,
     private val settings: SettingsRepository,
     val systemTts: SystemTtsEngine,
     private val texts: LocalizedTextProvider
@@ -1196,7 +1203,52 @@ class CameraViewModel @Inject constructor(
     }
 
     fun selectParagraph(paragraph: BilingualParagraph?) {
-        _uiState.update { it.copy(selectedParagraph = paragraph) }
+        if (paragraph == null) {
+            _uiState.update {
+                it.copy(
+                    selectedParagraph = null,
+                    selectedParagraphCurrency = null,
+                    selectedWordDictionaryEntries = emptyList()
+                )
+            }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                selectedParagraph = paragraph,
+                selectedParagraphCurrency = null,
+                selectedWordDictionaryEntries = emptyList()
+            )
+        }
+        viewModelScope.launch {
+            val textWithCurrency = "${paragraph.sourceText} ${paragraph.translatedText}"
+            val augmented = currencyAugmentor.augment(textWithCurrency, paragraph.sourceLanguage)
+            val currencyMatch = Regex("""\((≈\s*[^)]+)\)""").find(augmented)?.value
+            _uiState.update { it.copy(selectedParagraphCurrency = currencyMatch) }
+        }
+    }
+
+    fun lookupWordInDictionary(word: String) {
+        val paragraph = _uiState.value.selectedParagraph ?: return
+        viewModelScope.launch {
+            val entries = dictionaryRepository.lookupWord(
+                rawWord = word,
+                sourceLang = paragraph.sourceLanguage.code,
+                targetLang = paragraph.targetLanguage.code
+            )
+            _uiState.update { it.copy(selectedWordDictionaryEntries = entries) }
+        }
+    }
+
+    fun dismissDictionaryLookup() {
+        _uiState.update { it.copy(selectedWordDictionaryEntries = emptyList()) }
+    }
+
+    fun toggleFavoriteDictionaryEntry(entry: DictionaryEntry) {
+        viewModelScope.launch {
+            dictionaryRepository.toggleFavorite(entry)
+            lookupWordInDictionary(entry.headword)
+        }
     }
 
     fun speakText(text: String, langCode: String) {

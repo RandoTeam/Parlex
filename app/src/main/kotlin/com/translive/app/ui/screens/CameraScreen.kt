@@ -581,6 +581,11 @@ fun CameraScreen(
                             paragraphs = uiState.bilingualParagraphs,
                             selectedParagraph = uiState.selectedParagraph,
                             onSelectParagraph = viewModel::selectParagraph,
+                            currencyConversion = uiState.selectedParagraphCurrency,
+                            dictionaryEntries = uiState.selectedWordDictionaryEntries,
+                            onWordClick = viewModel::lookupWordInDictionary,
+                            onToggleFavoriteWord = viewModel::toggleFavoriteDictionaryEntry,
+                            onDismissDictionary = viewModel::dismissDictionaryLookup,
                             isSpeaking = uiState.isSpeaking,
                             onSpeakText = viewModel::speakText,
                             onStopSpeech = viewModel::stopSpeech
@@ -1543,6 +1548,11 @@ private fun CaptureImageView(
     paragraphs: List<BilingualParagraph>,
     selectedParagraph: BilingualParagraph?,
     onSelectParagraph: (BilingualParagraph?) -> Unit,
+    currencyConversion: String? = null,
+    dictionaryEntries: List<com.translive.app.data.model.DictionaryEntry> = emptyList(),
+    onWordClick: (String) -> Unit = {},
+    onToggleFavoriteWord: (com.translive.app.data.model.DictionaryEntry) -> Unit = {},
+    onDismissDictionary: () -> Unit = {},
     isSpeaking: Boolean,
     onSpeakText: (String, String) -> Unit,
     onStopSpeech: () -> Unit
@@ -1655,6 +1665,11 @@ private fun CaptureImageView(
         BilingualInspectBottomSheet(
             paragraph = selectedParagraph,
             isSpeaking = isSpeaking,
+            currencyConversion = currencyConversion,
+            dictionaryEntries = dictionaryEntries,
+            onWordClick = onWordClick,
+            onToggleFavoriteWord = onToggleFavoriteWord,
+            onDismissDictionary = onDismissDictionary,
             onSpeak = onSpeakText,
             onStopSpeech = onStopSpeech,
             onDismiss = { onSelectParagraph(null) }
