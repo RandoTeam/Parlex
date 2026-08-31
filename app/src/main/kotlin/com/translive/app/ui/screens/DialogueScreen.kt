@@ -8,11 +8,12 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -23,19 +24,23 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
 import com.translive.app.data.model.Language
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
-import com.translive.app.ui.viewmodel.DialogueUiMessage
 import com.translive.app.ui.viewmodel.DialoguePhase
+import com.translive.app.ui.viewmodel.DialogueUiMessage
 import com.translive.app.ui.viewmodel.DialogueViewModel
 
 @Composable
@@ -49,7 +54,7 @@ fun DialogueScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
 
     // Microphone permission
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -57,7 +62,7 @@ fun DialogueScreen(
     ) { granted -> viewModel.setMicPermission(granted) }
 
     LaunchedEffect(Unit) {
-        val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+        val granted = ContextCompat.checkSelfPermission(
             context, Manifest.permission.RECORD_AUDIO
         ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         if (granted) viewModel.setMicPermission(true)
@@ -92,7 +97,7 @@ fun DialogueScreen(
             // Header with phase indicator
             DialogueHeader(phase = uiState.phase)
 
-            // Language selector
+            // Zero-Emoji Material 3 Language selector
             var showSourceLangPicker by remember { mutableStateOf(false) }
             var showTargetLangPicker by remember { mutableStateOf(false) }
 
@@ -120,6 +125,7 @@ fun DialogueScreen(
                     onDismiss = { showTargetLangPicker = false }
                 )
             }
+
             // Check readiness
             val allReady = uiState.isTranslationModelReady && uiState.isSttReady
 
@@ -149,11 +155,12 @@ fun DialogueScreen(
                         }
                     }
 
-                    items(uiState.messages) { message ->
+                    itemsIndexed(uiState.messages) { index, message ->
                         DialogueBubble(
                             message = message,
                             onSpeakSource = { viewModel.speakMessage(message.sourceText, message.sourceLang) },
                             onSpeakTranslation = { viewModel.speakMessage(message.translatedText, message.targetLang) },
+                            onImproveWithLlm = { viewModel.improveMessageWithLlm(index) },
                             ttsReady = uiState.isTtsReady
                         )
                     }
@@ -379,7 +386,27 @@ private fun DialogueLanguageSelector(
     ) {
         AssistChip(
             onClick = onSourceClick,
-            label = { Text("${sourceLanguage.flag} ${sourceLanguage.nativeName}") },
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.padding(end = 6.dp)
+                    ) {
+                        Text(
+                            text = sourceLanguage.code.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = sourceLanguage.nativeName,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            },
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp),
             enabled = enabled
@@ -403,7 +430,27 @@ private fun DialogueLanguageSelector(
 
         AssistChip(
             onClick = onTargetClick,
-            label = { Text("${targetLanguage.flag} ${targetLanguage.nativeName}") },
+            label = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.padding(end = 6.dp)
+                    ) {
+                        Text(
+                            text = targetLanguage.code.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = targetLanguage.nativeName,
+                        style = MaterialTheme.typography.labelMedium
+                    )
+                }
+            },
             modifier = Modifier.weight(1f),
             shape = RoundedCornerShape(12.dp),
             enabled = enabled
@@ -442,21 +489,55 @@ private fun ConversationButton(
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         if (isActive) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
+                FilledTonalButton(
                     onClick = onSpeakSource,
-                    enabled = phase == DialoguePhase.LISTENING
+                    enabled = phase == DialoguePhase.LISTENING,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Icon(Icons.Filled.Mic, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("${sourceLanguage.flag} ${sourceLanguage.nativeName}")
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        modifier = Modifier.padding(end = 6.dp)
+                    ) {
+                        Text(
+                            text = sourceLanguage.code.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                    Text(
+                        text = sourceLanguage.nativeName,
+                        style = MaterialTheme.typography.labelMedium
+                    )
                 }
-                Button(
+                FilledTonalButton(
                     onClick = onSpeakTarget,
-                    enabled = phase == DialoguePhase.LISTENING
+                    enabled = phase == DialoguePhase.LISTENING,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     Icon(Icons.Filled.Mic, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("${targetLanguage.flag} ${targetLanguage.nativeName}")
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
+                        modifier = Modifier.padding(end = 6.dp)
+                    ) {
+                        Text(
+                            text = targetLanguage.code.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
+                    Text(
+                        text = targetLanguage.nativeName,
+                        style = MaterialTheme.typography.labelMedium
+                    )
                 }
             }
             Spacer(modifier = Modifier.height(14.dp))
@@ -493,10 +574,10 @@ private fun DialogueBubble(
     message: DialogueUiMessage,
     onSpeakSource: () -> Unit,
     onSpeakTranslation: () -> Unit,
+    onImproveWithLlm: () -> Unit,
     ttsReady: Boolean
 ) {
-    val langLabel = Language.allLanguages.find { it.code == message.sourceLang }?.flag ?: "🌐"
-    val targetLabel = Language.allLanguages.find { it.code == message.targetLang }?.flag ?: "🌐"
+    val clipboard = LocalClipboardManager.current
 
     Column(modifier = Modifier.fillMaxWidth()) {
         // Source (original speech)
@@ -505,29 +586,64 @@ private fun DialogueBubble(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.Bottom
         ) {
-            if (ttsReady) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.padding(end = 4.dp, bottom = 4.dp)
+            ) {
                 IconButton(
-                    onClick = onSpeakSource,
+                    onClick = { clipboard.setText(AnnotatedString(message.sourceText)) },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        Icons.Filled.VolumeUp, stringResource(R.string.cd_speak),
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                        Icons.Filled.ContentCopy,
+                        contentDescription = stringResource(R.string.cd_copy),
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
+                if (ttsReady) {
+                    IconButton(
+                        onClick = onSpeakSource,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = stringResource(R.string.cd_speak),
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
             }
-            Text(
-                text = langLabel,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(end = 4.dp, bottom = 8.dp)
-            )
+
             Surface(
                 shape = RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp),
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.widthIn(max = 280.dp)
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = message.sourceLang.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     Text(
                         text = message.sourceText,
                         color = MaterialTheme.colorScheme.onPrimary,
@@ -559,6 +675,57 @@ private fun DialogueBubble(
                 modifier = Modifier.widthIn(max = 280.dp)
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = message.targetLang.uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            )
+                        }
+
+                        // Runtime Provenance Badge: FAST vs LLM
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (message.isLlmRefined) MaterialTheme.colorScheme.tertiaryContainer
+                                    else MaterialTheme.colorScheme.surfaceContainerHigh
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                            ) {
+                                if (message.isLlmRefined) {
+                                    Icon(
+                                        Icons.Filled.AutoAwesome,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(10.dp),
+                                        tint = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                }
+                                Text(
+                                    text = if (message.isLlmRefined) "LLM" else "FAST",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (message.isLlmRefined) MaterialTheme.colorScheme.onTertiaryContainer
+                                            else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     Text(
                         text = message.translatedText,
                         color = MaterialTheme.colorScheme.onSecondaryContainer,
@@ -574,21 +741,62 @@ private fun DialogueBubble(
                     }
                 }
             }
-            Text(
-                text = targetLabel,
-                fontSize = 14.sp,
-                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-            )
-            if (ttsReady) {
+
+            // Action buttons on the right of translation bubble
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+            ) {
+                // Inline LLM Upgrade button
+                if (!message.isLlmRefined) {
+                    if (message.isImproving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .padding(4.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    } else {
+                        IconButton(
+                            onClick = onImproveWithLlm,
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.AutoAwesome,
+                                contentDescription = "Improve with LLM",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.tertiary
+                            )
+                        }
+                    }
+                }
+
                 IconButton(
-                    onClick = onSpeakTranslation,
+                    onClick = { clipboard.setText(AnnotatedString(message.translatedText)) },
                     modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
-                        Icons.Filled.VolumeUp, stringResource(R.string.cd_speak),
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.primary
+                        Icons.Filled.ContentCopy,
+                        contentDescription = stringResource(R.string.cd_copy),
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
+                }
+
+                if (ttsReady) {
+                    IconButton(
+                        onClick = onSpeakTranslation,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = stringResource(R.string.cd_speak),
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
         }

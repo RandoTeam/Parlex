@@ -20,6 +20,10 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+
 enum class ListeningState { IDLE, LISTENING, PROCESSING, ERROR }
 
 data class SpeechResult(
@@ -40,6 +44,7 @@ class SpeechEngine @Inject constructor(
     companion object {
         private const val TAG = "SpeechEngine"
         private const val SAMPLE_RATE = 16000
+        private const val POST_TTS_REVERB_COOLDOWN_MS = 300L
     }
 
     private var vad: Vad? = null
@@ -53,6 +58,10 @@ class SpeechEngine @Inject constructor(
     val state: StateFlow<ListeningState> = _state.asStateFlow()
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
+    // AEC Suppression & Reverb Cooldown Tracking
+    private val aecMuteUntilTimestampMs = AtomicLong(0L)
+    private val isAecSuppressed = AtomicBoolean(false)
 
     private val sttDir: File get() = File(context.filesDir, "stt")
     val vadFile: File get() = File(sttDir, "silero_vad.onnx")
@@ -186,6 +195,25 @@ class SpeechEngine @Inject constructor(
         }
     }
 
+    /**
+     * Signals AEC suppression and resets the post-TTS cooldown timer.
+     */
+    fun notifyTtsPlaybackStarted() {
+        isAecSuppressed.set(true)
+    }
+
+    fun notifyTtsPlaybackFinished() {
+        aecMuteUntilTimestampMs.set(SystemClock.elapsedRealtime() + POST_TTS_REVERB_COOLDOWN_MS)
+        isAecSuppressed.set(false)
+    }
+
+    /**
+     * Resets the Silero VAD state to discard partial frames.
+     */
+    fun resetVad() {
+        vad?.reset()
+    }
+
     fun startListening(language: String, singleShot: Boolean, onResult: (SpeechResult) -> Unit) {
         if (_state.value == ListeningState.LISTENING) return
         if (!_isReady.value || currentLanguage != language.take(2) || currentSpeechModel != settings.speechModel) {
@@ -211,9 +239,26 @@ class SpeechEngine @Inject constructor(
         _state.value = ListeningState.LISTENING
         listenJob = CoroutineScope(Dispatchers.IO).launch {
             val samples = ShortArray(512)
+            var wasSuppressed = false
+
             while (isActive && _state.value == ListeningState.LISTENING) {
                 val read = audioRecord?.read(samples, 0, samples.size) ?: -1
                 if (read <= 0) continue
+
+                val isSuppressed = isAecSuppressed.get()
+                val isInCooldown = SystemClock.elapsedRealtime() < aecMuteUntilTimestampMs.get()
+                val shouldDropFrames = isSuppressed || isInCooldown
+
+                if (shouldDropFrames) {
+                    wasSuppressed = true
+                    continue
+                }
+
+                if (wasSuppressed) {
+                    vad?.reset()
+                    wasSuppressed = false
+                }
+
                 vad?.acceptWaveform(FloatArray(read) { samples[it] / 32768.0f })
                 while (vad?.empty() == false) {
                     val segment = vad?.front()
