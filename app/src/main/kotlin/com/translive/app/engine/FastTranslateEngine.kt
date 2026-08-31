@@ -245,6 +245,26 @@ class FastTranslateEngine @Inject constructor() {
         return status.supported && downloadLanguagePackages(status.missingLanguageCodes)
     }
 
+    /** Deletes an on-device ML Kit language package. */
+    suspend fun deleteLanguagePackage(modelLanguageCode: String): Boolean {
+        val mlKitCode = toMlKitLang(modelLanguageCode) ?: modelLanguageCode
+        return try {
+            val manager = RemoteModelManager.getInstance()
+            val model = TranslateRemoteModel.Builder(mlKitCode).build()
+            suspendCancellableCoroutine<Boolean> { cont ->
+                manager.deleteDownloadedModel(model)
+                    .addOnSuccessListener { if (cont.isActive) cont.resume(true) }
+                    .addOnFailureListener {
+                        Log.w(TAG, "Failed to delete ML Kit language package: $mlKitCode", it)
+                        if (cont.isActive) cont.resume(false)
+                    }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting ML Kit package $mlKitCode", e)
+            false
+        }
+    }
+
     /**
      * Activates only an already installed pair. It never starts a download.
      */

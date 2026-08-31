@@ -2,14 +2,15 @@ package com.translive.app.ui.viewmodel
 
 import android.net.Uri
 import android.content.Context
-
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
+import com.translive.app.data.LanguagePackRepository
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.Language
+import com.translive.app.data.model.LanguagePack
 import com.translive.app.data.model.ModelCatalog
 import com.translive.app.data.model.ModelFamily
 import com.translive.app.data.model.ModelRuntime
@@ -69,6 +70,7 @@ data class ModelManagerUiState(
     val families: List<FamilyUiState> = emptyList(),
     val models: List<ModelItemState> = emptyList(),
     val externalModels: List<ModelItemState> = emptyList(),
+    val travelPacks: List<LanguagePack> = emptyList(),
     val totalDownloadedSize: Long = 0L,
     val availableSpace: Long = 0L,
     val isLoadingModel: Boolean = false,
@@ -138,6 +140,7 @@ class ModelManagerViewModel @Inject constructor(
     private val speechEngine: SpeechEngine,
     private val FastTranslateEngine: FastTranslateEngine,
     private val dictionaryRepository: com.translive.app.data.DictionaryRepository,
+    private val languagePackRepository: LanguagePackRepository,
     private val settings: SettingsRepository,
     private val texts: LocalizedTextProvider
 ) : ViewModel() {
@@ -170,6 +173,11 @@ class ModelManagerViewModel @Inject constructor(
         viewModelScope.launch {
             downloadManager.activeDownloads.collect { downloads ->
                 updateDownloadStates(downloads)
+            }
+        }
+        viewModelScope.launch {
+            languagePackRepository.packs.collect { packs ->
+                _uiState.update { it.copy(travelPacks = packs) }
             }
         }
         viewModelScope.launch {
@@ -272,6 +280,19 @@ class ModelManagerViewModel @Inject constructor(
             dictionaryRepository.ensureSeeded()
             val count = dictionaryRepository.getTotalEntryCount()
             _uiState.update { it.copy(dictionaryEntriesCount = count) }
+            languagePackRepository.refreshPackStatuses()
+        }
+    }
+
+    fun downloadTravelPack(packId: String) {
+        viewModelScope.launch {
+            languagePackRepository.downloadLanguagePack(packId)
+        }
+    }
+
+    fun deleteTravelPack(packId: String) {
+        viewModelScope.launch {
+            languagePackRepository.removeLanguagePack(packId)
         }
     }
 

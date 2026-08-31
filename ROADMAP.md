@@ -112,18 +112,20 @@
    translation-oriented модели и поддержка в текущем native runtime.
 4. Для каждой модели фиксировать качество, скорость, RAM и лицензионные риски.
 
-## Фаза P1: Offline Language Packs
+## Фаза P1: Offline Language Packs [COMPLETED]
 
-Цель: пользователь видит не отдельные модели, а готовые offline-сценарии.
+Статус: выполнена (2026-08-31).
 
-Первые пакеты:
+Цель: пользователь видит не отдельные разрозненные файлы, а целостные офлайн-сценарии с атомарной загрузкой и прозрачным учетом занятого пространства.
 
-- Russian-English travel pack.
-- English-Russian camera pack.
-- Vietnamese-English travel pack.
+Реализованные пакеты и функциональность:
 
-В каждый пакет должны входить перевод, OCR assets, STT readiness и TTS readiness,
-если они доступны на устройстве.
+1. [x] Создана модель данных `LanguagePackModels.kt` (`PackComponentType`, `ComponentInstallStatus`, `PackOverallStatus`, `LanguagePack`, `TravelPacksCatalog`).
+2. [x] Каталог готовых Travel Packs: 🇷🇺 ↔ 🇬🇧 RU-EN, 🇻🇳 ↔ 🇬🇧 VI-EN, 🇨🇳 ↔ 🇬🇧 ZH-EN, 🇪🇸 ↔ 🇬🇧 ES-EN, 🇯🇵 ↔ 🇬🇧 JA-EN, 🇩🇪 ↔ 🇬🇧 DE-EN, 🇫🇷 ↔ 🇬🇧 FR-EN.
+3. [x] Создан координатор `LanguagePackRepository.kt` (мульти-компонентная атомарная верификация и загрузка NMT через `FastTranslateEngine`, словаря через `DictionaryRepository`, STT через `SpeechEngine`, OCR-скриптов и системного TTS).
+4. [x] Создан хаб `LanguagePacksHubSection` и карточки `TravelPackCard` в `LanguagePackComponents.kt` с многосегментным прогресс-баром и детальным списком модулей.
+5. [x] Интеграция в `ModelManagerViewModel.kt` и `ModelManagerScreen.kt`.
+6. [x] Покрыто модульными тестами (`LanguagePackRepositoryTest.kt`).
 
 ## Фаза F1: Fast NMT На Всех Поверхностях
 

@@ -36,6 +36,7 @@ import com.translive.app.data.model.SttModelInfo
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
+import com.translive.app.ui.components.LanguagePacksHubSection
 import com.translive.app.ui.viewmodel.CameraPackagePairUiState
 import com.translive.app.ui.viewmodel.FamilyUiState
 import com.translive.app.ui.viewmodel.CameraTranslationPackUiState
@@ -151,6 +152,18 @@ fun ModelManagerScreen(
                     availableSpace = uiState.availableSpace,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                 )
+            }
+
+            // Travel Packs Hub
+            if (uiState.travelPacks.isNotEmpty()) {
+                item(key = "travel_packs", contentType = "travel_packs") {
+                    LanguagePacksHubSection(
+                        packs = uiState.travelPacks,
+                        onDownloadPack = viewModel::downloadTravelPack,
+                        onDeletePack = viewModel::deleteTravelPack,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+                }
             }
 
             // Loading indicator
