@@ -1,6 +1,6 @@
 # Project Stage Snapshot
 
-Snapshot date: 2026-06-20
+Snapshot date: 2026-08-31
 
 ## Repository
 
@@ -23,21 +23,17 @@ Snapshot date: 2026-06-20
 
 ## Current Functional Stage
 
-- Text translation works offline with source auto-detection and separately
-  persisted language direction.
-- Dialogue mode works with its own persisted language direction, STT, translation,
-  and system TTS.
-- Camera mode is beta and supports live translation, full-resolution capture,
-  gallery photo translation, source auto-detection, mixed-language capture logic,
-  torch, camera candidates exposed by Android CameraX, quality hints, and debug
-  capture packs in debug builds.
-- Model catalog contains Tencent HY-MT 1.5, Tencent Hy-MT2, Google
-  TranslateGemma GGUF, and TranslateGemma LiteRT-LM Beta entries.
-- Interface localization is implemented for system, English, Russian, Simplified
-  Chinese, and Traditional Chinese.
-- GitHub Actions `Android Check` builds debug APKs for pull requests and pushes
-  to `main`; it does not publish releases.
-- Contributor workflow exists through `CONTRIBUTING.md` and the PR template.
+- **Multi-Tier Translation Policy**: Fast NMT (ML Kit, ~30ms, 0MB LLM RAM), Fast + Improve, and LLM Direct across Text, Dialogue, Camera, and Screen Translation.
+- **Screen Translation & Floating HUD**: Continuous Auto-Live AR translation and Single-Shot mode with animated pulsating HUD, mini language picker, clipboard copy, and TTS readout.
+- **Transliteration Engine**: Offline ICU Transliterator for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul.
+- **Built-in Offline Dictionary**: Room DB lexicon with fast word lookup, grammatical categorization, and TSV lexicon import.
+- **PDF Document Translation**: High-DPI page rendering, semantic paragraph extraction, bilingual overlay/split mode, and TXT/PDF export.
+- **Zero-Key Live Currency Converter**: Real-time multi-currency detection ($50, 100€, 10 000₫, 1 500₽) with baseline offline conversion into user's preferred home currency.
+- **Camera Document Polish & Travel Mode**: 2-stage OCR box clustering, gradient inpainting, interactive inspect sheet, Luma SAD stability/lighting analyzer, and dietary allergen classification across 33 languages.
+- **Live Subtitle Mode**: Spatio-temporal text tracking with IoU matching and Levenshtein jitter filtering for dynamic video/presentation subtitle teleprompter.
+- **Offline Language Packs**: Unified multi-component travel packs (RU-EN, VI-EN, ZH-EN, ES-EN, JA-EN, DE-EN, FR-EN) coordinating NMT, Dictionary, STT, and OCR assets.
+- **Audited Model Catalog & Performance Tiers**: Pinned SHA-256 checksums, memory bounds, and tier badges (`⚡ Fast / Budget`, `⭐ Balanced`, `💎 Max Quality`, `🚀 GPU-Accelerated`).
+- **LiteRT-LM Beta Benchmark**: Comprehensive 38-language evaluation suite, TTFT/throughput profiler, and CPU/GPU fallback telemetry.
 
 ## Repository Work Recently Completed
 
