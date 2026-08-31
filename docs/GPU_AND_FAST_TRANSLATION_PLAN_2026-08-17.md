@@ -13,7 +13,7 @@
 - CPU remains the fallback only for driver failure or a measured loss. It is
   not a substitute for implementing a working Adreno GPU path.
 
-## Phase 1 — Adreno compatibility and performance
+## Phase 1 — Adreno compatibility and performance [COMPLETED]
 
 1. Audit current pinned llama.cpp/MNN revisions and Android OpenCL loader
    integration against upstream and PocketPal's Android bridge.

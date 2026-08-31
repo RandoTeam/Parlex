@@ -132,13 +132,24 @@ class TranslationEngine {
             val profile = customProfile ?: AdrenoProfileRegistry.detectCurrentDeviceProfile()
 
             val (nGpuLayers, effectiveThreads) = if (useGpu) {
-                val freeRamBytes = Runtime.getRuntime().freeMemory() + (Runtime.getRuntime().maxMemory() - Runtime.getRuntime().totalMemory())
+                var memAvailableBytes = 1_500_000_000L
+                try {
+                    java.io.File("/proc/meminfo").forEachLine { line ->
+                        if (line.startsWith("MemAvailable:")) {
+                            val parts = line.split("\\s+".toRegex())
+                            if (parts.size >= 2) memAvailableBytes = parts[1].toLong() * 1024L
+                        }
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                
                 val modelFile = java.io.File(modelPath)
                 val modelBytes = if (modelFile.exists()) modelFile.length() else 1_200_000_000L
                 val layers = profile.calculateGpuLayers(
                     modelTotalBytes = modelBytes,
                     modelLayerCount = 28,
-                    availableRamBytes = freeRamBytes.coerceAtLeast(1_500_000_000L)
+                    availableRamBytes = memAvailableBytes
                 )
                 val threads = profile.hostThreads.coerceIn(1, Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
                 Pair(layers, threads)
