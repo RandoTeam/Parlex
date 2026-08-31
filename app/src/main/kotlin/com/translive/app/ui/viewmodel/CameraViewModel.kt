@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
 import com.translive.app.data.DictionaryRepository
+import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.TranslationPolicy
 import com.translive.app.data.model.DictionaryEntry
@@ -208,7 +209,8 @@ data class CameraUiState(
     val selectedParagraphCurrency: String? = null,
     val selectedWordDictionaryEntries: List<DictionaryEntry> = emptyList(),
     val isSpeaking: Boolean = false,
-    val subtitleState: LiveSubtitleUiState = LiveSubtitleUiState()
+    val subtitleState: LiveSubtitleUiState = LiveSubtitleUiState(),
+    val isLlmTranslating: Boolean = false
 ) {
     val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
 }
@@ -222,6 +224,7 @@ class CameraViewModel @Inject constructor(
     private val fastTranslateEngine: FastTranslateEngine,
     private val dictionaryRepository: DictionaryRepository,
     private val currencyAugmentor: CurrencyAugmentor,
+    private val modelRepository: ModelRepository,
     private val settings: SettingsRepository,
     val systemTts: SystemTtsEngine,
     private val texts: LocalizedTextProvider
@@ -337,6 +340,43 @@ class CameraViewModel @Inject constructor(
         clearLiveSession()
     }
 
+    fun improveCaptureWithLlm() {
+        val bitmap = _uiState.value.capturedBitmap ?: return
+        if (_uiState.value.isCaptureProcessing || _uiState.value.isLlmTranslating) return
+
+        translateJob?.cancel()
+        translateJob = viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update {
+                it.copy(
+                    translationMode = CameraTranslationMode.QUALITY,
+                    captureStatus = CaptureStatus.PROCESSING,
+                    isLlmTranslating = true,
+                    captureMessage = texts.text(R.string.camera_improving_with_llm),
+                    nmtError = null
+                )
+            }
+            try {
+                ensureLlmModelLoaded()
+                processCaptureBitmap(
+                    bitmap = bitmap,
+                    sourceLanguage = _uiState.value.sourceLanguage,
+                    sourceAuto = _uiState.value.isSourceAuto,
+                    targetLanguage = _uiState.value.targetLanguage
+                )
+            } catch (e: Exception) {
+                Log.e("CameraVM", "LLM capture improvement failed: ${e.message}", e)
+                _uiState.update {
+                    it.copy(
+                        captureStatus = CaptureStatus.ERROR,
+                        captureMessage = texts.text(R.string.camera_capture_processing_error)
+                    )
+                }
+            } finally {
+                _uiState.update { it.copy(isLlmTranslating = false) }
+            }
+        }
+    }
+
     fun swapLanguages() {
         if (_uiState.value.isSourceAuto) return
 
@@ -370,7 +410,8 @@ class CameraViewModel @Inject constructor(
                 qualityWarnings = emptyList(),
                 bilingualParagraphs = emptyList(),
                 selectedParagraph = null,
-                isSpeaking = false
+                isSpeaking = false,
+                isLlmTranslating = false
             )
         }
     }
@@ -447,6 +488,23 @@ class CameraViewModel @Inject constructor(
         if (source == null) return false
         if (source.code == state.targetLanguage.code) return true
         return engineReady && fastTranslateEngine.isReadyFor(source.code, state.targetLanguage.code)
+    }
+
+    private suspend fun ensureLlmModelLoaded(): Boolean {
+        if (translationEngine.isLoaded) return true
+        val modelPath = modelRepository.getActiveModelPath() ?: return false
+        val modelFile = File(modelPath)
+        if (!modelFile.exists() || modelFile.length() == 0L) return false
+        return try {
+            translationEngine.loadModel(
+                modelPath = modelPath,
+                nThreads = settings.threads,
+                backend = settings.backend
+            )
+        } catch (e: Exception) {
+            Log.e("CameraVM", "Failed to load LLM model on demand: ${e.message}", e)
+            false
+        }
     }
 
     fun startFullResolutionCapture() {
@@ -1520,10 +1578,11 @@ class CameraViewModel @Inject constructor(
 
     private fun autoOcrCandidateOrder(language: Language): Int = when (autoOcrBackendKey(language)) {
         "mlkit-latin" -> 0
-        "mlkit-chinese" -> 1
-        "mlkit-japanese" -> 2
-        "mlkit-korean" -> 3
-        "mlkit-devanagari" -> 4
+        "tesseract-cyrillic" -> 1
+        "mlkit-chinese" -> 2
+        "mlkit-japanese" -> 3
+        "mlkit-korean" -> 4
+        "mlkit-devanagari" -> 5
         else -> 10
     }
 
@@ -1628,7 +1687,13 @@ class CameraViewModel @Inject constructor(
         attempts.maxByOrNull { attempt ->
             var score = attempt.score.selectionScore
             if (attempt.score.isStrongForExpectedScript) score += 18f else score -= 10f
-            if (attempt.language == Language.ENGLISH) score += 6f
+            val text = extractRawCaptureLines(attempt.result).joinToString(" ") { it.text }
+            if (languageDetectionEngine.isLatinKrakozyabry(text)) {
+                score -= 35f
+            }
+            if (attempt.score.expectedScript == OcrTextScript.CYRILLIC && attempt.score.expectedLetterCount >= 2) {
+                score += 25f
+            }
             score
         } ?: attempts.first()
 
@@ -2069,7 +2134,7 @@ class CameraViewModel @Inject constructor(
 
         if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && translationEngine.isLoaded) {
             runCatching {
-                val maxTokens = (sourceText.length * 2).coerceIn(512, 2048)
+                val maxTokens = CameraLlmTokenBudget.estimateTokenBudget(sourceText.length)
                 translationEngine.translateSafe(sourceText, sourceLanguage, targetLanguage, maxTokens)
             }.onSuccess { translated ->
                 val normalized = sanitizeDocumentTranslation(translated)
@@ -2095,7 +2160,7 @@ class CameraViewModel @Inject constructor(
 
     private fun sanitizeDocumentTranslation(text: String): String =
         text.lines()
-            .map { line -> stripStructuredLineId(line).trim() }
+            .map { line -> CameraLlmTagParser.stripTag(line, "L").trim() }
             .filterNot { line ->
                 line.contains("Return one translated", ignoreCase = true) ||
                     line.contains("Do not add explanations", ignoreCase = true) ||
@@ -2231,7 +2296,7 @@ class CameraViewModel @Inject constructor(
         val sourceText = block.lines.mapIndexed { index, line ->
             "[${ids[index]}] ${line.text}"
         }.joinToString("\n")
-        val maxTokens = (sourceText.length * 3).coerceIn(256, 2048)
+        val maxTokens = CameraLlmTokenBudget.estimateTokenBudget(sourceText.length)
         val translated = translationEngine.translateStructuredSafe(
             sourceText = sourceText,
             source = sourceLanguage,
@@ -2239,7 +2304,12 @@ class CameraViewModel @Inject constructor(
             maxTokens = maxTokens
         )
 
-        val parsed = parseStructuredTranslations(translated, ids)
+        val parsed = CameraLlmTagParser.parseIndexedTranslations(
+            rawOutput = translated,
+            expectedLineCount = block.lines.size,
+            tagPrefix = "L"
+        ) ?: parseStructuredTranslations(translated, ids)
+
         if (parsed == null) {
             Log.w("CameraVM", "Structured translation did not preserve lines for ${block.id}")
             return null

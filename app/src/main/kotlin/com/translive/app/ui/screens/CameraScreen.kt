@@ -673,17 +673,29 @@ fun CameraScreen(
                         } else {
                             FilledTonalButton(onClick = { viewModel.backToLive() }) {
                                 Icon(Icons.Filled.CameraAlt, null)
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(stringResource(R.string.camera_mode_camera))
                             }
-                            Spacer(Modifier.width(8.dp))
+                            Spacer(Modifier.width(6.dp))
                             FilledTonalButton(
                                 onClick = openGallery,
                                 enabled = !uiState.isCaptureProcessing
                             ) {
                                 Icon(Icons.Filled.PhotoLibrary, null)
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(stringResource(R.string.camera_mode_photo))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Button(
+                                onClick = { viewModel.improveCaptureWithLlm() },
+                                enabled = !uiState.isCaptureProcessing && uiState.capturedBitmap != null,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary
+                                )
+                            ) {
+                                Icon(Icons.Filled.AutoFixHigh, null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(stringResource(R.string.camera_translate_with_llm))
                             }
                         }
                     }

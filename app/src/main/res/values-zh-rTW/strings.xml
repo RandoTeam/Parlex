@@ -196,4 +196,7 @@
     <string name="model_variant_translate_gemma_litert_beta_dynamic_int8_desc">LiteRT-LM dynamic INT8，約 4 GB，品質更高</string>
     <string name="settings_tts_engine_value">Android System TTS</string>
     <string name="stt_combined_description">Silero VAD (2 MB) + Whisper Tiny (40 MB)</string>
+    <string name="camera_translate_with_llm">使用大模型翻譯</string>
+    <string name="camera_improving_with_llm">正在使用本地大模型深度翻譯…</string>
+    <string name="screen_overlay_capture_failed">螢幕畫面擷取失敗</string>
 </resources>

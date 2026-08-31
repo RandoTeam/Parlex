@@ -1,14 +1,14 @@
 /**
  * TransLive JNI Bridge — connects Kotlin TranslationEngine to llama.cpp.
  *
- * This file provides native methods for:
- * - Loading GGUF model files (mmap, Flash Attention, dynamic Adreno GPU parameters)
- * - Running translation inference (blocking and streaming)
- * - Releasing model resources
- * - Detailed runtime hardware & OpenCL diagnostics
+ * Requirements & Specifications:
+ * - Strict Material / Technical zero-emoji policy across all logs and errors.
+ * - Iterative prefill chunking: tokens chunked to <= n_batch during llama_decode.
+ * - Memory & KV cache clearing: llama_memory_clear between inference turns.
+ * - Robust null checks on model, ctx, vocab, sampler, and JNI callback objects.
+ * - Full protection against empty inputs and context window overflow.
  *
- * Sampling: official HY-MT 1.5 parameters (temp=0.7, top_k=20, top_p=0.6, rep_penalty=1.05)
- * Source: https://huggingface.co/tencent/HY-MT1.5-1.8B
+ * Upstream Engine: llama.cpp b9464 (commit 5dcb71166686799f0d873eab7386234302d05ecf).
  */
 
 #include <jni.h>
@@ -28,6 +28,7 @@
 #define TAG "TransLive-JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__)
 
 // OpenCL function pointer types for runtime dynamic probe without hard link dependency
 typedef int cl_int;
@@ -103,56 +104,101 @@ static ggml_backend_dev_t find_gpu_device() {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-static int tokenize_prompt(TransLiveContext* tlctx, const std::string& prompt,
-                           std::vector<llama_token>& out_tokens, bool useChatTemplate) {
+static int tokenize_prompt(
+    TransLiveContext* tlctx,
+    const std::string& prompt,
+    std::vector<llama_token>& out_tokens,
+    bool useChatTemplate
+) {
+    if (!tlctx || !tlctx->model || !tlctx->vocab || prompt.empty()) {
+        out_tokens.clear();
+        return 0;
+    }
+
     std::string finalPrompt;
-
     if (useChatTemplate) {
-        std::vector<llama_chat_message> messages = {
-            {"user", prompt.c_str()}
-        };
+        const char* tmpl = llama_model_chat_template(tlctx->model, nullptr);
+        if (tmpl != nullptr) {
+            std::vector<llama_chat_message> messages = {
+                {"user", prompt.c_str()}
+            };
 
-        std::vector<char> formatted(prompt.size() * 2 + 256);
-        int len = llama_chat_apply_template(
-            llama_model_chat_template(tlctx->model, nullptr),
-            messages.data(), messages.size(),
-            true, formatted.data(), formatted.size()
-        );
-        if (len < 0 || (size_t)len >= formatted.size()) {
-            formatted.resize(len + 1);
-            len = llama_chat_apply_template(
-                llama_model_chat_template(tlctx->model, nullptr),
+            std::vector<char> formatted(prompt.size() * 2 + 256);
+            int len = llama_chat_apply_template(
+                tmpl,
                 messages.data(), messages.size(),
                 true, formatted.data(), formatted.size()
             );
+            if (len < 0 || static_cast<size_t>(len) >= formatted.size()) {
+                formatted.resize(std::max(0, len) + 1);
+                len = llama_chat_apply_template(
+                    tmpl,
+                    messages.data(), messages.size(),
+                    true, formatted.data(), formatted.size()
+                );
+            }
+            if (len > 0) {
+                finalPrompt = std::string(formatted.data(), len);
+            } else {
+                finalPrompt = prompt;
+            }
+        } else {
+            finalPrompt = prompt;
         }
-        finalPrompt = std::string(formatted.data(), len);
     } else {
         finalPrompt = prompt;
     }
 
     out_tokens.resize(finalPrompt.size() + 64);
     int n_tokens = llama_tokenize(
-        tlctx->vocab, finalPrompt.c_str(), finalPrompt.size(),
-        out_tokens.data(), out_tokens.size(), true, true
+        tlctx->vocab, finalPrompt.c_str(), static_cast<int32_t>(finalPrompt.size()),
+        out_tokens.data(), static_cast<int32_t>(out_tokens.size()), true, true
     );
     if (n_tokens < 0) {
-        out_tokens.resize(-n_tokens);
+        out_tokens.resize(static_cast<size_t>(-n_tokens));
         n_tokens = llama_tokenize(
-            tlctx->vocab, finalPrompt.c_str(), finalPrompt.size(),
-            out_tokens.data(), out_tokens.size(), true, true
+            tlctx->vocab, finalPrompt.c_str(), static_cast<int32_t>(finalPrompt.size()),
+            out_tokens.data(), static_cast<int32_t>(out_tokens.size()), true, true
         );
     }
-    out_tokens.resize(n_tokens);
+
+    if (n_tokens < 0) {
+        LOGE("Failed to tokenize prompt (code %d)", n_tokens);
+        out_tokens.clear();
+        return 0;
+    }
+
+    out_tokens.resize(static_cast<size_t>(n_tokens));
     return n_tokens;
 }
 
 static int prefill_prompt(TransLiveContext* tlctx, const std::vector<llama_token>& tokens) {
+    if (!tlctx || !tlctx->ctx || tokens.empty()) {
+        return -1;
+    }
+
+    // Reset KV cache memory contents for sequence 0
     llama_memory_clear(llama_get_memory(tlctx->ctx), true);
-    llama_batch batch = llama_batch_get_one(
-        const_cast<llama_token*>(tokens.data()), tokens.size()
-    );
-    return llama_decode(tlctx->ctx, batch);
+
+    const int32_t n_batch = tlctx->n_batch > 0 ? tlctx->n_batch : 512;
+    const int32_t total_tokens = static_cast<int32_t>(tokens.size());
+
+    // Iteratively chunk tokens into batches <= n_batch
+    for (int32_t i = 0; i < total_tokens; i += n_batch) {
+        const int32_t cur_batch = std::min(n_batch, total_tokens - i);
+        llama_batch batch = llama_batch_get_one(
+            const_cast<llama_token*>(tokens.data() + i),
+            cur_batch
+        );
+
+        const int decode_res = llama_decode(tlctx->ctx, batch);
+        if (decode_res != 0) {
+            LOGE("llama_decode failed during prefill at offset %d / %d (status %d)", i, total_tokens, decode_res);
+            llama_memory_clear(llama_get_memory(tlctx->ctx), true);
+            return -1;
+        }
+    }
+    return 0;
 }
 
 static int bounded_generation_tokens(
@@ -160,6 +206,7 @@ static int bounded_generation_tokens(
     size_t prompt_token_count,
     int requested_tokens
 ) {
+    if (!tlctx || !tlctx->ctx) return 0;
     const int context_tokens = llama_n_ctx(tlctx->ctx);
     const int reserve_tokens = 8;
     const int available_tokens = context_tokens - static_cast<int>(prompt_token_count) - reserve_tokens;
@@ -173,7 +220,9 @@ static llama_sampler* create_translation_sampler(
     float top_p,
     float repetition_penalty
 ) {
+    if (!vocab) return nullptr;
     llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
+    if (!sampler) return nullptr;
     llama_sampler_chain_add(sampler, llama_sampler_init_penalties(
         llama_vocab_n_tokens(vocab), 64, repetition_penalty, 0.0f, 0.0f));
     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(top_k));
@@ -185,6 +234,7 @@ static llama_sampler* create_translation_sampler(
 
 static int token_to_string(const llama_vocab* vocab, llama_token token,
                            char* buf, int buf_size) {
+    if (!vocab || !buf || buf_size <= 0) return 0;
     return llama_token_to_piece(vocab, token, buf, buf_size, 0, true);
 }
 
@@ -193,7 +243,6 @@ static int token_to_string(const llama_vocab* vocab, llama_token token,
 extern "C" {
 
 JNIEXPORT jint JNI_OnLoad(JavaVM* /*vm*/, void* /*reserved*/) {
-    // Keep JNI_OnLoad minimal and non-blocking during classloader initialization.
     LOGI("translive native library loaded (JNI 1.6)");
     return JNI_VERSION_1_6;
 }
@@ -211,7 +260,17 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
 
     ensure_backend_initialized();
 
+    if (!modelPath) {
+        LOGE("Model path is null");
+        return 0;
+    }
+
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
+    if (!path) {
+        LOGE("Failed to extract UTF chars for model path");
+        return 0;
+    }
+
     const int effectiveBatch = nBatch > 0 ? nBatch : 512;
     const int effectiveUbatch = nUbatch > 0 ? std::min(nUbatch, effectiveBatch) : 128;
     const int effectiveCtx = nCtx > 0 ? nCtx : 1024;
@@ -286,19 +345,29 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     jfloat topP, jfloat repetitionPenalty) {
 
     auto* tlctx = reinterpret_cast<TransLiveContext*>(contextPtr);
-    if (!tlctx || !tlctx->ctx) {
+    if (!tlctx || !tlctx->ctx || !tlctx->model || !tlctx->vocab) {
         return env->NewStringUTF("[Error: context not initialized]");
     }
 
+    if (!prompt) {
+        return env->NewStringUTF("");
+    }
+
     const char* promptStr = env->GetStringUTFChars(prompt, nullptr);
+    if (!promptStr) {
+        return env->NewStringUTF("");
+    }
     std::string promptCpp(promptStr);
     env->ReleaseStringUTFChars(prompt, promptStr);
 
+    if (promptCpp.empty()) {
+        return env->NewStringUTF("");
+    }
+
     std::vector<llama_token> tokens;
     tokenize_prompt(tlctx, promptCpp, tokens, useChatTemplate);
-
-    if (prefill_prompt(tlctx, tokens) != 0) {
-        return env->NewStringUTF("[Error: decode failed]");
+    if (tokens.empty()) {
+        return env->NewStringUTF("");
     }
 
     const int generation_limit = bounded_generation_tokens(tlctx, tokens.size(), maxTokens);
@@ -306,8 +375,17 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
         return env->NewStringUTF("[Error: input exceeds model context]");
     }
 
+    if (prefill_prompt(tlctx, tokens) != 0) {
+        return env->NewStringUTF("[Error: decode failed]");
+    }
+
     llama_sampler* sampler = create_translation_sampler(
         tlctx->vocab, temperature, topK, topP, repetitionPenalty);
+    if (!sampler) {
+        llama_memory_clear(llama_get_memory(tlctx->ctx), true);
+        return env->NewStringUTF("[Error: sampler allocation failed]");
+    }
+
     std::string result;
     llama_token eos = llama_vocab_eos(tlctx->vocab);
 
@@ -325,6 +403,7 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     }
 
     llama_sampler_free(sampler);
+    llama_memory_clear(llama_get_memory(tlctx->ctx), true);
 
     LOGI("Translation complete: %zu chars", result.size());
     return env->NewStringUTF(result.c_str());
@@ -336,27 +415,53 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
     jint maxTokens, jboolean useChatTemplate, jfloat temperature, jint topK,
     jfloat topP, jfloat repetitionPenalty, jobject callback) {
 
+    jint counts[2] = {0, 0};
     auto* tlctx = reinterpret_cast<TransLiveContext*>(contextPtr);
 
+    if (!tlctx || !tlctx->ctx || !tlctx->model || !tlctx->vocab || !callback) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
     jclass cbClass = env->GetObjectClass(callback);
+    if (!cbClass) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
     jmethodID onTokenMethod = env->GetMethodID(cbClass, "onToken", "(Ljava/lang/String;)Z");
+    if (!onTokenMethod) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
 
-    jint counts[2] = {0, 0};
-
-    if (!tlctx || !tlctx->ctx || !onTokenMethod) {
+    if (!prompt) {
         jintArray arr = env->NewIntArray(2);
         env->SetIntArrayRegion(arr, 0, 2, counts);
         return arr;
     }
 
     const char* promptStr = env->GetStringUTFChars(prompt, nullptr);
+    if (!promptStr) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
     std::string promptCpp(promptStr);
     env->ReleaseStringUTFChars(prompt, promptStr);
 
+    if (promptCpp.empty()) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
     std::vector<llama_token> tokens;
     counts[0] = tokenize_prompt(tlctx, promptCpp, tokens, useChatTemplate);
-
-    if (prefill_prompt(tlctx, tokens) != 0) {
+    if (tokens.empty()) {
         jintArray arr = env->NewIntArray(2);
         env->SetIntArrayRegion(arr, 0, 2, counts);
         return arr;
@@ -369,8 +474,21 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
         return arr;
     }
 
+    if (prefill_prompt(tlctx, tokens) != 0) {
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
     llama_sampler* sampler = create_translation_sampler(
         tlctx->vocab, temperature, topK, topP, repetitionPenalty);
+    if (!sampler) {
+        llama_memory_clear(llama_get_memory(tlctx->ctx), true);
+        jintArray arr = env->NewIntArray(2);
+        env->SetIntArrayRegion(arr, 0, 2, counts);
+        return arr;
+    }
+
     llama_token eos = llama_vocab_eos(tlctx->vocab);
 
     for (int i = 0; i < generation_limit; i++) {
@@ -384,6 +502,10 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
             jstring tokenStr = env->NewStringUTF(std::string(buf, n).c_str());
             jboolean keepGoing = env->CallBooleanMethod(callback, onTokenMethod, tokenStr);
             env->DeleteLocalRef(tokenStr);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                break;
+            }
             counts[1]++;
             if (!keepGoing) break;
         }
@@ -393,6 +515,7 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
     }
 
     llama_sampler_free(sampler);
+    llama_memory_clear(llama_get_memory(tlctx->ctx), true);
 
     jintArray arr = env->NewIntArray(2);
     env->SetIntArrayRegion(arr, 0, 2, counts);

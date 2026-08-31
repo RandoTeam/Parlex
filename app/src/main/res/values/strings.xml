@@ -236,4 +236,7 @@
     <string name="screen_overlay_copied">Copied to clipboard</string>
     <string name="screen_overlay_processing">Translating screen…</string>
     <string name="screen_overlay_no_text">No text found on screen</string>
+    <string name="camera_translate_with_llm">Translate with LLM</string>
+    <string name="camera_improving_with_llm">Deep translating with local LLM…</string>
+    <string name="screen_overlay_capture_failed">Screen frame capture failed</string>
 </resources>

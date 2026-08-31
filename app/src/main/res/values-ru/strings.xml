@@ -236,4 +236,7 @@
     <string name="screen_overlay_copied">Скопировано в буфер обмена</string>
     <string name="screen_overlay_processing">Перевожу экран…</string>
     <string name="screen_overlay_no_text">Текст на экране не найден</string>
+    <string name="camera_translate_with_llm">Перевести через LLM</string>
+    <string name="camera_improving_with_llm">Улучшенный перевод через локальную LLM…</string>
+    <string name="screen_overlay_capture_failed">Не удалось захватить кадр экрана</string>
 </resources>
