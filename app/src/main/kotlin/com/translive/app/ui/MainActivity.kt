@@ -42,13 +42,18 @@ class MainActivity : ComponentActivity() {
             if (isLive) {
                 LiveScreenTranslateService.start(this, result.resultCode, resultData)
                 moveTaskToBack(true)
+            } else if (fromOverlay) {
+                ScreenTranslateOverlayService.startWithProjection(this, result.resultCode, resultData)
+                moveTaskToBack(true)
             } else {
                 startForegroundService(
-                    ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData, fromOverlay)
+                    ScreenCaptureService.newCaptureIntent(this, result.resultCode, resultData, fromOverlay = false)
                 )
-                if (fromOverlay) {
-                    moveTaskToBack(true)
-                }
+            }
+        } else {
+            if (isOverlayCaptureRequest) {
+                isOverlayCaptureRequest = false
+                ScreenTranslateOverlayService.start(this)
             }
         }
     }
@@ -119,7 +124,8 @@ class MainActivity : ComponentActivity() {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             return
         }
-        ScreenTranslateOverlayService.start(this)
+        isOverlayCaptureRequest = true
+        requestScreenCapture()
     }
 
     private fun extractIncomingTranslationText(intent: Intent?): String? {

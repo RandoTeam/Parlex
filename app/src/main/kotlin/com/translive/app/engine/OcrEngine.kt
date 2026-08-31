@@ -108,53 +108,50 @@ class OcrEngine @Inject constructor(
     private var tessCurrentLang: String = ""
     private var tessDataPath: String? = null
 
-    /** Map language code → OCR backend. */
+    /** Map language code -> OCR backend. */
     private fun backendFor(code: String): OcrBackend {
-        return when (code) {
-            // Latin script → ML Kit Latin
+        return when (code.lowercase()) {
             "en", "fr", "de", "es", "pt", "it", "nl", "pl", "cs",
             "tr", "vi", "id", "ms", "fil" -> OcrBackend.MLKIT_LATIN
 
-            // Chinese variants share one recognizer; Japanese and Korean use
-            // their dedicated ML Kit recognizers below.
-            "zh", "zh-Hant", "yue", "nan" -> OcrBackend.MLKIT_CHINESE
+            "zh", "zh-hant", "yue", "nan" -> OcrBackend.MLKIT_CHINESE
             "ja" -> OcrBackend.MLKIT_JAPANESE
             "ko" -> OcrBackend.MLKIT_KOREAN
 
-            // Devanagari → ML Kit Devanagari
             "hi", "mr", "gu" -> OcrBackend.MLKIT_DEVANAGARI
 
-            // Everything else → Tesseract
             else -> OcrBackend.TESSERACT
         }
     }
 
-    /** Map language code → Tesseract traineddata name. */
+    /** Map language code -> Tesseract traineddata name. */
     private fun tessLangFor(code: String): String {
-        return when (code) {
-            "ru" -> "rus"
-            "uk" -> "ukr"
-            "ar" -> "ara"
-            "fa" -> "fas"
-            "ur" -> "urd"
-            "he" -> "heb"
-            "th" -> "tha"
-            "bn" -> "ben"
-            "ta" -> "tam"
-            "te" -> "tel"
-            "my" -> "mya"
-            "km" -> "khm"
-            "bo" -> "bod"
-            "mn" -> "rus"  // Mongolian Cyrillic → use Russian model
-            "ug" -> "ara"  // Uyghur Arabic script → use Arabic model
-            else -> "eng"  // fallback
+        return when (code.lowercase()) {
+            "ru" -> "rus+eng"
+            "uk" -> "ukr+eng"
+            "ar" -> "ara+eng"
+            "fa" -> "fas+eng"
+            "ur" -> "urd+eng"
+            "he" -> "heb+eng"
+            "th" -> "tha+eng"
+            "bn" -> "ben+eng"
+            "ta" -> "tam+eng"
+            "te" -> "tel+eng"
+            "my" -> "mya+eng"
+            "km" -> "khm+eng"
+            "bo" -> "bod+eng"
+            "mn" -> "rus+eng"
+            "ug" -> "ara+eng"
+            "auto" -> "rus+eng"
+            else -> "eng"
         }
     }
 
-    // ── Public API ───────────────────────────────────────────────────────
+    // -- Public API -------------------------------------------------------
 
     fun backendNameFor(sourceLanguageCode: String): String =
-        backendFor(sourceLanguageCode).name
+        if (sourceLanguageCode.equals("auto", ignoreCase = true)) "HYBRID_AUTO"
+        else backendFor(sourceLanguageCode).name
 
     fun engineLanguageFor(sourceLanguageCode: String): String =
         when (backendFor(sourceLanguageCode)) {
@@ -163,9 +160,6 @@ class OcrEngine @Inject constructor(
         }
 
     suspend fun recognize(bitmap: Bitmap, sourceLanguageCode: String = "en"): OcrResult {
-        // Prefer the validated PP-OCR/MNN package when it has been imported or
-        // downloaded. This path is capability-gated and falls back to the
-        // existing recognizers if the package is absent or incompatible.
         val ppOcrRoot = File(context.filesDir, "ocr/${PpOcrPackage.ID}")
         val ppOcrValidation = PpOcrPackage.validate(ppOcrRoot)
         if (ppOcrValidation.valid) {
@@ -180,11 +174,25 @@ class OcrEngine @Inject constructor(
             )
             if (ppOcrResult.blocks.isNotEmpty()) return ppOcrResult
         }
-        val backend = backendFor(sourceLanguageCode)
+
         val qualityStartedAt = SystemClock.elapsedRealtime()
         val quality = analyzeFrameQuality(bitmap)
         val qualityMs = SystemClock.elapsedRealtime() - qualityStartedAt
         val recognitionStartedAt = SystemClock.elapsedRealtime()
+
+        if (sourceLanguageCode.equals("auto", ignoreCase = true)) {
+            val autoResult = recognizeAutoHybrid(bitmap)
+            return autoResult.copy(
+                quality = quality,
+                diagnostics = OcrDiagnostics(
+                    backend = "HYBRID_AUTO",
+                    recognitionMs = SystemClock.elapsedRealtime() - recognitionStartedAt,
+                    qualityAnalysisMs = qualityMs
+                )
+            )
+        }
+
+        val backend = backendFor(sourceLanguageCode)
         val result = when (backend) {
             OcrBackend.MLKIT_LATIN -> {
                 val image = InputImage.fromBitmap(bitmap, 0)
@@ -220,6 +228,51 @@ class OcrEngine @Inject constructor(
         )
     }
 
+    private suspend fun recognizeAutoHybrid(bitmap: Bitmap): OcrResult {
+        val inputImage = InputImage.fromBitmap(bitmap, 0)
+        val latinResult = recognizeWithMlKit(inputImage, latinRecognizer)
+        val latinText = latinResult.blocks.joinToString(" ") { it.text }
+
+        val tesseractResult = recognizeWithTesseract(bitmap, "ru")
+        val tesseractText = tesseractResult.blocks.joinToString(" ") { it.text }
+        val cyrillicCount = tesseractText.count { it in 'Ѐ'..'ԯ' }
+
+        if (cyrillicCount >= 2 || (cyrillicCount >= 1 && tesseractText.length <= 6)) {
+            return tesseractResult
+        }
+
+        val cjkCount = latinText.count { it in '一'..'鿿' || it in '぀'..'ヿ' || it in '가'..'힯' }
+        if (cjkCount >= 2 || latinResult.blocks.isEmpty()) {
+            val chineseResult = recognizeWithMlKit(inputImage, chineseRecognizer)
+            val chineseText = chineseResult.blocks.joinToString(" ") { it.text }
+            if (chineseText.count { it in '一'..'鿿' } >= 2) {
+                return chineseResult
+            }
+            val japaneseResult = recognizeWithMlKit(inputImage, japaneseRecognizer)
+            val japaneseText = japaneseResult.blocks.joinToString(" ") { it.text }
+            if (japaneseText.count { it in '぀'..'ヿ' } >= 1) {
+                return japaneseResult
+            }
+            val koreanResult = recognizeWithMlKit(inputImage, koreanRecognizer)
+            val koreanText = koreanResult.blocks.joinToString(" ") { it.text }
+            if (koreanText.count { it in '가'..'힯' } >= 1) {
+                return koreanResult
+            }
+        }
+
+        val devanagariCount = latinText.count { it in 'ऀ'..'ॿ' }
+        if (devanagariCount >= 2 || latinResult.blocks.isEmpty()) {
+            val devanagariResult = recognizeWithMlKit(inputImage, devanagariRecognizer)
+            if (devanagariResult.blocks.isNotEmpty()) {
+                return devanagariResult
+            }
+        }
+
+        return if (latinResult.blocks.isNotEmpty()) latinResult
+        else if (tesseractResult.blocks.isNotEmpty()) tesseractResult
+        else latinResult
+    }
+
     @androidx.camera.core.ExperimentalGetImage
     suspend fun recognize(
         imageProxy: androidx.camera.core.ImageProxy,
@@ -239,10 +292,7 @@ class OcrEngine @Inject constructor(
     }
 
     /**
-     * Fast CameraX path for the scripts supported by ML Kit.  Do not turn a
-     * YUV frame into JPEG/Bitmap first: ML Kit accepts the camera image and
-     * its rotation directly.  Tesseract still needs a bitmap and uses the
-     * regular path below.
+     * Fast CameraX path for the scripts supported by ML Kit.
      */
     @androidx.camera.core.ExperimentalGetImage
     suspend fun recognizeLive(
@@ -285,7 +335,7 @@ class OcrEngine @Inject constructor(
         )
     }
 
-    // ── ML Kit ───────────────────────────────────────────────────────────
+    // -- ML Kit -----------------------------------------------------------
 
     private suspend fun recognizeWithMlKit(
         image: InputImage,
@@ -315,15 +365,13 @@ class OcrEngine @Inject constructor(
             }
     }
 
-    // ── Tesseract ────────────────────────────────────────────────────────
+    // -- Tesseract --------------------------------------------------------
 
     private fun ensureTesseractReady(langCode: String): Boolean {
         val tessLang = tessLangFor(langCode)
 
-        // Already initialized for this language
         if (tessApi != null && tessCurrentLang == tessLang) return true
 
-        // Close previous if different language
         tessApi?.recycle()
         tessApi = null
 
@@ -332,26 +380,32 @@ class OcrEngine @Inject constructor(
             val tessDir = File(dataDir, "tessdata")
             tessDir.mkdirs()
 
-            val trainedDataFile = File(tessDir, "$tessLang.traineddata")
-            if (!trainedDataFile.exists()) {
-                val assetName = "tessdata/$tessLang.traineddata"
-                try {
-                    context.assets.open(assetName).use { input ->
-                        trainedDataFile.outputStream().use { output ->
-                            input.copyTo(output)
+            val singleLangs = tessLang.split("+")
+            for (subLang in singleLangs) {
+                val trainedDataFile = File(tessDir, "$subLang.traineddata")
+                if (!trainedDataFile.exists()) {
+                    val assetName = "tessdata/$subLang.traineddata"
+                    try {
+                        context.assets.open(assetName).use { input ->
+                            trainedDataFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
                         }
+                        Log.i(TAG, "Copied $assetName (${trainedDataFile.length()} bytes)")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to copy tessdata $assetName: ${e.message}", e)
+                        if (subLang == singleLangs.first()) return false
                     }
-                    Log.i(TAG, "Copied $assetName (${trainedDataFile.length()} bytes)")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to copy tessdata $assetName: ${e.message}", e)
-                    return false
                 }
             }
 
             val api = TessBaseAPI()
             if (!api.init(dataDir.absolutePath, tessLang)) {
-                Log.e(TAG, "Tesseract init failed for $tessLang")
-                return false
+                val primary = singleLangs.first()
+                if (!api.init(dataDir.absolutePath, primary)) {
+                    Log.e(TAG, "Tesseract init failed for $tessLang and $primary")
+                    return false
+                }
             }
             api.pageSegMode = TessBaseAPI.PageSegMode.PSM_AUTO
             api.setVariable("preserve_interword_spaces", "1")
@@ -444,7 +498,7 @@ class OcrEngine @Inject constructor(
         }
     }
 
-    // ── Utils ────────────────────────────────────────────────────────────
+    // -- Utils ------------------------------------------------------------
 
     private fun preprocessForTesseract(bitmap: Bitmap): Bitmap {
         val width = bitmap.width
@@ -567,17 +621,14 @@ class OcrEngine @Inject constructor(
         val uPixelStride = uPlane.pixelStride
         val vPixelStride = vPlane.pixelStride
 
-        // Build NV21 byte array: Y plane + interleaved VU
         val nv21 = ByteArray(width * height * 3 / 2)
 
-        // Copy Y plane row by row (handles rowStride > width)
         val yBuffer = yPlane.buffer
         for (row in 0 until height) {
             yBuffer.position(row * yRowStride)
             yBuffer.get(nv21, row * width, width)
         }
 
-        // Copy UV planes interleaved as VU (NV21 format)
         val uBuffer = uPlane.buffer
         val vBuffer = vPlane.buffer
         val uvHeight = height / 2
@@ -588,8 +639,8 @@ class OcrEngine @Inject constructor(
             for (col in 0 until uvWidth) {
                 val vIndex = row * vRowStride + col * vPixelStride
                 val uIndex = row * uRowStride + col * uPixelStride
-                nv21[uvIndex++] = vBuffer.get(vIndex)  // V first (NV21)
-                nv21[uvIndex++] = uBuffer.get(uIndex)  // then U
+                nv21[uvIndex++] = vBuffer.get(vIndex)
+                nv21[uvIndex++] = uBuffer.get(uIndex)
             }
         }
 
@@ -627,6 +678,8 @@ class OcrEngine @Inject constructor(
     fun release() {
         latinRecognizer.close()
         chineseRecognizer.close()
+        japaneseRecognizer.close()
+        koreanRecognizer.close()
         devanagariRecognizer.close()
         tessLock.withLock {
             tessApi?.recycle()
