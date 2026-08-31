@@ -98,19 +98,21 @@
 4. Оставить LiteRT явно помеченным beta до доказанного выигрыша.
 5. Занести результаты в `docs/LITERT_BETA.md`.
 
-## Фаза M1: Model Catalog Audit
+## Фаза M1: Model Catalog Audit [COMPLETED]
+
+Статус: выполнена (2026-08-31).
 
 Цель: держать каталог моделей современным, но не превращать приложение в
 непроверенный список файлов.
 
-Шаги:
+Реализованные шаги и результаты аудита:
 
-1. Проверять Tencent, Google и llama.cpp только по официальным источникам.
-2. Добавлять новые переводческие модели только с понятной лицензией,
-   назначением и размером.
-3. MTP/speculative decoding рассматривать только если есть реальные
-   translation-oriented модели и поддержка в текущем native runtime.
-4. Для каждой модели фиксировать качество, скорость, RAM и лицензионные риски.
+1. [x] Проведен аудит всех семейств моделей по официальным upstream-репозиториям (Tencent HuggingFace, Google AI Edge LiteRT, Google TranslateGemma GGUF).
+2. [x] Введены категории производительности `ModelPerformanceTier` (`⚡ Fast / Budget`, `⭐ Balanced`, `💎 Max Quality`, `🚀 GPU-Accelerated`).
+3. [x] Добавлено отображение бейджей категорий производительности в карточках моделей (`ModelManagerScreen.kt`).
+4. [x] Зафиксированы точные SHA-256 хеши, размеры и требования к RAM для всех вариантов GGUF и LiteRT-LM.
+5. [x] Создан документ аудита `docs/DEPENDENCY_MODEL_AUDIT_2026-08-31.md`.
+6. [x] Написан набор модульных тестов целостности каталога `ModelCatalogTest.kt` (100% pass).
 
 ## Фаза P1: Offline Language Packs [COMPLETED]
 

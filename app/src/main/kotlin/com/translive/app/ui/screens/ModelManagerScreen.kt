@@ -30,6 +30,7 @@ import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.Language
 import com.translive.app.engine.DownloadState
 import com.translive.app.data.model.ModelFamily
+import com.translive.app.data.model.ModelPerformanceTier
 import com.translive.app.data.model.ModelRuntime
 import com.translive.app.data.model.ModelVariant
 import com.translive.app.data.model.SttModelInfo
@@ -835,17 +836,39 @@ private fun ModelCard(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(start = 8.dp)
                 )
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = when (variant.performanceTier) {
+                        ModelPerformanceTier.FAST_BUDGET -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
+                        ModelPerformanceTier.BALANCED -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                        ModelPerformanceTier.MAX_QUALITY -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
+                        ModelPerformanceTier.GPU_ACCELERATED -> MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
+                    },
+                    modifier = Modifier.padding(start = 6.dp)
+                ) {
+                    Text(
+                        text = variant.performanceTier.badgeLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when (variant.performanceTier) {
+                            ModelPerformanceTier.FAST_BUDGET -> MaterialTheme.colorScheme.secondary
+                            ModelPerformanceTier.BALANCED -> MaterialTheme.colorScheme.primary
+                            ModelPerformanceTier.MAX_QUALITY -> MaterialTheme.colorScheme.tertiary
+                            ModelPerformanceTier.GPU_ACCELERATED -> MaterialTheme.colorScheme.error
+                        },
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
                 if (variant.isRecommended) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(start = 8.dp)
+                        modifier = Modifier.padding(start = 6.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.model_recommended),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
@@ -853,13 +876,13 @@ private fun ModelCard(
                     Surface(
                         shape = RoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(start = 8.dp)
+                        modifier = Modifier.padding(start = 6.dp)
                     ) {
                         Text(
                             text = stringResource(R.string.model_active_checked),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                         )
                     }
                 }
