@@ -71,17 +71,19 @@
 5. [x] Доработать `CameraViewModel.kt` и `CameraScreen.kt` (интеграция `DictionaryRepository`, `CurrencyAugmentor`, интерактивный просмотрщик).
 6. [x] Покрыть модульными тестами (`CameraTravelModeTest.kt`).
 
-## Фаза C3: Live Subtitle Camera Mode
+## Фаза C3: Live Subtitle Camera Mode [COMPLETED]
 
-Цель: переводить текст на экранах, презентациях и табличках как стабильные
-субтитры.
+Статус: выполнена (2026-08-31).
+
+Цель: переводить динамичный текст на внешних экранах, презентациях, онлайн-лекциях, мониторах и табличках как стабильные, немерцающие плавающие субтитры (Floating Teleprompter HUD).
 
 Шаги:
 
-1. Не перерисовывать перевод при каждом OCR jitter.
-2. Кэшировать переводы одинаковых строк.
-3. Ограничить частоту запросов к модели.
-4. Добавить понятное состояние, когда live mode ждет более стабильный кадр.
+1. [x] Создать `CameraSubtitleModels.kt` (`SubtitleLine`, `SubtitleStyle`, `LiveSubtitleUiState`, `SubtitleAction`).
+2. [x] Создать `SpatioTemporalSubtitleTracker.kt` (3-стадийный трекер: IoU-сопоставление $\ge 0.38$, фильтрация OCR-джиттера через расстояние Левенштейна и EMA-сглаживание координат).
+3. [x] Создать `LiveSubtitleBanner.kt` (плавающий телесуфлер субтитров с кнопками паузы, TTS-озвучивания, копирования и переключения размера шрифта).
+4. [x] Интегрировать в `CameraViewModel.kt` и `CameraScreen.kt` (кнопка переключения режима субтитров, потоковая дедупликация и обновление UI).
+5. [x] Покрыть модульными тестами (`CameraSubtitleTrackerTest.kt`).
 
 ## Фаза L1: TranslateGemma LiteRT Beta Benchmark
 

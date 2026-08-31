@@ -78,10 +78,12 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
 import com.translive.app.engine.camera.BilingualParagraph
+import com.translive.app.engine.camera.SubtitleAction
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BilingualInspectBottomSheet
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.LanguagePickerSheet
+import com.translive.app.ui.components.LiveSubtitleBanner
 import com.translive.app.ui.viewmodel.CameraMode
 import com.translive.app.ui.viewmodel.CameraQualityWarning
 import com.translive.app.ui.viewmodel.CameraViewModel
@@ -574,6 +576,20 @@ fun CameraScreen(
                                 }
                             }
                         }
+
+                        // Live Teleprompter / Subtitles HUD
+                        LiveSubtitleBanner(
+                            state = uiState.subtitleState,
+                            onAction = viewModel::handleSubtitleAction,
+                            onSpeakText = viewModel::speakText,
+                            onStopSpeech = viewModel::stopSpeech,
+                            modifier = Modifier
+                                .align(if (uiState.subtitleState.style.positionTop) Alignment.TopCenter else Alignment.BottomCenter)
+                                .padding(
+                                    top = if (uiState.subtitleState.style.positionTop) 70.dp else 0.dp,
+                                    bottom = if (uiState.subtitleState.style.positionTop) 0.dp else 120.dp
+                                )
+                        )
                     }
                     CameraMode.CAPTURE -> {
                         CaptureImageView(
@@ -637,7 +653,23 @@ fun CameraScreen(
                                 Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White))
                             }
                             Spacer(Modifier.width(18.dp))
-                            Box(Modifier.size(52.dp))
+                            IconButton(
+                                onClick = { viewModel.handleSubtitleAction(SubtitleAction.ToggleSubtitleMode) },
+                                enabled = !uiState.isCaptureProcessing,
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (uiState.subtitleState.isSubtitleModeActive) Color(0xFF43A047).copy(alpha = 0.85f)
+                                        else Color.Black.copy(alpha = 0.5f)
+                                    )
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Subtitles,
+                                    contentDescription = "Субтитры",
+                                    tint = Color.White
+                                )
+                            }
                         } else {
                             FilledTonalButton(onClick = { viewModel.backToLive() }) {
                                 Icon(Icons.Filled.CameraAlt, null)

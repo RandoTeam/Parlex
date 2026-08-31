@@ -207,7 +207,8 @@ data class CameraUiState(
     val selectedParagraph: BilingualParagraph? = null,
     val selectedParagraphCurrency: String? = null,
     val selectedWordDictionaryEntries: List<DictionaryEntry> = emptyList(),
-    val isSpeaking: Boolean = false
+    val isSpeaking: Boolean = false,
+    val subtitleState: LiveSubtitleUiState = LiveSubtitleUiState()
 ) {
     val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
 }
@@ -253,6 +254,7 @@ class CameraViewModel @Inject constructor(
 
     /** Live OCR line tracks keep overlays attached to the same visual row between frames. */
     private val liveTracks = mutableListOf<LiveTextTrack>()
+    private val subtitleTracker = SpatioTemporalSubtitleTracker()
     private var nextLiveTrackId = 0
     private val liveTranslationCache = object : LinkedHashMap<String, String>(
         LIVE_TRANSLATION_CACHE_LIMIT,
@@ -631,6 +633,27 @@ class CameraViewModel @Inject constructor(
 
                 if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) return@launch
 
+                // Update Spatio-Temporal Subtitle Tracker if subtitle mode is active
+                val updatedSubtitleState = if (state.subtitleState.isSubtitleModeActive && !state.subtitleState.isPaused) {
+                    val subtitleLines = subtitleTracker.update(
+                        detectedLines = rawLines,
+                        sourceLang = liveOcr.sourceLanguage,
+                        targetLang = state.targetLanguage
+                    ) { texts ->
+                        runCatching {
+                            if (fastTranslateEngine.isReadyFor(liveOcr.sourceLanguage.code, state.targetLanguage.code)) {
+                                kotlinx.coroutines.runBlocking { fastTranslateEngine.translateLines(texts) }
+                            } else texts
+                        }.getOrDefault(texts)
+                    }
+                    state.subtitleState.copy(
+                        subtitles = subtitleLines,
+                        activeTrackCount = subtitleLines.size
+                    )
+                } else {
+                    state.subtitleState
+                }
+
                 _uiState.update {
                     it.copy(
                         liveBlocks = translatedBlocks,
@@ -642,7 +665,8 @@ class CameraViewModel @Inject constructor(
                         } else {
                             emptyList()
                         },
-                        qualityWarnings = qualityWarnings
+                        qualityWarnings = qualityWarnings,
+                        subtitleState = updatedSubtitleState
                     )
                 }
             } catch (e: Exception) {
@@ -758,6 +782,7 @@ class CameraViewModel @Inject constructor(
 
     private fun clearLiveSession() {
         liveTracks.clear()
+        subtitleTracker.reset()
         liveTranslationCache.clear()
         nextLiveTrackId = 0
         lastLiveFrameStartedAtMs = 0L
@@ -1259,6 +1284,32 @@ class CameraViewModel @Inject constructor(
     fun stopSpeech() {
         _uiState.update { it.copy(isSpeaking = false) }
         systemTts.stop()
+    }
+
+    fun handleSubtitleAction(action: SubtitleAction) {
+        _uiState.update { state ->
+            val sub = state.subtitleState
+            val updated = when (action) {
+                SubtitleAction.ToggleSubtitleMode -> sub.copy(isSubtitleModeActive = !sub.isSubtitleModeActive)
+                SubtitleAction.TogglePause -> sub.copy(isPaused = !sub.isPaused)
+                SubtitleAction.ToggleTts -> sub.copy(isTtsSpeaking = !sub.isTtsSpeaking)
+                SubtitleAction.ToggleShowOriginal -> sub.copy(style = sub.style.copy(showOriginal = !sub.style.showOriginal))
+                SubtitleAction.CycleFontSize -> {
+                    val nextSize = when (sub.style.fontSizeSp) {
+                        14 -> 18
+                        18 -> 22
+                        else -> 14
+                    }
+                    sub.copy(style = sub.style.copy(fontSizeSp = nextSize))
+                }
+                SubtitleAction.TogglePosition -> sub.copy(style = sub.style.copy(positionTop = !sub.style.positionTop))
+                SubtitleAction.ClearSubtitles -> {
+                    subtitleTracker.reset()
+                    sub.copy(subtitles = emptyList())
+                }
+            }
+            state.copy(subtitleState = updated)
+        }
     }
 
     private suspend fun recognizeCaptureBitmap(
