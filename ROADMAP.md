@@ -85,6 +85,20 @@
 4. [x] Интегрировать в `CameraViewModel.kt` и `CameraScreen.kt` (кнопка переключения режима субтитров, потоковая дедупликация и обновление UI).
 5. [x] Покрыть модульными тестами (`CameraSubtitleTrackerTest.kt`).
 
+## Фаза G1: Snapdragon Multi-Generation Hardware Profiles & Dynamic GPU Tuning [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: обеспечить максимальную производительность GPU на Snapdragon 8 Gen 3 (Adreno 750), Snapdragon 845 (Adreno 630) и всей линейке Adreno 6xx/7xx/8xx в рамках единого универсального APK без регрессии эталонного профиля Snapdragon 8 Elite (Adreno 830 / OnePlus 13).
+
+Реализованные шаги:
+
+1. [x] Создана подсистема классификации поколений `AdrenoHardwareProfile.kt` (`AdrenoGeneration.ADRENO_6XX`, `ADRENO_7XX`, `ADRENO_8XX`, `UNKNOWN_GPU`) с автоматическим расчетом динамического оффлоада слоев `calculateGpuLayers()` с защитным резервом RAM 600 МБ для предотвращения OOM на 4GB/6GB RAM.
+2. [x] Создан реестр аппаратных профилей `AdrenoProfileRegistry.kt`, охватывающий Snapdragon 845 (Adreno 630), 855 (640), 865 (650), 888 (660), 8 Gen 1 (730), 7+ Gen 2 (725), 8 Gen 2 (740), 7+ Gen 3 (732), 8s Gen 3 (735), 8 Gen 3 (750), 8s Gen 4 (825) и эталонный замороженный профиль Snapdragon 8 Elite (Adreno 830 / OnePlus 13).
+3. [x] Расширен нативный JNI-мост `translive_jni.cpp` и `translive_jni_stub.cpp` с параметризованной загрузкой `nativeLoadModel` (`nGpuLayers`, `nBatch`, `nUbatch`, `nCtx`, `nThreads`), сохранением Flash Attention и mmap-загрузки, а также расширенным OpenCL hardware probe в `nativeRuntimeDiagnostics()`.
+4. [x] Интегрирован `TranslationEngine.kt` с автоопределением профиля и клампингом потоков host CPU на GPU (2 для A6x, 4 для A7x/A8x).
+5. [x] Создан модульный тест `AdrenoHardwareProfileTest.kt` (100% pass).
+
 ## Фаза L1: TranslateGemma LiteRT Beta Benchmark [COMPLETED]
 
 Статус: выполнена (2026-08-31).

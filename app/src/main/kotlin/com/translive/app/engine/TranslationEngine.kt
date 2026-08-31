@@ -8,6 +8,8 @@ import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.Language
 import com.translive.app.data.model.PromptStyle
 import com.translive.app.data.model.TranslationProfile
+import com.translive.app.engine.hardware.AdrenoDeviceProfile
+import com.translive.app.engine.hardware.AdrenoProfileRegistry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.sync.Mutex
@@ -55,7 +57,7 @@ class TranslationEngine {
     // --- Native methods (JNI) ---
 
     /** Load GGUF model from file path. Returns context pointer or 0 on failure. */
-    private external fun nativeLoadModel(modelPath: String, nThreads: Int, useGpu: Boolean): Long
+    private external fun nativeLoadModel(modelPath: String, nThreads: Int, useGpu: Boolean, nGpuLayers: Int, nBatch: Int, nUbatch: Int, nCtx: Int): Long
 
     /** Run translation inference. Returns translated text. */
     private external fun nativeTranslate(
@@ -100,32 +102,73 @@ class TranslationEngine {
     var currentBackend: String? = null
         private set
 
+    @Volatile
+    var activeHardwareProfile: AdrenoDeviceProfile? = null
+        private set
+
+    @Volatile
+    var activeOffloadedLayers: Int = 0
+        private set
+
     val isLoaded: Boolean
         get() = nativeLock.withLock { isLoadedLocked() }
 
     fun loadModel(
         modelPath: String,
         nThreads: Int = 4,
-        backend: String = SettingsRepository.BACKEND_CPU
+        backend: String = SettingsRepository.BACKEND_CPU,
+        customProfile: AdrenoDeviceProfile? = null
     ): Boolean {
         return nativeLock.withLock {
             if (isLoadedLocked()) {
                 nativeUnloadModel(contextPtr)
                 contextPtr = 0L
                 currentBackend = null
+                activeHardwareProfile = null
+                activeOffloadedLayers = 0
             }
-            val optimalThreads = getOptimalThreadCount(nThreads)
-            android.util.Log.i("TranslationEngine", "Loading model: threads=$optimalThreads (requested=$nThreads, cores=${Runtime.getRuntime().availableProcessors()})")
+
+            val useGpu = (backend == SettingsRepository.BACKEND_GPU)
+            val profile = customProfile ?: AdrenoProfileRegistry.detectCurrentDeviceProfile()
+
+            val (nGpuLayers, effectiveThreads) = if (useGpu) {
+                val freeRamBytes = Runtime.getRuntime().freeMemory() + (Runtime.getRuntime().maxMemory() - Runtime.getRuntime().totalMemory())
+                val modelFile = java.io.File(modelPath)
+                val modelBytes = if (modelFile.exists()) modelFile.length() else 1_200_000_000L
+                val layers = profile.calculateGpuLayers(
+                    modelTotalBytes = modelBytes,
+                    modelLayerCount = 28,
+                    availableRamBytes = freeRamBytes.coerceAtLeast(1_500_000_000L)
+                )
+                val threads = profile.hostThreads.coerceIn(1, Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
+                Pair(layers, threads)
+            } else {
+                Pair(0, getOptimalThreadCount(nThreads))
+            }
+
+            android.util.Log.i(
+                "TranslationEngine",
+                "Loading model: profile=${profile.socName}, layers=$nGpuLayers, batch=${profile.nBatch}, ubatch=${profile.nUbatch}, threads=$effectiveThreads"
+            )
+
             contextPtr = nativeLoadModel(
-                modelPath,
-                optimalThreads,
-                backend == SettingsRepository.BACKEND_GPU
+                modelPath = modelPath,
+                nThreads = effectiveThreads,
+                useGpu = useGpu,
+                nGpuLayers = nGpuLayers,
+                nBatch = profile.nBatch,
+                nUbatch = profile.nUbatch,
+                nCtx = 1024
             )
             val loaded = isLoadedLocked()
-            currentBackend = if (loaded) {
-                if (backend == SettingsRepository.BACKEND_GPU) "opencl" else "cpu"
+            if (loaded) {
+                currentBackend = if (useGpu) "opencl" else "cpu"
+                activeHardwareProfile = profile
+                activeOffloadedLayers = nGpuLayers
             } else {
-                null
+                currentBackend = null
+                activeHardwareProfile = null
+                activeOffloadedLayers = 0
             }
             loaded
         }
@@ -147,6 +190,8 @@ class TranslationEngine {
                 nativeUnloadModel(contextPtr)
                 contextPtr = 0L
                 currentBackend = null
+                activeHardwareProfile = null
+                activeOffloadedLayers = 0
             }
         }
     }
@@ -161,6 +206,11 @@ class TranslationEngine {
             appendLine("Android: ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
             appendLine("ABI: ${Build.SUPPORTED_ABIS.joinToString()}")
             appendLine("App-visible RAM: ${memory.availMem / mib} MiB free / ${memory.totalMem / mib} MiB total")
+            activeHardwareProfile?.let { prof ->
+                appendLine("Hardware Profile: ${prof.socName} [${prof.generation.generationName}]")
+                appendLine("GPU Profile Config: batch=${prof.nBatch}, ubatch=${prof.nUbatch}, maxAlloc=${prof.maxSingleAllocMb}MB, target=${prof.openClTarget}, offloadLayers=$activeOffloadedLayers")
+            }
+            appendLine()
             append(nativeRuntimeDiagnostics())
         }
     }

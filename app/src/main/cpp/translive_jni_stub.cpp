@@ -14,7 +14,7 @@ extern "C" {
 
 JNIEXPORT jlong JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
-    JNIEnv*, jobject, jstring, jint, jboolean) {
+    JNIEnv*, jobject, jstring, jint, jboolean, jint, jint, jint, jint) {
     LOGW("Stub: nativeLoadModel called. llama.cpp not integrated yet.");
     // Return non-zero so the engine thinks a model is loaded
     return 1;
@@ -61,8 +61,8 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
         env->DeleteLocalRef(stubToken);
     }
 
-    jint counts[2] = {0, 1};
     jintArray arr = env->NewIntArray(2);
+    jint counts[2] = {0, 1};
     env->SetIntArrayRegion(arr, 0, 2, counts);
     return arr;
 }

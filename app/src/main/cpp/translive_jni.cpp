@@ -2,9 +2,10 @@
  * TransLive JNI Bridge — connects Kotlin TranslationEngine to llama.cpp.
  *
  * This file provides native methods for:
- * - Loading GGUF model files (mmap, Flash Attention)
+ * - Loading GGUF model files (mmap, Flash Attention, dynamic Adreno GPU parameters)
  * - Running translation inference (blocking and streaming)
  * - Releasing model resources
+ * - Detailed runtime hardware & OpenCL diagnostics
  *
  * Sampling: official HY-MT 1.5 parameters (temp=0.7, top_k=20, top_p=0.6, rep_penalty=1.05)
  * Source: https://huggingface.co/tencent/HY-MT1.5-1.8B
@@ -14,10 +15,11 @@
 #include <algorithm>
 #include <dlfcn.h>
 #include <fstream>
+#include <sstream>
 #include <string>
+#include <vector>
 #include <sys/sysinfo.h>
 #include <unistd.h>
-#include <vector>
 #include <android/log.h>
 #include "llama.h"
 #include "ggml-backend.h"
@@ -25,6 +27,33 @@
 #define TAG "TransLive-JNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+// OpenCL function pointer types for runtime dynamic probe without hard link dependency
+typedef int cl_int;
+typedef unsigned int cl_uint;
+typedef unsigned long long cl_ulong;
+typedef void* cl_platform_id;
+typedef void* cl_device_id;
+
+#define CL_SUCCESS 0
+#define CL_PLATFORM_NAME 0x0902
+#define CL_PLATFORM_VENDOR 0x0903
+#define CL_PLATFORM_VERSION 0x0901
+#define CL_DEVICE_TYPE_GPU (1 << 2)
+#define CL_DEVICE_NAME 0x102B
+#define CL_DEVICE_VENDOR 0x102C
+#define CL_DRIVER_VERSION 0x102D
+#define CL_DEVICE_VERSION 0x102F
+#define CL_DEVICE_MAX_COMPUTE_UNITS 0x1002
+#define CL_DEVICE_MAX_WORK_GROUP_SIZE 0x1004
+#define CL_DEVICE_MAX_MEM_ALLOC_SIZE 0x1010
+#define CL_DEVICE_GLOBAL_MEM_SIZE 0x101F
+#define CL_DEVICE_EXTENSIONS 0x1030
+
+typedef cl_int (*pfn_clGetPlatformIDs)(cl_uint, cl_platform_id*, cl_uint*);
+typedef cl_int (*pfn_clGetPlatformInfo)(cl_platform_id, cl_uint, size_t, void*, size_t*);
+typedef cl_int (*pfn_clGetDeviceIDs)(cl_platform_id, cl_ulong, cl_uint, cl_device_id*, cl_uint*);
+typedef cl_int (*pfn_clGetDeviceInfo)(cl_device_id, cl_uint, size_t, void*, size_t*);
 
 static bool runtime_library_available(const char * name) {
     void * handle = dlopen(name, RTLD_NOW | RTLD_LOCAL);
@@ -45,6 +74,10 @@ struct TransLiveContext {
     const llama_vocab* vocab = nullptr;
     int n_threads = 4;
     bool gpu_requested = false;
+    int n_gpu_layers = 0;
+    int n_batch = 512;
+    int n_ubatch = 128;
+    int n_ctx = 1024;
     std::string gpu_device;
 };
 
@@ -60,19 +93,11 @@ static ggml_backend_dev_t find_gpu_device() {
 
 // ─── Helpers ──────────────────────────────────────────────────────────
 
-/**
- * Tokenize prompt into token vector.
- * If useChatTemplate is true, wraps prompt in model's chat template first.
- * If false, tokenizes the raw prompt directly (for models like TranslateGemma
- * whose prompt format already contains structured output markers).
- * Returns number of tokens, or -1 on failure.
- */
 static int tokenize_prompt(TransLiveContext* tlctx, const std::string& prompt,
                            std::vector<llama_token>& out_tokens, bool useChatTemplate) {
     std::string finalPrompt;
 
     if (useChatTemplate) {
-        // Wrap prompt in chat template (HY-MT, etc.)
         std::vector<llama_chat_message> messages = {
             {"user", prompt.c_str()}
         };
@@ -93,11 +118,9 @@ static int tokenize_prompt(TransLiveContext* tlctx, const std::string& prompt,
         }
         finalPrompt = std::string(formatted.data(), len);
     } else {
-        // Raw prompt — no chat template wrapping
         finalPrompt = prompt;
     }
 
-    // Tokenize
     out_tokens.resize(finalPrompt.size() + 64);
     int n_tokens = llama_tokenize(
         tlctx->vocab, finalPrompt.c_str(), finalPrompt.size(),
@@ -114,10 +137,6 @@ static int tokenize_prompt(TransLiveContext* tlctx, const std::string& prompt,
     return n_tokens;
 }
 
-/**
- * Prepare context for inference: clear KV cache, encode prompt tokens.
- * Returns 0 on success, non-zero on failure.
- */
 static int prefill_prompt(TransLiveContext* tlctx, const std::vector<llama_token>& tokens) {
     llama_memory_clear(llama_get_memory(tlctx->ctx), true);
     llama_batch batch = llama_batch_get_one(
@@ -126,10 +145,6 @@ static int prefill_prompt(TransLiveContext* tlctx, const std::vector<llama_token
     return llama_decode(tlctx->ctx, batch);
 }
 
-/**
- * Never decode past the actual context window. A small reserve keeps the
- * final EOG token and runtime bookkeeping from exhausting the KV cache.
- */
 static int bounded_generation_tokens(
     TransLiveContext* tlctx,
     size_t prompt_token_count,
@@ -141,15 +156,6 @@ static int bounded_generation_tokens(
     return std::max(0, std::min(requested_tokens, available_tokens));
 }
 
-/**
- * Create translation sampler with official HY-MT 1.5 recommended parameters.
- * Source: https://huggingface.co/tencent/HY-MT1.5-1.8B
- * { "top_k": 20, "top_p": 0.6, "repetition_penalty": 1.05, "temperature": 0.7 }
- *
- * Chain order follows llama.cpp convention: penalties → top_k → top_p → temp → dist
- * Penalties must see full logit distribution before filtering.
- * Caller must free with llama_sampler_free().
- */
 static llama_sampler* create_translation_sampler(
     const llama_vocab* vocab,
     float temperature,
@@ -167,10 +173,6 @@ static llama_sampler* create_translation_sampler(
     return sampler;
 }
 
-/**
- * Decode a single token to UTF-8 string piece.
- * Returns number of bytes written, or 0 if token cannot be decoded.
- */
 static int token_to_string(const llama_vocab* vocab, llama_token token,
                            char* buf, int buf_size) {
     return llama_token_to_piece(vocab, token, buf, buf_size, 0, true);
@@ -180,7 +182,6 @@ static int token_to_string(const llama_vocab* vocab, llama_token token,
 
 extern "C" {
 
-/** Initialize llama backend once when the .so is loaded */
 JNIEXPORT jint JNI_OnLoad(JavaVM* /*vm*/, void* /*reserved*/) {
     llama_backend_init();
     LOGI("llama backend initialized");
@@ -189,14 +190,26 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* /*vm*/, void* /*reserved*/) {
 
 JNIEXPORT jlong JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
-    JNIEnv* env, jobject /*thiz*/, jstring modelPath, jint nThreads, jboolean useGpu) {
+    JNIEnv* env, jobject /*thiz*/,
+    jstring modelPath,
+    jint nThreads,
+    jboolean useGpu,
+    jint nGpuLayers,
+    jint nBatch,
+    jint nUbatch,
+    jint nCtx) {
 
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
-    LOGI("Loading model: %s (threads=%d)", path, nThreads);
+    const int effectiveBatch = nBatch > 0 ? nBatch : 512;
+    const int effectiveUbatch = nUbatch > 0 ? std::min(nUbatch, effectiveBatch) : 128;
+    const int effectiveCtx = nCtx > 0 ? nCtx : 1024;
 
-    // Load model through mmap. Newer llama.cpp exposes this as load_mode.
+    LOGI("Loading model: %s (threads=%d, gpu=%d, layers=%d, batch=%d, ubatch=%d, ctx=%d)",
+         path, nThreads, useGpu, nGpuLayers, effectiveBatch, effectiveUbatch, effectiveCtx);
+
     llama_model_params model_params = llama_model_default_params();
     model_params.load_mode = LLAMA_LOAD_MODE_MMAP;
+
     if (useGpu) {
         auto * gpu = find_gpu_device();
         if (!gpu) {
@@ -204,31 +217,31 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
             env->ReleaseStringUTFChars(modelPath, path);
             return 0;
         }
-        // -1 means all transformer layers. Keep input on CPU as llama.cpp does
-        // internally, and let its scheduler use the OpenCL device for the rest.
-        model_params.n_gpu_layers = -1;
-        LOGI("GGUF GPU requested: device=%s", ggml_backend_dev_name(gpu));
+        model_params.n_gpu_layers = nGpuLayers;
+        LOGI("GGUF GPU offload enabled: device=%s, layers=%d", ggml_backend_dev_name(gpu), nGpuLayers);
     } else {
         model_params.n_gpu_layers = 0;
     }
+
     llama_model* model = llama_model_load_from_file(path, model_params);
     env->ReleaseStringUTFChars(modelPath, path);
 
     if (!model) {
-        LOGE("Failed to load model");
+        LOGE("Failed to load model from path");
         return 0;
     }
 
-    // Create context
     llama_context_params ctx_params = llama_context_default_params();
-    ctx_params.n_ctx = 1024;
+    ctx_params.n_ctx = static_cast<uint32_t>(effectiveCtx);
+    ctx_params.n_batch = static_cast<uint32_t>(effectiveBatch);
+    ctx_params.n_ubatch = static_cast<uint32_t>(effectiveUbatch);
     ctx_params.n_threads = nThreads;
     ctx_params.n_threads_batch = nThreads;
     ctx_params.flash_attn_type = LLAMA_FLASH_ATTN_TYPE_ENABLED;
 
     llama_context* ctx = llama_init_from_model(model, ctx_params);
     if (!ctx) {
-        LOGE("Failed to create context");
+        LOGE("Failed to create llama context from model");
         llama_model_free(model);
         return 0;
     }
@@ -239,12 +252,18 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
     tlctx->vocab = llama_model_get_vocab(model);
     tlctx->n_threads = nThreads;
     tlctx->gpu_requested = useGpu;
+    tlctx->n_gpu_layers = useGpu ? nGpuLayers : 0;
+    tlctx->n_batch = effectiveBatch;
+    tlctx->n_ubatch = effectiveUbatch;
+    tlctx->n_ctx = effectiveCtx;
+
     if (useGpu) {
         auto * gpu = find_gpu_device();
         tlctx->gpu_device = gpu ? ggml_backend_dev_name(gpu) : "unavailable";
     }
 
-    LOGI("Model loaded (mmap=1, flash_attn=1, n_ctx=1024, GPU=%d)", useGpu);
+    LOGI("Model successfully loaded (mmap=1, flash_attn=1, ctx=%d, batch=%d, ubatch=%d, layers=%d)",
+         effectiveCtx, effectiveBatch, effectiveUbatch, tlctx->n_gpu_layers);
     return reinterpret_cast<jlong>(tlctx);
 }
 
@@ -263,7 +282,6 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     std::string promptCpp(promptStr);
     env->ReleaseStringUTFChars(prompt, promptStr);
 
-    // Tokenize + prefill
     std::vector<llama_token> tokens;
     tokenize_prompt(tlctx, promptCpp, tokens, useChatTemplate);
 
@@ -276,7 +294,6 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
         return env->NewStringUTF("[Error: input exceeds model context]");
     }
 
-    // Generate
     llama_sampler* sampler = create_translation_sampler(
         tlctx->vocab, temperature, topK, topP, repetitionPenalty);
     std::string result;
@@ -301,10 +318,6 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslate(
     return env->NewStringUTF(result.c_str());
 }
 
-/**
- * Streaming translation: calls callback.onToken(String) for each generated token.
- * Returns int array: [promptTokenCount, generatedTokenCount].
- */
 JNIEXPORT jintArray JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
     JNIEnv* env, jobject /*thiz*/, jlong contextPtr, jstring prompt,
@@ -328,7 +341,6 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
     std::string promptCpp(promptStr);
     env->ReleaseStringUTFChars(prompt, promptStr);
 
-    // Tokenize + prefill
     std::vector<llama_token> tokens;
     counts[0] = tokenize_prompt(tlctx, promptCpp, tokens, useChatTemplate);
 
@@ -345,11 +357,9 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
         return arr;
     }
 
-    // Generate with per-token callback
     llama_sampler* sampler = create_translation_sampler(
         tlctx->vocab, temperature, topK, topP, repetitionPenalty);
     llama_token eos = llama_vocab_eos(tlctx->vocab);
-    int generated = 0;
 
     for (int i = 0; i < generation_limit; i++) {
         llama_token token = llama_sampler_sample(sampler, tlctx->ctx, -1);
@@ -360,13 +370,10 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
         int n = token_to_string(tlctx->vocab, token, buf, sizeof(buf));
         if (n > 0) {
             jstring tokenStr = env->NewStringUTF(std::string(buf, n).c_str());
-            jboolean cont = env->CallBooleanMethod(callback, onTokenMethod, tokenStr);
+            jboolean keepGoing = env->CallBooleanMethod(callback, onTokenMethod, tokenStr);
             env->DeleteLocalRef(tokenStr);
-            if (!cont) {
-                LOGI("Streaming cancelled at token %d", i);
-                break;
-            }
-            generated++;
+            counts[1]++;
+            if (!keepGoing) break;
         }
 
         llama_batch batch = llama_batch_get_one(&token, 1);
@@ -374,9 +381,7 @@ Java_com_translive_app_engine_TranslationEngine_nativeTranslateStreaming(
     }
 
     llama_sampler_free(sampler);
-    counts[1] = generated;
 
-    LOGI("Streaming: %d prompt, %d generated tokens", counts[0], counts[1]);
     jintArray arr = env->NewIntArray(2);
     env->SetIntArrayRegion(arr, 0, 2, counts);
     return arr;
@@ -406,27 +411,125 @@ Java_com_translive_app_engine_TranslationEngine_nativeIsLoaded(
 JNIEXPORT jstring JNICALL
 Java_com_translive_app_engine_TranslationEngine_nativeRuntimeDiagnostics(
     JNIEnv * env, jobject /*thiz*/) {
+
     struct sysinfo memory {};
     sysinfo(&memory);
     const unsigned long long totalMiB =
         (static_cast<unsigned long long>(memory.totalram) * memory.mem_unit) / (1024ULL * 1024ULL);
     const unsigned long long freeMiB =
         (static_cast<unsigned long long>(memory.freeram) * memory.mem_unit) / (1024ULL * 1024ULL);
-    std::string report;
-    report += "CPU logical cores: " + std::to_string(sysconf(_SC_NPROCESSORS_ONLN)) + "\n";
-    report += "System RAM: " + std::to_string(freeMiB) + " MiB free / " + std::to_string(totalMiB) + " MiB total\n";
-    report += "GPU (KGSL): " + read_first_line("/sys/class/kgsl/kgsl-3d0/gpu_model") + "\n";
-    report += "Vulkan loader: " + std::string(runtime_library_available("libvulkan.so") ? "available" : "unavailable") + "\n";
-    report += "OpenCL loader: " + std::string(runtime_library_available("libOpenCL.so") ? "available" : "unavailable") + "\n";
-    auto * gpu = find_gpu_device();
-    report += "GGUF GPU backend compiled: " + std::string(gpu ? "OpenCL" : "no") + "\n";
-    if (gpu) {
-        report += "GGUF GPU device: " + std::string(ggml_backend_dev_name(gpu)) + "\n";
-        report += "GGUF GPU offload: available; no model benchmark was run";
+
+    std::ostringstream out;
+    out << "=== CPU & Host Memory ===\n";
+    out << "CPU logical cores: " << sysconf(_SC_NPROCESSORS_ONLN) << "\n";
+    out << "System RAM: " << freeMiB << " MiB free / " << totalMiB << " MiB total\n";
+
+    out << "\n=== Kernel GPU Subsystem ===\n";
+    out << "GPU (KGSL): " << read_first_line("/sys/class/kgsl/kgsl-3d0/gpu_model") << "\n";
+    out << "Vulkan loader: " << (runtime_library_available("libvulkan.so") ? "available" : "unavailable") << "\n";
+
+    out << "\n=== OpenCL Hardware Probe ===\n";
+    void* clHandle = dlopen("libOpenCL.so", RTLD_NOW | RTLD_LOCAL);
+    if (!clHandle) {
+        out << "OpenCL loader: unavailable (dlopen libOpenCL.so failed)\n";
     } else {
-        report += "GGUF GPU offload: unavailable; no model benchmark was run";
+        out << "OpenCL loader: available (libOpenCL.so loaded)\n";
+
+        auto clGetPlatformIDs_ptr = (pfn_clGetPlatformIDs)dlsym(clHandle, "clGetPlatformIDs");
+        auto clGetPlatformInfo_ptr = (pfn_clGetPlatformInfo)dlsym(clHandle, "clGetPlatformInfo");
+        auto clGetDeviceIDs_ptr = (pfn_clGetDeviceIDs)dlsym(clHandle, "clGetDeviceIDs");
+        auto clGetDeviceInfo_ptr = (pfn_clGetDeviceInfo)dlsym(clHandle, "clGetDeviceInfo");
+
+        if (!clGetPlatformIDs_ptr || !clGetPlatformInfo_ptr || !clGetDeviceIDs_ptr || !clGetDeviceInfo_ptr) {
+            out << "OpenCL symbols: incomplete symbol table in libOpenCL.so\n";
+        } else {
+            cl_uint numPlatforms = 0;
+            if (clGetPlatformIDs_ptr(0, nullptr, &numPlatforms) == CL_SUCCESS && numPlatforms > 0) {
+                std::vector<cl_platform_id> platforms(numPlatforms);
+                clGetPlatformIDs_ptr(numPlatforms, platforms.data(), nullptr);
+
+                for (cl_uint p = 0; p < numPlatforms; ++p) {
+                    char pName[256] = {0};
+                    char pVersion[256] = {0};
+                    char pVendor[256] = {0};
+                    clGetPlatformInfo_ptr(platforms[p], CL_PLATFORM_NAME, sizeof(pName), pName, nullptr);
+                    clGetPlatformInfo_ptr(platforms[p], CL_PLATFORM_VERSION, sizeof(pVersion), pVersion, nullptr);
+                    clGetPlatformInfo_ptr(platforms[p], CL_PLATFORM_VENDOR, sizeof(pVendor), pVendor, nullptr);
+
+                    out << "Platform [" << p << "]: " << pName << " (" << pVendor << ") " << pVersion << "\n";
+
+                    cl_uint numDevices = 0;
+                    if (clGetDeviceIDs_ptr(platforms[p], CL_DEVICE_TYPE_GPU, 0, nullptr, &numDevices) == CL_SUCCESS && numDevices > 0) {
+                        std::vector<cl_device_id> devices(numDevices);
+                        clGetDeviceIDs_ptr(platforms[p], CL_DEVICE_TYPE_GPU, numDevices, devices.data(), nullptr);
+
+                        for (cl_uint d = 0; d < numDevices; ++d) {
+                            char dName[256] = {0};
+                            char dDriverVer[256] = {0};
+                            char dDeviceVer[256] = {0};
+                            cl_uint computeUnits = 0;
+                            cl_ulong maxAllocSize = 0;
+                            cl_ulong globalMemSize = 0;
+                            size_t maxWorkGroupSize = 0;
+
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_NAME, sizeof(dName), dName, nullptr);
+                            clGetDeviceInfo_ptr(devices[d], CL_DRIVER_VERSION, sizeof(dDriverVer), dDriverVer, nullptr);
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_VERSION, sizeof(dDeviceVer), dDeviceVer, nullptr);
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(computeUnits), &computeUnits, nullptr);
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(maxAllocSize), &maxAllocSize, nullptr);
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(globalMemSize), &globalMemSize, nullptr);
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
+
+                            out << "  GPU Device [" << d << "]: " << dName << "\n";
+                            out << "  Driver version: " << dDriverVer << "\n";
+                            out << "  OpenCL version: " << dDeviceVer << "\n";
+                            out << "  Compute units: " << computeUnits << "\n";
+                            out << "  Max workgroup size: " << maxWorkGroupSize << "\n";
+                            out << "  Max alloc size: " << (maxAllocSize / (1024 * 1024)) << " MiB (" << maxAllocSize << " bytes)\n";
+                            out << "  Global memory: " << (globalMemSize / (1024 * 1024)) << " MiB (" << globalMemSize << " bytes)\n";
+
+                            size_t extSize = 0;
+                            clGetDeviceInfo_ptr(devices[d], CL_DEVICE_EXTENSIONS, 0, nullptr, &extSize);
+                            if (extSize > 0) {
+                                std::vector<char> extBuf(extSize);
+                                clGetDeviceInfo_ptr(devices[d], CL_DEVICE_EXTENSIONS, extSize, extBuf.data(), nullptr);
+                                std::string extensions(extBuf.data());
+
+                                out << "  Key Qualcomm extensions:\n";
+                                auto checkExt = [&](const char* name) {
+                                    out << "    - " << name << ": " << (extensions.find(name) != std::string::npos ? "SUPPORTED" : "no") << "\n";
+                                };
+                                checkExt("cl_qcom_android_native_buffer_host_ptr");
+                                checkExt("cl_qcom_ext_host_ptr");
+                                checkExt("cl_qcom_ion_host_ptr");
+                                checkExt("cl_khr_fp16");
+                                checkExt("cl_khr_subgroups");
+                                checkExt("cl_qcom_perf_hint");
+                                checkExt("cl_qcom_recordable_queues");
+                            }
+                        }
+                    } else {
+                        out << "  No CL_DEVICE_TYPE_GPU found for platform " << p << "\n";
+                    }
+                }
+            } else {
+                out << "No OpenCL platforms found on system\n";
+            }
+        }
+        dlclose(clHandle);
     }
-    return env->NewStringUTF(report.c_str());
+
+    out << "\n=== GGUF Backend Probe ===\n";
+    auto * gpu = find_gpu_device();
+    out << "GGUF GPU backend compiled: " << (gpu ? "OpenCL" : "no") << "\n";
+    if (gpu) {
+        out << "GGUF GPU device: " << ggml_backend_dev_name(gpu) << "\n";
+        out << "GGUF GPU offload: available (dynamic Adreno device profile configured)";
+    } else {
+        out << "GGUF GPU offload: unavailable";
+    }
+
+    return env->NewStringUTF(out.str().c_str());
 }
 
 } // extern "C"

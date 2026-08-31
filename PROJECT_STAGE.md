@@ -33,6 +33,7 @@ Snapshot date: 2026-08-31
 - **Live Subtitle Mode**: Spatio-temporal text tracking with IoU matching and Levenshtein jitter filtering for dynamic video/presentation subtitle teleprompter.
 - **Offline Language Packs**: Unified multi-component travel packs (RU-EN, VI-EN, ZH-EN, ES-EN, JA-EN, DE-EN, FR-EN) coordinating NMT, Dictionary, STT, and OCR assets.
 - **Audited Model Catalog & Performance Tiers**: Pinned SHA-256 checksums, memory bounds, and tier badges (`⚡ Fast / Budget`, `⭐ Balanced`, `💎 Max Quality`, `🚀 GPU-Accelerated`).
+- **Multi-Generation Snapdragon Adreno GPU Acceleration**: Dynamic hardware profile registry (`AdrenoHardwareProfile.kt`, `AdrenoProfileRegistry.kt`) covering Snapdragon 845 (Adreno 630), Snapdragon 8 Gen 3 (Adreno 750) through Snapdragon 8 Elite (Adreno 830 / OnePlus 13 reference profile) with runtime layer scaling, dynamic batching (128/256/512), and OpenCL hardware probes in a single universal APK.
 - **LiteRT-LM Beta Benchmark**: Comprehensive 38-language evaluation suite, TTFT/throughput profiler, and CPU/GPU fallback telemetry.
 
 ## Repository Work Recently Completed
