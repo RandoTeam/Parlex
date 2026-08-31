@@ -37,49 +37,16 @@ Current release signing state:
 
 ## What Is Implemented
 
-Text mode:
-
-- Manual source/target language selection.
-- Source auto-detection for the first side.
-- Separate persisted translation direction.
-- Offline model translation.
-- TTS playback.
-- History and favorites.
-
-Dialogue mode:
-
-- Two-way speech translation.
-- Separate persisted direction.
-- STT, translation, TTS pipeline.
-
-Camera beta:
-
-- Camera UI is visible again.
-- Live camera OCR/translation path.
-- Full-resolution capture path.
-- Gallery image translation.
-- Auto source handling.
-- Mixed-language capture direction.
-- Torch mode.
-- Camera candidate selection when CameraX exposes multiple lenses.
-- Quality hints.
-- Debug capture pack button in debug builds.
-
-Models:
-
-- Tencent HY-MT 1.5 entries.
-- Tencent Hy-MT2 entries.
-- Google TranslateGemma GGUF entries.
-- Google TranslateGemma LiteRT-LM beta entries.
-
-i18n:
-
-- English fallback resources.
-- Russian resources.
-- Simplified Chinese resources.
-- Traditional Chinese resources.
-- Settings option for system/en/ru/zh-CN/zh-TW.
-- `LocalizedTextProvider` for ViewModel/service-facing strings.
+- **Text & Dialogue Multi-Tier Translation**: Fast NMT (ML Kit, zero LLM RAM), Fast + LLM Improve, and LLM Direct across all 33 primary languages and 5 dialects with ICU Transliteration subtitles.
+- **Screen Translation & Floating HUD**: Draggable overlay button, in-place text replacement card, continuous Auto-Live AR stream, animated pulsating HUD, on-screen language switcher, and zero-key currency augmentation.
+- **Live Zero-Key Currency Converter**: Lexical/symbol parser ($50, 100€, 10 000₫, 1 500₽) with baseline offline conversion table for 35+ fiat currencies and customizable user home currency.
+- **Camera Document Polish & Travel Mode**: 2-stage OCR box grouping, background inpainting, interactive bilingual inspect bottom sheet, Luma SAD camera stability analyzer, and 7-category dietary allergen classification.
+- **Live Subtitle Camera Mode**: Spatio-temporal OCR tracker (IoU matching + Levenshtein jitter filter) for live teleprompter captions over videos and presentations.
+- **PDF Document Translation**: High-DPI page renderer, semantic paragraph segmentation, overlay/split viewer, and multi-format export.
+- **Built-in Offline Dictionary**: Local Room DB lexicon with fast multi-word lookup, parts of speech, and TSV import.
+- **Offline Language Packs Hub**: Unified travel packs (RU-EN, VI-EN, ZH-EN, ES-EN, JA-EN, DE-EN, FR-EN) coordinating atomic NMT, dictionary, STT, and OCR downloads.
+- **Audited Model Catalog & Performance Tiers**: Pinned SHA-256 checksums and performance tier badges (`⚡ Fast / Budget`, `⭐ Balanced`, `💎 Max Quality`, `🚀 GPU-Accelerated`).
+- **LiteRT-LM Beta Benchmark**: End-to-end profiler (TTFT, tok/s, RSS memory, delegate fallback) and 38-language quality evaluation suite.
 
 Governance:
 
