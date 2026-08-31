@@ -18,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <mutex>
 #include <sys/sysinfo.h>
 #include <unistd.h>
 #include <android/log.h>
@@ -81,7 +82,16 @@ struct TransLiveContext {
     std::string gpu_device;
 };
 
+static void ensure_backend_initialized() {
+    static std::once_flag s_init_flag;
+    std::call_once(s_init_flag, []() {
+        llama_backend_init();
+        LOGI("llama backend initialized");
+    });
+}
+
 static ggml_backend_dev_t find_gpu_device() {
+    ensure_backend_initialized();
     for (size_t i = 0; i < ggml_backend_dev_count(); ++i) {
         auto * device = ggml_backend_dev_get(i);
         if (ggml_backend_dev_type(device) == GGML_BACKEND_DEVICE_TYPE_GPU) {
@@ -183,8 +193,8 @@ static int token_to_string(const llama_vocab* vocab, llama_token token,
 extern "C" {
 
 JNIEXPORT jint JNI_OnLoad(JavaVM* /*vm*/, void* /*reserved*/) {
-    llama_backend_init();
-    LOGI("llama backend initialized");
+    // Keep JNI_OnLoad minimal and non-blocking during classloader initialization.
+    LOGI("translive native library loaded (JNI 1.6)");
     return JNI_VERSION_1_6;
 }
 
@@ -198,6 +208,8 @@ Java_com_translive_app_engine_TranslationEngine_nativeLoadModel(
     jint nBatch,
     jint nUbatch,
     jint nCtx) {
+
+    ensure_backend_initialized();
 
     const char* path = env->GetStringUTFChars(modelPath, nullptr);
     const int effectiveBatch = nBatch > 0 ? nBatch : 512;
