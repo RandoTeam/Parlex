@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +45,7 @@ import com.translive.app.ui.viewmodel.CameraTranslationPackUiState
 import com.translive.app.ui.viewmodel.ModelItemState
 import com.translive.app.ui.viewmodel.ModelManagerViewModel
 import com.translive.app.ui.viewmodel.ModelStatus
+import com.translive.app.engine.FastTranslateEngine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -390,8 +392,14 @@ fun ModelManagerScreen(
                             packs = uiState.cameraLanguagePacks,
                             pair = uiState.cameraPackagePair,
                             expanded = uiState.cameraLanguagePacksExpanded,
+                            isBulkDownloading = uiState.isBulkDownloadingFastPackages,
+                            bulkDownloadProgress = uiState.bulkDownloadProgress,
+                            bulkDownloadedCount = uiState.bulkDownloadedCount,
+                            bulkTotalCount = uiState.bulkTotalCount,
                             onToggle = viewModel::toggleCameraLanguagePacks,
                             onDownload = viewModel::downloadCameraLanguagePack,
+                            onDelete = viewModel::deleteCameraLanguagePack,
+                            onDownloadAll = viewModel::downloadAllFastLanguagePackages,
                             onPairSourceSelected = viewModel::selectCameraPackagePairSource,
                             onPairTargetSelected = viewModel::selectCameraPackagePairTarget,
                             onPairDownload = viewModel::downloadCameraPackagePair,
@@ -426,11 +434,20 @@ fun ModelManagerScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "📖 Встроенный словарь RU ↔ EN",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.AutoMirrored.Outlined.MenuBook,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = "Встроенный словарь RU ↔ EN",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
                                     text = "Статей в базе: ${uiState.dictionaryEntriesCount} • Мгновенный поиск",
@@ -1241,21 +1258,33 @@ private fun CameraLanguagePacksGroup(
     packs: List<com.translive.app.ui.viewmodel.CameraLanguagePackUiState>,
     pair: CameraPackagePairUiState?,
     expanded: Boolean,
+    isBulkDownloading: Boolean,
+    bulkDownloadProgress: Float,
+    bulkDownloadedCount: Int,
+    bulkTotalCount: Int,
     onToggle: () -> Unit,
     onDownload: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onDownloadAll: () -> Unit,
     onPairSourceSelected: (Language) -> Unit,
     onPairTargetSelected: (Language) -> Unit,
     onPairDownload: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val ready = packs.count { it.isDownloaded }
-    // The picker must expose the complete model catalog, not only ML Kit's
-    // fast subset. Unsupported fast packages use the local LLM fallback.
+    val fastPacks = packs.filter { it.fastSupported }
+    val readyCount = fastPacks.count { it.isDownloaded }
+    val totalCount = fastPacks.size
+    val installedBytes = readyCount * FastTranslateEngine.PACKAGE_SIZE_BYTES
+    val totalBytes = totalCount * FastTranslateEngine.PACKAGE_SIZE_BYTES
+    val missingCount = totalCount - readyCount
+    val missingBytes = missingCount * FastTranslateEngine.PACKAGE_SIZE_BYTES
+
     val supportedLanguages = remember(packs) {
         packs.flatMap { it.languages }.distinct().ifEmpty { Language.allLanguages }
     }
     var selectingSource by remember { mutableStateOf(false) }
     var selectingTarget by remember { mutableStateOf(false) }
+
     Card(
         onClick = onToggle,
         modifier = modifier.fillMaxWidth(),
@@ -1263,44 +1292,178 @@ private fun CameraLanguagePacksGroup(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            // Header Row
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 Icon(
                     Icons.Filled.Translate,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
                 )
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = stringResource(R.string.models_camera_all_language_packages),
-                        style = MaterialTheme.typography.titleSmall,
+                        style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold
                     )
+                    Spacer(Modifier.height(2.dp))
                     Text(
-                        text = stringResource(
-                            R.string.models_camera_all_packages_progress,
-                            ready,
-                            packs.size
-                        ),
+                        text = "Установлено $readyCount / $totalCount (${formatSize(installedBytes)} / ${formatSize(totalBytes)})",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = if (readyCount == totalCount && totalCount > 0)
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    else
+                        MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.padding(end = 4.dp)
+                ) {
+                    Text(
+                        text = "$readyCount / $totalCount",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = if (readyCount == totalCount && totalCount > 0)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
                 Icon(
                     imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
-                    contentDescription = null
+                    contentDescription = if (expanded) stringResource(R.string.cd_collapse) else stringResource(R.string.cd_expand),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
 
             if (expanded) {
+                Spacer(Modifier.height(12.dp))
+
+                // Source origin metadata badge
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.CloudDownload,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "${FastTranslateEngine.DOWNLOAD_SOURCE_NAME} • Офлайн-модели NMT",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
                 Spacer(Modifier.height(10.dp))
                 Text(
                     text = stringResource(R.string.models_camera_all_packages_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                // Bulk Download Action Section
+                Spacer(Modifier.height(12.dp))
+                if (isBulkDownloading) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(
+                                MaterialTheme.colorScheme.surface,
+                                RoundedCornerShape(10.dp)
+                            )
+                            .padding(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Загрузка всех пакетов ($bulkDownloadedCount / $bulkTotalCount)…",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = "${(bulkDownloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        LinearProgressIndicator(
+                            progress = { bulkDownloadProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                        )
+                    }
+                } else if (missingCount > 0) {
+                    FilledTonalButton(
+                        onClick = onDownloadAll,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = "Скачать все пакеты (~${formatSize(missingBytes)})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Icon(
+                                Icons.Filled.CheckCircle,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = "Все языковые пакеты установлены",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                // Pair selector
                 pair?.let { selectedPair ->
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     Text(
                         text = stringResource(R.string.models_camera_pair_download_title),
                         style = MaterialTheme.typography.titleSmall,
@@ -1366,39 +1529,132 @@ private fun CameraLanguagePacksGroup(
                         }
                     }
                 }
+
+                // Individual Package Rows
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+                Spacer(Modifier.height(8.dp))
+
                 packs.forEach { pack ->
-                    val label = pack.languages.joinToString(", ") { it.displayName }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(top = 8.dp),
+                            .padding(vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        when {
-                            !pack.fastSupported -> Text(
-                                text = stringResource(R.string.models_camera_unsupported_pair),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 8.dp)
-                            )
-                            pack.isDownloaded -> Text(
-                                text = stringResource(R.string.model_ready),
+                        // Zero-Emoji Material 3 ISO Code Tag
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = if (pack.isDownloaded)
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.width(48.dp)
+                        ) {
+                            Text(
+                                text = pack.modelLanguageCode.replace("llm:", "").uppercase(),
                                 style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
+                                fontWeight = FontWeight.Bold,
+                                color = if (pack.isDownloaded)
+                                    MaterialTheme.colorScheme.primary
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                maxLines = 1
                             )
-                            pack.isDownloading -> CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                strokeWidth = 2.dp
+                        }
+
+                        Spacer(Modifier.width(10.dp))
+
+                        // Names, Size, and Source
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = pack.languages.joinToString(", ") { it.displayName },
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
-                            else -> TextButton(onClick = { onDownload(pack.modelLanguageCode) }) {
-                                Icon(Icons.Filled.Download, null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text(stringResource(R.string.model_download))
+                            Text(
+                                text = if (pack.fastSupported)
+                                    "~${formatSize(pack.sizeBytes)} • ${pack.downloadSource}"
+                                else
+                                    "Локальная LLM модель",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
+                        // Actions
+                        when {
+                            !pack.fastSupported -> {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
+                                    modifier = Modifier.padding(start = 8.dp)
+                                ) {
+                                    Text(
+                                        text = "LLM Fallback",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                            pack.isDownloading -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.5.dp
+                                )
+                            }
+                            pack.isDeleting -> {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    strokeWidth = 2.5.dp,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                            pack.isDownloaded -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    ) {
+                                        Text(
+                                            text = stringResource(R.string.model_ready),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(4.dp))
+                                    IconButton(
+                                        onClick = { onDelete(pack.modelLanguageCode) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Delete,
+                                            contentDescription = stringResource(R.string.model_delete),
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            else -> {
+                                IconButton(
+                                    onClick = { onDownload(pack.modelLanguageCode) },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Download,
+                                        contentDescription = stringResource(R.string.model_download),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
                             }
                         }
                     }

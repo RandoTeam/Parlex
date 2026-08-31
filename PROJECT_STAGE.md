@@ -24,6 +24,8 @@ Snapshot date: 2026-08-31
 ## Current Functional Stage
 
 - **Multi-Tier Translation Policy**: Fast NMT (ML Kit, ~30ms, 0MB LLM RAM), Fast + Improve, and LLM Direct across Text, Dialogue, Camera, and Screen Translation.
+- **Continuous Hands-Free Voice Dialogue (Phase D1)**: Background VAD loop with multi-stage AEC Guard (TTS frame dropping + 300ms reverb cooldown), deterministic multi-script language arbiter, and on-demand inline LLM polish without scroll shift.
+- **Fast NMT Package Manager & Bulk Downloader (Phase P1)**: Complete storage telemetry (~30 MB/pack, 900 MB full catalog), source transparency (`Google ML Kit CDN • On-Device NMT`), one-tap "Download All" with progress tracking, per-package deletion, and strict Material 3 Zero-Emoji ISO tags.
 - **Screen Translation & Floating HUD**: Continuous Auto-Live AR translation and Single-Shot mode with animated pulsating HUD, mini language picker, clipboard copy, and TTS readout.
 - **Transliteration Engine**: Offline ICU Transliterator for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul.
 - **Built-in Offline Dictionary**: Room DB lexicon with fast word lookup, grammatical categorization, and TSV lexicon import.

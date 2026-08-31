@@ -273,6 +273,33 @@ Parlex.
    - Поддержка одиночного снимка по требованию (`TriggerSingleShot`).
 4. [x] Покрыть модульными тестами (`ScreenTranslateModelsTest.kt`).
 
+## Фаза D1: Continuous Bi-Directional Hands-Free Voice Dialogue [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: непрерывный голосовой перевод диалога без удержания кнопок с VAD и защитой от акустического эха (AEC Guard), автоматическим арбитром языков реплик (Language Arbiter) и двухуровневым переводом (мгновенный Fast NMT ~20мс + опциональный LLM Refine по требованию) с Material Design 3 zero-emoji стандартами.
+
+Шаги:
+
+1. [x] D1.1: Детерминированный `DialogueLanguageArbiter.kt` (анализ Unicode-скриптов, битовая маска диакритик, лексикон и марковское априорное чередование).
+2. [x] D1.2: Непрерывный фоновый цикл захвата аудио с Silero VAD и трехуровневым AEC Guard (`SpeechEngine.kt` - подавление фреймов микрофона при TTS + 300мс reverb cooldown).
+3. [x] D1.3: Двухуровневый перевод: Fast NMT (~20мс) + кнопка глубокого улучшения контекста LLM (`improveMessageWithLlm`) в пузыре сообщения без сдвига скролла. Полный редизайн на Material 3 Zero-Emoji (плашки `[EN]`, `[RU]`).
+4. [x] Покрыть модульными тестами (`DialogueLanguageArbiterTest.kt`, `ContinuousDialogueVadTest.kt`, `DialogueLlmRefinementTest.kt`).
+
+## Фаза P1: Fast Translation Package Download Management & Bulk Download [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: прозрачное управление пакетами быстрого офлайн-перевода (Google ML Kit NMT) по аналогии со скачиванием LLM моделей: отображение точных размеров пакетов (~30 МБ на язык), объема занятого и свободного дискового пространства, прозрачность источника (`Google ML Kit CDN • Офлайн-модели NMT`), кнопка пакетного скачивания всех языков («Скачать все пакеты») с отображением прогресса и удаление установленных пакетов.
+
+Шаги:
+
+1. [x] Расширить `FastTranslateEngine.kt`: константа `PACKAGE_SIZE_BYTES = 30_000_000L`, происхождение `DOWNLOAD_SOURCE_NAME`, конвейер `downloadAllPackages` с колбэками прогресса и автозакрытие транслятора при удалении.
+2. [x] Расширить `ModelManagerViewModel.kt`: поля размера, источника и состояния удаления в `CameraLanguagePackUiState`, методы `downloadAllFastLanguagePackages()` и `deleteCameraLanguagePack()`.
+3. [x] Редизайн карточки `CameraLanguagePacksGroup` в `ModelManagerScreen.kt`: сводка хранилища (`X / 30 пакетов`, `размер на диске`), бейдж источника Google CDN, линейный индикатор загрузки, кнопка массового скачивания, плашки ISO кодов языков и корзина для удаления пакетов.
+4. [x] Полное соответствие Material 3 Zero-Emoji (включая очистку карточки словаря).
+5. [x] Покрыть модульными тестами (`FastTranslatePackageManagementTest.kt` - 12/12 тестов pass).
+
 ## Governance
 
 - Один PR должен решать одну тему.
@@ -280,4 +307,5 @@ Parlex.
   одном PR.
 - Debug CI проверяет качество, но не выпускает APK.
 - Подписанные beta/release APK остаются ручным контролируемым процессом.
+
 

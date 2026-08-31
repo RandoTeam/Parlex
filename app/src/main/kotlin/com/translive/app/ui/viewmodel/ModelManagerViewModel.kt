@@ -89,6 +89,10 @@ data class ModelManagerUiState(
     val cameraLanguagePacks: List<CameraLanguagePackUiState> = emptyList(),
     val cameraLanguagePacksExpanded: Boolean = false,
     val cameraPackagePair: CameraPackagePairUiState? = null,
+    val isBulkDownloadingFastPackages: Boolean = false,
+    val bulkDownloadProgress: Float = 0f,
+    val bulkDownloadedCount: Int = 0,
+    val bulkTotalCount: Int = 0,
     val ocrPackageInstalled: Boolean = false,
     val ocrPackageBusy: Boolean = false,
     val error: String? = null,
@@ -116,7 +120,10 @@ data class CameraLanguagePackUiState(
     val languages: List<Language>,
     val fastSupported: Boolean = true,
     val isDownloaded: Boolean,
-    val isDownloading: Boolean = false
+    val isDownloading: Boolean = false,
+    val isDeleting: Boolean = false,
+    val sizeBytes: Long = FastTranslateEngine.PACKAGE_SIZE_BYTES,
+    val downloadSource: String = FastTranslateEngine.DOWNLOAD_SOURCE_NAME
 )
 
 /** A user-picked fast camera pair in the collapsed Models group. */
@@ -309,7 +316,10 @@ class ModelManagerViewModel @Inject constructor(
                     languages = pack.languages,
                     fastSupported = pack.fastSupported,
                     isDownloaded = pack.modelLanguageCode in downloadedCodes,
-                    isDownloading = FastTranslateEngine.isDownloading.value
+                    isDownloading = FastTranslateEngine.isDownloading.value && pack.modelLanguageCode !in downloadedCodes,
+                    isDeleting = false,
+                    sizeBytes = pack.sizeBytes,
+                    downloadSource = pack.downloadSource
                 )
             }
             val existingPair = _uiState.value.cameraPackagePair
@@ -437,6 +447,69 @@ class ModelManagerViewModel @Inject constructor(
             val downloaded = FastTranslateEngine.downloadLanguagePackages(listOf(modelLanguageCode))
             if (!downloaded) {
                 _uiState.update { it.copy(error = tr(R.string.camera_pack_download_failed)) }
+            }
+            refreshCameraTranslationPack()
+        }
+    }
+
+    fun downloadAllFastLanguagePackages() {
+        if (_uiState.value.isBulkDownloadingFastPackages) return
+
+        viewModelScope.launch(Dispatchers.IO) {
+            val downloadedCodes = FastTranslateEngine.downloadedLanguageCodes()
+            val fastPackages = FastTranslateEngine.availableLanguagePackages()
+                .filter { it.fastSupported }
+                .map { it.modelLanguageCode }
+                .distinct()
+            val missing = fastPackages.filter { it !in downloadedCodes }
+
+            if (missing.isEmpty()) return@launch
+
+            _uiState.update {
+                it.copy(
+                    isBulkDownloadingFastPackages = true,
+                    bulkTotalCount = missing.size,
+                    bulkDownloadedCount = 0,
+                    bulkDownloadProgress = 0f
+                )
+            }
+
+            val success = FastTranslateEngine.downloadAllPackages { completed, total ->
+                _uiState.update {
+                    it.copy(
+                        bulkDownloadedCount = completed,
+                        bulkTotalCount = total,
+                        bulkDownloadProgress = if (total > 0) completed.toFloat() / total else 0f
+                    )
+                }
+                refreshCameraTranslationPack()
+            }
+
+            _uiState.update {
+                it.copy(
+                    isBulkDownloadingFastPackages = false,
+                    error = if (!success) tr(R.string.camera_pack_download_failed) else null,
+                    successMessage = if (success) "Все языковые пакеты быстрого перевода успешно загружены" else null
+                )
+            }
+            refreshCameraTranslationPack()
+        }
+    }
+
+    fun deleteCameraLanguagePack(modelLanguageCode: String) {
+        _uiState.update { state ->
+            state.copy(
+                cameraLanguagePacks = state.cameraLanguagePacks.map {
+                    if (it.modelLanguageCode == modelLanguageCode) it.copy(isDeleting = true) else it
+                }
+            )
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val success = FastTranslateEngine.deleteLanguagePackage(modelLanguageCode)
+            if (!success) {
+                _uiState.update {
+                    it.copy(error = "Не удалось удалить языковой пакет $modelLanguageCode")
+                }
             }
             refreshCameraTranslationPack()
         }

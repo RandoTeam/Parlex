@@ -36,6 +36,13 @@ class FastTranslateEngine @Inject constructor() {
 
     companion object {
         private const val TAG = "FastTranslateEngine"
+
+        /** Approximate download size per ML Kit language package (~30 MB). */
+        const val PACKAGE_SIZE_BYTES = 30_000_000L
+
+        /** CDN and origin metadata for offline NMT models. */
+        const val DOWNLOAD_SOURCE_NAME = "Google ML Kit CDN"
+        const val DOWNLOAD_SOURCE_DESCRIPTION = "Официальные офлайн-модели Google ML Kit Translation"
     }
 
     private var currentTranslator: Translator? = null
@@ -69,7 +76,9 @@ class FastTranslateEngine @Inject constructor() {
         val modelLanguageCode: String,
         val languages: List<Language>,
         /** False when the language is handled by the local LLM fallback. */
-        val fastSupported: Boolean
+        val fastSupported: Boolean,
+        val sizeBytes: Long = PACKAGE_SIZE_BYTES,
+        val downloadSource: String = DOWNLOAD_SOURCE_NAME
     )
 
     /**
@@ -128,7 +137,9 @@ class FastTranslateEngine @Inject constructor() {
                 LanguagePackage(
                     modelLanguageCode = modelCode,
                     languages = languages,
-                    fastSupported = !modelCode.startsWith("llm:")
+                    fastSupported = !modelCode.startsWith("llm:"),
+                    sizeBytes = if (modelCode.startsWith("llm:")) 0L else PACKAGE_SIZE_BYTES,
+                    downloadSource = DOWNLOAD_SOURCE_NAME
                 )
             }
             .sortedBy { it.languages.first().displayName }
@@ -239,6 +250,53 @@ class FastTranslateEngine @Inject constructor() {
         }
     }
 
+    /**
+     * Batch download all available fast packages with incremental progress reporting.
+     */
+    suspend fun downloadAllPackages(
+        onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> }
+    ): Boolean {
+        val supportedCodes = availableLanguagePackages()
+            .filter { it.fastSupported }
+            .map { it.modelLanguageCode }
+            .distinct()
+        val downloaded = downloadedLanguageCodes()
+        val missing = supportedCodes.filter { it !in downloaded }
+
+        if (missing.isEmpty()) {
+            onProgress(0, 0)
+            return true
+        }
+
+        _isDownloading.value = true
+        return try {
+            val manager = RemoteModelManager.getInstance()
+            val conditions = DownloadConditions.Builder().build()
+            var completedCount = 0
+            val totalCount = missing.size
+            onProgress(completedCount, totalCount)
+
+            for (languageCode in missing) {
+                val model = TranslateRemoteModel.Builder(languageCode).build()
+                suspendCancellableCoroutine<Unit> { cont ->
+                    manager.download(model, conditions)
+                        .addOnSuccessListener { if (cont.isActive) cont.resume(Unit) }
+                        .addOnFailureListener { error ->
+                            if (cont.isActive) cont.resumeWith(Result.failure(error))
+                        }
+                }
+                completedCount++
+                onProgress(completedCount, totalCount)
+            }
+            true
+        } catch (error: Throwable) {
+            Log.e(TAG, "ML Kit batch package download failed", error)
+            false
+        } finally {
+            _isDownloading.value = false
+        }
+    }
+
     /** Downloads only the missing reusable packages for a pair without changing the active fast translator. */
     suspend fun downloadPairPackages(sourceCode: String, targetCode: String): Boolean {
         val status = getPackageStatus(sourceCode, targetCode)
@@ -251,7 +309,7 @@ class FastTranslateEngine @Inject constructor() {
         return try {
             val manager = RemoteModelManager.getInstance()
             val model = TranslateRemoteModel.Builder(mlKitCode).build()
-            suspendCancellableCoroutine<Boolean> { cont ->
+            val deleted = suspendCancellableCoroutine<Boolean> { cont ->
                 manager.deleteDownloadedModel(model)
                     .addOnSuccessListener { if (cont.isActive) cont.resume(true) }
                     .addOnFailureListener {
@@ -259,6 +317,16 @@ class FastTranslateEngine @Inject constructor() {
                         if (cont.isActive) cont.resume(false)
                     }
             }
+            if (deleted) {
+                if (currentSourceLang == modelLanguageCode ||
+                    currentTargetLang == modelLanguageCode ||
+                    toMlKitLang(currentSourceLang) == mlKitCode ||
+                    toMlKitLang(currentTargetLang) == mlKitCode
+                ) {
+                    release()
+                }
+            }
+            deleted
         } catch (e: Exception) {
             Log.e(TAG, "Error deleting ML Kit package $mlKitCode", e)
             false
