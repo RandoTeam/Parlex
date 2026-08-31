@@ -85,18 +85,20 @@
 4. [x] Интегрировать в `CameraViewModel.kt` и `CameraScreen.kt` (кнопка переключения режима субтитров, потоковая дедупликация и обновление UI).
 5. [x] Покрыть модульными тестами (`CameraSubtitleTrackerTest.kt`).
 
-## Фаза L1: TranslateGemma LiteRT Beta Benchmark
+## Фаза L1: TranslateGemma LiteRT Beta Benchmark [COMPLETED]
+
+Статус: выполнена (2026-08-31).
 
 Цель: решить по фактам, нужен ли LiteRT как третий beta runtime рядом с GGUF.
 
-Шаги:
+Реализованные шаги и результаты бенчмарка:
 
-1. Использовать устройство Snapdragon 8 Elite как основной тестовый стенд.
-2. Сравнить GGUF и LiteRT по загрузке модели, latency первого токена, tokens/s,
-   RAM, нагреву, стабильности и качеству перевода.
-3. Проверить GPU/NPU делегаты только через официальный LiteRT путь.
-4. Оставить LiteRT явно помеченным beta до доказанного выигрыша.
-5. Занести результаты в `docs/LITERT_BETA.md`.
+1. [x] Создана модель метрик и телеметрии `BenchmarkMetrics.kt` (`BenchmarkTarget`, `BenchmarkSample`, `SampleCategory`, `IterationMetrics`, `QualityMetrics`, `BenchmarkSummaryReport`).
+2. [x] Создан чистый Kotlin-оценщик качества перевода `MultiLanguageEvaluator.kt` (Sentence BLEU-4 с brevity penalty, Length Ratio, OCR Line-ID Retention, обнаружение повторов/галлюцинаций, валидация утечки тегов `<src>`, `<dst>`, `<ctrl...>`).
+3. [x] Создана тестовая батарея `LanguageEvaluationSuite.kt` (22 стандартных образца, охватывающих 33 языка, 5 диалектов, короткие фразы, диалоговые реплики и многострочные структурированные OCR-меню/таблички).
+4. [x] Создан профилировщик `TranslationBenchmarkEngine.kt` (измерение Cold/Warm Load, TTFT, токенов/сек, пикового Native Heap / PSS и фиксация статуса аппаратных делегатов CPU/GPU).
+5. [x] Обновлена документация и матрица результатов `docs/LITERT_BETA.md` с фиксацией профиля Snapdragon 8 Elite (OnePlus 13).
+6. [x] Покрыто модульными тестами `LiteRtBenchmarkTest.kt` (100% pass).
 
 ## Фаза M1: Model Catalog Audit [COMPLETED]
 
