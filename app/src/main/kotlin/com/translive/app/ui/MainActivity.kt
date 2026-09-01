@@ -18,6 +18,7 @@ import com.translive.app.i18n.AppLocale
 import com.translive.app.service.LiveScreenTranslateService
 import com.translive.app.service.ScreenCaptureService
 import com.translive.app.service.ScreenTranslateOverlayService
+import com.translive.app.service.accessibility.ScreenAccessibilityService
 import com.translive.app.ui.theme.TransLiveTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -28,6 +29,10 @@ class MainActivity : ComponentActivity() {
     private var incomingImageUri by mutableStateOf<Uri?>(null)
     private var isOverlayCaptureRequest: Boolean = false
     private var isLiveTranslateRequest: Boolean = false
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { /* Permission result handled reactively by UI and services */ }
 
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -73,6 +78,12 @@ class MainActivity : ComponentActivity() {
         AppLocale.applyRuntimeLanguage(this, languageCode)
         enableEdgeToEdge()
         applyIncomingIntent(intent)
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (!com.translive.app.ui.permissions.SystemPermissionManager.areNotificationsEnabled(this)) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
 
         setContent {
             TransLiveTheme {
@@ -122,6 +133,15 @@ class MainActivity : ComponentActivity() {
     private fun startScreenOverlay() {
         if (!Settings.canDrawOverlays(this)) {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            return
+        }
+        if (ScreenTranslateOverlayService.isServiceRunning.value) {
+            ScreenTranslateOverlayService.stop(this)
+            return
+        }
+        if (ScreenAccessibilityService.isConnected()) {
+            ScreenTranslateOverlayService.start(this)
+            moveTaskToBack(true)
             return
         }
         isOverlayCaptureRequest = true

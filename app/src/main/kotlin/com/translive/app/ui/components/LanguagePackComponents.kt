@@ -32,47 +32,77 @@ fun LanguagePacksHubSection(
 ) {
     if (packs.isEmpty()) return
 
-    Column(modifier = modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Luggage,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(Modifier.width(8.dp))
-            Column {
-                Text(
-                    text = "Офлайн Языковые Пакеты (Travel Packs)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+    var isSectionExpanded by remember { mutableStateOf(false) }
+
+    Card(
+        onClick = { isSectionExpanded = !isSectionExpanded },
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    Icons.Default.Luggage,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
                 )
-                Text(
-                    text = "NMT + Словарь + OCR + Голосовые модули в одном пакете",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Офлайн Языковые Пакеты (Travel Packs)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "NMT + Словарь + OCR + Голосовые модули в одном пакете",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                    modifier = Modifier.padding(end = 6.dp)
+                ) {
+                    Text(
+                        text = "${packs.count { it.overallStatus == PackOverallStatus.FULLY_INSTALLED }} / ${packs.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+                Icon(
+                    imageVector = if (isSectionExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (isSectionExpanded) "Свернуть" else "Развернуть",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-        }
 
-        LazyRow(
-            contentPadding = PaddingValues(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(vertical = 4.dp)
-        ) {
-            items(packs, key = { it.id }) { pack ->
-                TravelPackCard(
-                    pack = pack,
-                    onDownload = { onDownloadPack(pack.id) },
-                    onDelete = { onDeletePack(pack.id) },
-                    modifier = Modifier.width(310.dp)
-                )
+            AnimatedVisibility(visible = isSectionExpanded) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    packs.forEach { pack ->
+                        TravelPackCard(
+                            pack = pack,
+                            onDownload = { onDownloadPack(pack.id) },
+                            onDelete = { onDeletePack(pack.id) },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
             }
         }
     }
@@ -101,16 +131,24 @@ fun TravelPackCard(
         )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Header Row: Emoji Flag + Title + Status Badge
+            // Header Row: ISO Tag Pill + Title + Status Badge
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    text = pack.flagEmoji,
-                    fontSize = 22.sp,
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f),
                     modifier = Modifier.padding(end = 8.dp)
-                )
+                ) {
+                    Text(
+                        text = "${pack.sourceLanguage.code.uppercase()} ⇄ ${pack.targetLanguage.code.uppercase()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = pack.title,

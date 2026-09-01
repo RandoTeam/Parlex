@@ -64,6 +64,9 @@ interface DialogueDao {
     @Query("SELECT * FROM dialogue_sessions ORDER BY updatedAt DESC")
     fun getAllSessions(): Flow<List<DialogueSession>>
 
+    @Query("SELECT * FROM dialogue_sessions WHERE id = :sessionId LIMIT 1")
+    fun getSessionById(sessionId: Long): Flow<DialogueSession?>
+
     @Query("SELECT * FROM dialogue_messages WHERE sessionId = :sessionId ORDER BY timestamp ASC")
     fun getMessagesForSession(sessionId: Long): Flow<List<DialogueMessage>>
 
@@ -80,6 +83,33 @@ interface DialogueDao {
 
     @Query("UPDATE dialogue_sessions SET updatedAt = :time WHERE id = :sessionId")
     suspend fun updateSessionTime(sessionId: Long, time: Long = System.currentTimeMillis())
+
+    @Query("""
+        UPDATE dialogue_sessions 
+        SET durationMs = :durationMs,
+            totalTurns = :totalTurns,
+            totalWords = :totalWords,
+            totalCharacters = :totalCharacters,
+            updatedAt = :updatedAt
+        WHERE id = :sessionId
+    """)
+    suspend fun updateSessionStatistics(
+        sessionId: Long,
+        durationMs: Long,
+        totalTurns: Int,
+        totalWords: Int,
+        totalCharacters: Int,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    @Query("UPDATE dialogue_sessions SET summary = :summary, summaryTimestamp = :timestamp WHERE id = :sessionId")
+    suspend fun updateSessionSummary(sessionId: Long, summary: String?, timestamp: Long? = System.currentTimeMillis())
+
+    @Query("UPDATE dialogue_sessions SET audioFilePath = :path, audioFormat = :format, isRecorded = :isRecorded, updatedAt = :updatedAt WHERE id = :sessionId")
+    suspend fun attachSessionAudio(sessionId: Long, path: String?, format: String?, isRecorded: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE dialogue_sessions SET audioFilePath = NULL, audioFormat = NULL, isRecorded = 0")
+    suspend fun clearAllSessionAudioPaths()
 
     @Delete
     suspend fun deleteSession(session: DialogueSession)
@@ -102,7 +132,7 @@ interface DialogueDao {
         DictionaryEntry::class,
         ExchangeRateEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class TransLiveDatabase : RoomDatabase() {

@@ -50,6 +50,7 @@ data class TranslationUiState(
     val isModelLoading: Boolean = false,
     val activeModelName: String? = null,
     val error: String? = null,
+    val llmImproveUnavailableReason: String? = null,
     val stats: TranslationStats? = null,
     val isFastResult: Boolean = false,
     val canImproveWithLlm: Boolean = false,
@@ -111,57 +112,142 @@ class TranslationViewModel @Inject constructor(
 
     fun loadModel() {
         if (_uiState.value.isModelLoaded || _uiState.value.isModelLoading) return
-        _uiState.update { it.copy(isModelLoading = true, error = null) }
 
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
+        when (settings.translationMode) {
+            SettingsRepository.TRANSLATION_MODE_FAST_ONLY -> {
+                _uiState.update {
+                    it.copy(
+                        isModelLoaded = false,
+                        isModelLoading = false,
+                        error = null,
+                        llmImproveUnavailableReason = null
+                    )
+                }
+            }
+            SettingsRepository.TRANSLATION_MODE_FAST_IMPROVE -> {
                 val modelPath = modelRepository.getActiveModelPath()
                 val activeVariant = modelRepository.getActiveVariant()
 
                 if (modelPath == null) {
                     _uiState.update {
                         it.copy(
+                            isModelLoaded = false,
                             isModelLoading = false,
-                            error = tr(R.string.error_no_model_selected)
+                            error = null,
+                            llmImproveUnavailableReason = "Улучшенный перевод недоступен без скачанной LLM-модели"
                         )
                     }
-                    return@launch
+                    return
                 }
 
-                val runtime = modelRepository.getActiveRuntime()
-                val threads = settings.threads
-                val loaded = if (runtime == ModelRuntime.LITERT_LM) {
-                    engine.unloadModel()
-                    liteRtEngine.loadModel(modelPath, settings.backend, threads)
-                } else {
-                    liteRtEngine.unloadModel()
-                    engine.loadModel(modelPath, threads, settings.backend)
-                }
+                _uiState.update { it.copy(isModelLoading = true, error = null, llmImproveUnavailableReason = null) }
 
-                _uiState.update {
-                    it.copy(
-                        isModelLoaded = loaded,
-                        isModelLoading = false,
-                        activeModelName = if (loaded) {
-                            activeVariant?.let { variant ->
-                                if (runtime == ModelRuntime.LITERT_LM) {
-                                    val backend = liteRtEngine.currentBackend ?: settings.backend
-                                    "${variant.quantName} Beta (${backend.uppercase()})"
-                                } else {
-                                    variant.quantName
-                                }
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        val runtime = modelRepository.getActiveRuntime()
+                        val threads = settings.threads
+                        val loaded = if (runtime == ModelRuntime.LITERT_LM) {
+                            engine.unloadModel()
+                            liteRtEngine.loadModel(modelPath, settings.backend, threads)
+                        } else {
+                            liteRtEngine.unloadModel()
+                            engine.loadModel(modelPath, threads, settings.backend)
+                        }
+
+                        _uiState.update {
+                            it.copy(
+                                isModelLoaded = loaded,
+                                isModelLoading = false,
+                                activeModelName = if (loaded) {
+                                    activeVariant?.let { variant ->
+                                        if (runtime == ModelRuntime.LITERT_LM) {
+                                            val backend = liteRtEngine.currentBackend ?: settings.backend
+                                            "${variant.quantName} Beta (${backend.uppercase()})"
+                                        } else {
+                                            variant.quantName
+                                        }
+                                    }
+                                } else null,
+                                error = null,
+                                llmImproveUnavailableReason = if (!loaded) "Улучшенный перевод недоступен: не удалось инициализировать LLM" else null
+                            )
+                        }
+
+                        if (loaded) {
+                            resetIdleTimer()
+                        }
+                    } catch (e: Exception) {
+                        _uiState.update {
+                            it.copy(
+                                isModelLoading = false,
+                                error = null,
+                                llmImproveUnavailableReason = "Улучшенный перевод недоступен: ${e.message}"
+                            )
+                        }
+                    }
+                }
+            }
+            SettingsRepository.TRANSLATION_MODE_LLM_DIRECT -> {
+                _uiState.update { it.copy(isModelLoading = true, error = null, llmImproveUnavailableReason = null) }
+
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        val modelPath = modelRepository.getActiveModelPath()
+                        val activeVariant = modelRepository.getActiveVariant()
+
+                        if (modelPath == null) {
+                            _uiState.update {
+                                it.copy(
+                                    isModelLoaded = false,
+                                    isModelLoading = false,
+                                    error = tr(R.string.error_no_model_selected),
+                                    llmImproveUnavailableReason = null
+                                )
                             }
-                        } else null,
-                        error = if (!loaded) tr(R.string.error_load_model_failed) else null
-                    )
-                }
+                            return@launch
+                        }
 
-                if (loaded) {
-                    resetIdleTimer()
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(isModelLoading = false, error = tr(R.string.error_load_model_with_message, e.message ?: ""))
+                        val runtime = modelRepository.getActiveRuntime()
+                        val threads = settings.threads
+                        val loaded = if (runtime == ModelRuntime.LITERT_LM) {
+                            engine.unloadModel()
+                            liteRtEngine.loadModel(modelPath, settings.backend, threads)
+                        } else {
+                            liteRtEngine.unloadModel()
+                            engine.loadModel(modelPath, threads, settings.backend)
+                        }
+
+                        _uiState.update {
+                            it.copy(
+                                isModelLoaded = loaded,
+                                isModelLoading = false,
+                                activeModelName = if (loaded) {
+                                    activeVariant?.let { variant ->
+                                        if (runtime == ModelRuntime.LITERT_LM) {
+                                            val backend = liteRtEngine.currentBackend ?: settings.backend
+                                            "${variant.quantName} Beta (${backend.uppercase()})"
+                                        } else {
+                                            variant.quantName
+                                        }
+                                    }
+                                } else null,
+                                error = if (!loaded) tr(R.string.error_load_model_failed) else null,
+                                llmImproveUnavailableReason = null
+                            )
+                        }
+
+                        if (loaded) {
+                            resetIdleTimer()
+                        }
+                    } catch (e: Exception) {
+                        _uiState.update {
+                            it.copy(
+                                isModelLoading = false,
+                                error = tr(R.string.error_load_model_with_message, e.message ?: ""),
+                                llmImproveUnavailableReason = null
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -231,14 +317,25 @@ class TranslationViewModel @Inject constructor(
                 sourceTransliteration = srcTrans,
                 isSourceAuto = false,
                 detectedSourceLanguage = null,
-                isDetectingSourceLanguage = false
+                isDetectingSourceLanguage = false,
+                translatedText = "",
+                targetTransliteration = null,
+                stats = null,
+                isFastResult = false,
+                canImproveWithLlm = false,
+                isImprovingWithLlm = false,
+                fastTranslationText = "",
+                error = null
             )
         }
         savedStateHandle["srcLang"] = lang.code
         savedStateHandle["srcAuto"] = false
+        savedStateHandle["translatedText"] = ""
         settings.textSourceLanguage = lang
         settings.textSourceAuto = false
         sourceDetectionJob?.cancel()
+
+        updateDictionaryLookupInternal(_uiState.value.sourceText, lang.code, _uiState.value.targetLanguage.code)
     }
 
     fun setSourceAuto() {
@@ -255,37 +352,94 @@ class TranslationViewModel @Inject constructor(
     }
 
     fun setTargetLanguage(lang: Language) {
-        val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(_uiState.value.translatedText, lang) else null
-        _uiState.update { it.copy(targetLanguage = lang, targetTransliteration = tgtTrans) }
+        _uiState.update {
+            it.copy(
+                targetLanguage = lang,
+                translatedText = "",
+                targetTransliteration = null,
+                stats = null,
+                isFastResult = false,
+                canImproveWithLlm = false,
+                isImprovingWithLlm = false,
+                fastTranslationText = "",
+                error = null
+            )
+        }
         savedStateHandle["tgtLang"] = lang.code
+        savedStateHandle["translatedText"] = ""
         settings.textTargetLanguage = lang
+
+        updateDictionaryLookupInternal(_uiState.value.sourceText, _uiState.value.sourceLanguage.code, lang.code)
     }
 
     fun swapLanguages() {
-        if (_uiState.value.isSourceAuto) return
-
         val oldState = _uiState.value
-        val newSrcTrans = if (settings.showTransliteration) transliterationEngine.transliterate(oldState.translatedText, oldState.targetLanguage) else null
-        val newTgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(oldState.sourceText, oldState.sourceLanguage) else null
+        val effectiveSource = if (oldState.isSourceAuto) {
+            oldState.detectedSourceLanguage ?: return
+        } else {
+            oldState.sourceLanguage
+        }
+
+        val newSourceLang = oldState.targetLanguage
+        val newTargetLang = effectiveSource
+
+        val hasTranslation = oldState.translatedText.isNotBlank()
+        val newSourceText = if (hasTranslation) oldState.translatedText else oldState.sourceText
+        val newTranslatedText = if (hasTranslation) oldState.sourceText else ""
+
+        val newSrcTrans = if (settings.showTransliteration && newSourceText.isNotBlank()) {
+            transliterationEngine.transliterate(newSourceText, newSourceLang)
+        } else null
+        val newTgtTrans = if (settings.showTransliteration && newTranslatedText.isNotBlank()) {
+            transliterationEngine.transliterate(newTranslatedText, newTargetLang)
+        } else null
 
         _uiState.update {
             it.copy(
-                sourceLanguage = it.targetLanguage,
-                targetLanguage = it.sourceLanguage,
-                sourceText = it.translatedText,
-                translatedText = it.sourceText,
+                sourceLanguage = newSourceLang,
+                targetLanguage = newTargetLang,
+                isSourceAuto = false,
+                detectedSourceLanguage = null,
+                isDetectingSourceLanguage = false,
+                sourceText = newSourceText,
+                translatedText = newTranslatedText,
                 sourceTransliteration = newSrcTrans,
-                targetTransliteration = newTgtTrans
+                targetTransliteration = newTgtTrans,
+                stats = null,
+                isFastResult = false,
+                canImproveWithLlm = false,
+                isImprovingWithLlm = false,
+                fastTranslationText = "",
+                error = null
             )
         }
         val state = _uiState.value
         savedStateHandle["srcLang"] = state.sourceLanguage.code
         savedStateHandle["tgtLang"] = state.targetLanguage.code
+        savedStateHandle["srcAuto"] = false
         savedStateHandle["sourceText"] = state.sourceText
         savedStateHandle["translatedText"] = state.translatedText
         settings.textSourceLanguage = state.sourceLanguage
         settings.textTargetLanguage = state.targetLanguage
         settings.textSourceAuto = false
+
+        updateDictionaryLookupInternal(newSourceText, newSourceLang.code, newTargetLang.code)
+    }
+
+    private fun updateDictionaryLookupInternal(text: String, srcLangCode: String, tgtLangCode: String) {
+        val trimmed = text.trim()
+        if (trimmed.isNotBlank() && !trimmed.contains(" ") && trimmed.length <= 40) {
+            viewModelScope.launch {
+                val entries = dictionaryRepository.lookupWord(
+                    rawWord = trimmed,
+                    sourceLang = srcLangCode,
+                    targetLang = tgtLangCode
+                )
+                _uiState.update { it.copy(dictionaryEntries = entries) }
+            }
+        } else {
+            _uiState.update { it.copy(dictionaryEntries = emptyList()) }
+        }
     }
 
 
@@ -651,7 +805,7 @@ class TranslationViewModel @Inject constructor(
                     it.copy(
                         isModelLoaded = false,
                         activeModelName = null,
-                        error = tr(R.string.notice_model_unloaded_idle, timeoutMinutes)
+                        error = null
                     )
                 }
                 engine.unloadModel()

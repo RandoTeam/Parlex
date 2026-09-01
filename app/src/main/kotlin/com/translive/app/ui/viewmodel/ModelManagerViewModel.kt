@@ -32,8 +32,12 @@ import kotlinx.coroutines.withContext
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.zip.ZipInputStream
 import com.translive.app.engine.PpOcrPackage
+import com.translive.app.engine.fastsync.FastModelArchiveValidator
+import com.translive.app.engine.fastsync.FastModelSyncPacker
+import com.translive.app.engine.fastsync.ParlexFastManifest
 import javax.inject.Inject
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -90,6 +94,7 @@ data class ModelManagerUiState(
     val cameraLanguagePacksExpanded: Boolean = false,
     val cameraPackagePair: CameraPackagePairUiState? = null,
     val isBulkDownloadingFastPackages: Boolean = false,
+    val currentDownloadingLanguageCode: String? = null,
     val bulkDownloadProgress: Float = 0f,
     val bulkDownloadedCount: Int = 0,
     val bulkTotalCount: Int = 0,
@@ -121,6 +126,7 @@ data class CameraLanguagePackUiState(
     val fastSupported: Boolean = true,
     val isDownloaded: Boolean,
     val isDownloading: Boolean = false,
+    val isQueued: Boolean = false,
     val isDeleting: Boolean = false,
     val sizeBytes: Long = FastTranslateEngine.PACKAGE_SIZE_BYTES,
     val downloadSource: String = FastTranslateEngine.DOWNLOAD_SOURCE_NAME
@@ -192,6 +198,14 @@ class ModelManagerViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(cameraPack = state.cameraPack?.copy(isDownloading = downloading))
                 }
+            }
+        }
+        viewModelScope.launch {
+            FastTranslateEngine.currentDownloadingLanguage.collect { currentCode ->
+                _uiState.update { state ->
+                    state.copy(currentDownloadingLanguageCode = currentCode)
+                }
+                refreshCameraTranslationPack()
             }
         }
     }
@@ -293,6 +307,9 @@ class ModelManagerViewModel @Inject constructor(
 
     fun downloadTravelPack(packId: String) {
         viewModelScope.launch {
+            if (!speechEngine.isVadDownloaded() || !speechEngine.isWhisperDownloaded()) {
+                downloadSttModels()
+            }
             languagePackRepository.downloadLanguagePack(packId)
         }
     }
@@ -310,13 +327,20 @@ class ModelManagerViewModel @Inject constructor(
         viewModelScope.launch(Dispatchers.IO) {
             val status = FastTranslateEngine.getPackageStatus(source.code, target.code)
             val downloadedCodes = FastTranslateEngine.downloadedLanguageCodes()
+            val currentCode = FastTranslateEngine.currentDownloadingLanguage.value
+            val isBulkDownloading = _uiState.value.isBulkDownloadingFastPackages
+
             val languagePacks = FastTranslateEngine.availableLanguagePackages().map { pack ->
+                val isDownloaded = pack.modelLanguageCode in downloadedCodes
+                val isDownloading = pack.fastSupported && (pack.modelLanguageCode == currentCode)
+                val isQueued = pack.fastSupported && isBulkDownloading && !isDownloaded && !isDownloading
                 CameraLanguagePackUiState(
                     modelLanguageCode = pack.modelLanguageCode,
                     languages = pack.languages,
                     fastSupported = pack.fastSupported,
-                    isDownloaded = pack.modelLanguageCode in downloadedCodes,
-                    isDownloading = FastTranslateEngine.isDownloading.value && pack.modelLanguageCode !in downloadedCodes,
+                    isDownloaded = isDownloaded,
+                    isDownloading = isDownloading,
+                    isQueued = isQueued,
                     isDeleting = false,
                     sizeBytes = pack.sizeBytes,
                     downloadSource = pack.downloadSource
@@ -452,10 +476,12 @@ class ModelManagerViewModel @Inject constructor(
         }
     }
 
+    private var bulkDownloadJob: kotlinx.coroutines.Job? = null
+
     fun downloadAllFastLanguagePackages() {
         if (_uiState.value.isBulkDownloadingFastPackages) return
 
-        viewModelScope.launch(Dispatchers.IO) {
+        bulkDownloadJob = viewModelScope.launch(Dispatchers.IO) {
             val downloadedCodes = FastTranslateEngine.downloadedLanguageCodes()
             val fastPackages = FastTranslateEngine.availableLanguagePackages()
                 .filter { it.fastSupported }
@@ -474,26 +500,53 @@ class ModelManagerViewModel @Inject constructor(
                 )
             }
 
-            val success = FastTranslateEngine.downloadAllPackages { completed, total ->
+            try {
+                val success = FastTranslateEngine.downloadAllPackages { completed, total ->
+                    _uiState.update {
+                        it.copy(
+                            bulkDownloadedCount = completed,
+                            bulkTotalCount = total,
+                            bulkDownloadProgress = if (total > 0) completed.toFloat() / total else 0f
+                        )
+                    }
+                    refreshCameraTranslationPack()
+                }
+
                 _uiState.update {
                     it.copy(
-                        bulkDownloadedCount = completed,
-                        bulkTotalCount = total,
-                        bulkDownloadProgress = if (total > 0) completed.toFloat() / total else 0f
+                        isBulkDownloadingFastPackages = false,
+                        error = if (!success && !_uiState.value.isBulkDownloadingFastPackages) null else if (!success) tr(R.string.camera_pack_download_failed) else null,
+                        successMessage = if (success) "Все языковые пакеты быстрого перевода успешно загружены" else null
+                    )
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                Log.i(TAG, "Fast batch download coroutine cancelled")
+            } catch (e: Exception) {
+                Log.e(TAG, "Fast batch download failed", e)
+                _uiState.update { it.copy(error = tr(R.string.camera_pack_download_failed)) }
+            } finally {
+                _uiState.update {
+                    it.copy(
+                        isBulkDownloadingFastPackages = false,
+                        currentDownloadingLanguageCode = null
                     )
                 }
                 refreshCameraTranslationPack()
             }
-
-            _uiState.update {
-                it.copy(
-                    isBulkDownloadingFastPackages = false,
-                    error = if (!success) tr(R.string.camera_pack_download_failed) else null,
-                    successMessage = if (success) "Все языковые пакеты быстрого перевода успешно загружены" else null
-                )
-            }
-            refreshCameraTranslationPack()
         }
+    }
+
+    fun cancelFastBatchDownload() {
+        FastTranslateEngine.cancelBatchDownload()
+        bulkDownloadJob?.cancel()
+        bulkDownloadJob = null
+        _uiState.update {
+            it.copy(
+                isBulkDownloadingFastPackages = false,
+                currentDownloadingLanguageCode = null
+            )
+        }
+        refreshCameraTranslationPack()
     }
 
     fun deleteCameraLanguagePack(modelLanguageCode: String) {
@@ -742,6 +795,83 @@ class ModelManagerViewModel @Inject constructor(
                     }
                 }
             )
+        }
+    }
+
+    fun exportFastModelsToUri(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _uiState.update { it.copy(isExporting = true) }
+                val modelsDir = File(appContext.noBackupFilesDir, "com.google.mlkit.translate.models")
+                val downloadedCodes = FastTranslateEngine.downloadedLanguageCodes().toList()
+                val manifest = ParlexFastManifest(
+                    format = ParlexFastManifest.FORMAT_V1,
+                    appVersion = "1.5.0",
+                    timestamp = System.currentTimeMillis(),
+                    languages = downloadedCodes,
+                    totalSizeBytes = downloadedCodes.size * com.translive.app.engine.FastTranslateEngine.PACKAGE_SIZE_BYTES
+                )
+                appContext.contentResolver.openOutputStream(uri)?.use { os ->
+                    FastModelSyncPacker.packToStream(modelsDir, manifest, os)
+                }
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        successMessage = "Экспорт пакета быстрого перевода завершен (${downloadedCodes.size} яз.)"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isExporting = false,
+                        error = "Ошибка экспорта моделей: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun importFastModelsFromUri(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                _uiState.update { it.copy(isImporting = true) }
+                val tempZip = File(appContext.cacheDir, "import_staging.parlex-fast")
+                appContext.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(tempZip).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val validation = FastModelArchiveValidator.validate(tempZip)
+                if (!validation.isValid) {
+                    _uiState.update {
+                        it.copy(
+                            isImporting = false,
+                            error = "Некорректный пакет моделей: ${validation.errorMessage}"
+                        )
+                    }
+                    tempZip.delete()
+                    return@launch
+                }
+
+                val modelsDir = File(appContext.noBackupFilesDir, "com.google.mlkit.translate.models")
+                FastModelArchiveValidator.unpackToDirectory(tempZip, modelsDir)
+                tempZip.delete()
+
+                _uiState.update {
+                    it.copy(
+                        isImporting = false,
+                        successMessage = "Импортировано моделей быстрого перевода: ${validation.languages.size}"
+                    )
+                }
+                refreshModels()
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isImporting = false,
+                        error = "Ошибка импорта: ${e.message}"
+                    )
+                }
+            }
         }
     }
 

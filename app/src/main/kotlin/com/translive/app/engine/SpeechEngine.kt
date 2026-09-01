@@ -59,6 +59,9 @@ class SpeechEngine @Inject constructor(
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
+    /** Optional PCM sample callback hook for audio session recording */
+    var onPcmSamplesRead: ((ShortArray, Int) -> Unit)? = null
+
     // AEC Suppression & Reverb Cooldown Tracking
     private val aecMuteUntilTimestampMs = AtomicLong(0L)
     private val isAecSuppressed = AtomicBoolean(false)
@@ -245,6 +248,8 @@ class SpeechEngine @Inject constructor(
                 val read = audioRecord?.read(samples, 0, samples.size) ?: -1
                 if (read <= 0) continue
 
+                onPcmSamplesRead?.invoke(samples, read)
+
                 val isSuppressed = isAecSuppressed.get()
                 val isInCooldown = SystemClock.elapsedRealtime() < aecMuteUntilTimestampMs.get()
                 val shouldDropFrames = isSuppressed || isInCooldown
@@ -291,10 +296,8 @@ class SpeechEngine @Inject constructor(
             val language = if (currentSpeechModel == SettingsRepository.SPEECH_MODEL_QWEN3_ASR_06B) {
                 normalizeQwenLanguage(result.lang)
             } else currentLanguage
-            if (language.isBlank()) {
-                Log.w(TAG, "Qwen3-ASR did not identify a language; ignored to prevent a wrong-direction translation")
-                null
-            } else SpeechResult(text, language)
+            val resolvedLanguage = language.ifBlank { "auto" }
+            SpeechResult(text, resolvedLanguage)
         } finally {
             stream.release()
         }

@@ -365,6 +365,7 @@ fun CameraScreen(
 
     var showSourcePicker by remember { mutableStateOf(false) }
     var showTargetPicker by remember { mutableStateOf(false) }
+    var showLlmMissingDialog by remember { mutableStateOf(false) }
     var cameraOptions by remember { mutableStateOf<List<CameraLensOption>>(emptyList()) }
     var selectedCameraId by rememberSaveable {
         mutableStateOf(cameraPrefs.getString(PREF_SELECTED_CAMERA_ID, null))
@@ -616,6 +617,40 @@ fun CameraScreen(
                                 .align(Alignment.TopCenter)
                                 .padding(top = 56.dp, start = 12.dp, end = 12.dp)
                         )
+                        if (uiState.isCaptureProcessing) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.6f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Card(
+                                    shape = RoundedCornerShape(16.dp),
+                                    colors = CardDefaults.cardColors(
+                                        containerColor = MaterialTheme.colorScheme.surface
+                                    ),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                                    modifier = Modifier.padding(horizontal = 32.dp)
+                                ) {
+                                    Column(
+                                        modifier = Modifier.padding(24.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(40.dp),
+                                            strokeWidth = 3.dp
+                                        )
+                                        Text(
+                                            text = uiState.captureMessage ?: stringResource(R.string.camera_improving_with_llm),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         if (isDebugBuild) {
                             CameraDebugCaptureButton(
                                 enabled = !uiState.isCaptureProcessing && uiState.capturedBitmap != null,
@@ -687,7 +722,13 @@ fun CameraScreen(
                             }
                             Spacer(Modifier.width(6.dp))
                             Button(
-                                onClick = { viewModel.improveCaptureWithLlm() },
+                                onClick = {
+                                    if (!uiState.isLlmModelAvailable) {
+                                        showLlmMissingDialog = true
+                                    } else {
+                                        viewModel.improveCaptureWithLlm()
+                                    }
+                                },
                                 enabled = !uiState.isCaptureProcessing && uiState.capturedBitmap != null,
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = MaterialTheme.colorScheme.primary
@@ -755,7 +796,13 @@ fun CameraScreen(
                         }
                         SegmentedButton(
                             selected = uiState.translationMode == CameraTranslationMode.QUALITY,
-                            onClick = { viewModel.setTranslationMode(CameraTranslationMode.QUALITY) },
+                            onClick = {
+                                if (!uiState.isLlmModelAvailable) {
+                                    showLlmMissingDialog = true
+                                } else {
+                                    viewModel.setTranslationMode(CameraTranslationMode.QUALITY)
+                                }
+                            },
                             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
                             icon = {}
                         ) {
@@ -777,6 +824,45 @@ fun CameraScreen(
                 }
             }
         }
+    }
+
+    if (showLlmMissingDialog) {
+        AlertDialog(
+            onDismissRequest = { showLlmMissingDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.AutoAwesome,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = {
+                Text(stringResource(R.string.camera_llm_model_missing_dialog_title))
+            },
+            text = {
+                Text(stringResource(R.string.camera_llm_model_missing_dialog_desc))
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showLlmMissingDialog = false
+                        onNavigateToModels()
+                    }
+                ) {
+                    Text(stringResource(R.string.camera_llm_model_missing_dialog_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLlmMissingDialog = false
+                        viewModel.setTranslationMode(CameraTranslationMode.FAST)
+                    }
+                ) {
+                    Text(stringResource(R.string.camera_llm_model_missing_dialog_cancel))
+                }
+            }
+        )
     }
 
     if (showSourcePicker) {

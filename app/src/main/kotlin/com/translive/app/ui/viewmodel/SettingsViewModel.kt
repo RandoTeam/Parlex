@@ -25,7 +25,9 @@ class SettingsViewModel @Inject constructor(
     private val modelRepository: ModelRepository,
     private val engine: TranslationEngine,
     private val liteRtEngine: LiteRtTranslationEngine,
-    private val ocrMnnRuntime: OcrMnnRuntime
+    private val ocrMnnRuntime: OcrMnnRuntime,
+    private val exchangeRateRepository: com.translive.app.data.ExchangeRateRepository,
+    private val dialogueDao: com.translive.app.data.db.DialogueDao
 ) : ViewModel() {
 
     private val _appLanguage = MutableStateFlow(settings.appLanguageCode)
@@ -52,14 +54,111 @@ class SettingsViewModel @Inject constructor(
     private val _translationPolicy = MutableStateFlow(settings.translationPolicy)
     val translationPolicy: StateFlow<TranslationPolicy> = _translationPolicy.asStateFlow()
 
+    private val _overlayStyle = MutableStateFlow(settings.overlayStyle)
+    val overlayStyle: StateFlow<String> = _overlayStyle.asStateFlow()
+
+    private val _screenSyncTargetWithMain = MutableStateFlow(settings.screenSyncTargetWithMain)
+    val screenSyncTargetWithMain: StateFlow<Boolean> = _screenSyncTargetWithMain.asStateFlow()
+
+    private val _screenTargetLanguage = MutableStateFlow(settings.screenTargetLanguage)
+    val screenTargetLanguage: StateFlow<com.translive.app.data.model.Language> = _screenTargetLanguage.asStateFlow()
+
+    private val _screenA11yShortcutBehavior = MutableStateFlow(settings.screenA11yShortcutBehavior)
+    val screenA11yShortcutBehavior: StateFlow<com.translive.app.data.ScreenA11yShortcutBehavior> = _screenA11yShortcutBehavior.asStateFlow()
+
     private val _homeCurrency = MutableStateFlow(settings.homeCurrencyCode)
     val homeCurrency: StateFlow<String> = _homeCurrency.asStateFlow()
 
     private val _enableCurrencyConversion = MutableStateFlow(settings.enableCurrencyConversion)
     val enableCurrencyConversion: StateFlow<Boolean> = _enableCurrencyConversion.asStateFlow()
 
+    private val _currencySyncPolicy = MutableStateFlow(settings.currencySyncPolicy)
+    val currencySyncPolicy: StateFlow<com.translive.app.data.model.CurrencySyncPolicy> = _currencySyncPolicy.asStateFlow()
+
+    val currencyLastUpdated: StateFlow<Long?> = exchangeRateRepository.lastUpdatedMillis
+
+    private val _isCurrencyRefreshing = MutableStateFlow(false)
+    val isCurrencyRefreshing: StateFlow<Boolean> = _isCurrencyRefreshing.asStateFlow()
+
+    private val _dialogueAutoSpeak = MutableStateFlow(settings.dialogueAutoSpeak)
+    val dialogueAutoSpeak: StateFlow<Boolean> = _dialogueAutoSpeak.asStateFlow()
+
+    private val _dialogueRecordingEnabled = MutableStateFlow(settings.dialogueRecordingEnabled)
+    val dialogueRecordingEnabled: StateFlow<Boolean> = _dialogueRecordingEnabled.asStateFlow()
+
+    private val _dialogueAudioFormat = MutableStateFlow(settings.dialogueAudioFormat)
+    val dialogueAudioFormat: StateFlow<com.translive.app.data.model.AudioRecordingFormat> = _dialogueAudioFormat.asStateFlow()
+
+    private val _dialogueStorageStats = MutableStateFlow(com.translive.app.data.DialogueStorageStats())
+    val dialogueStorageStats: StateFlow<com.translive.app.data.DialogueStorageStats> = _dialogueStorageStats.asStateFlow()
+
     private val _runtimeDiagnostics = MutableStateFlow<String?>(null)
     val runtimeDiagnostics: StateFlow<String?> = _runtimeDiagnostics.asStateFlow()
+
+    private val _systemPermissionsState = MutableStateFlow(
+        com.translive.app.ui.permissions.SystemPermissionManager.getPermissionsState(context)
+    )
+    val systemPermissionsState: StateFlow<com.translive.app.ui.permissions.SystemPermissionsState> = _systemPermissionsState.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            exchangeRateRepository.getLastUpdatedTimestamp()
+        }
+        refreshSystemPermissions()
+        refreshDialogueStorageStats()
+    }
+
+    fun refreshSystemPermissions() {
+        _systemPermissionsState.value = com.translive.app.ui.permissions.SystemPermissionManager.getPermissionsState(context)
+    }
+
+    fun refreshDialogueStorageStats() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dir = com.translive.app.data.DialogueStorageCalculator.getDialoguesDirectory(context)
+            _dialogueStorageStats.value = com.translive.app.data.DialogueStorageCalculator.calculate(dir)
+        }
+    }
+
+    fun clearAllDialogueRecordings() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val dir = com.translive.app.data.DialogueStorageCalculator.getDialoguesDirectory(context)
+            com.translive.app.data.DialogueStorageCalculator.deleteAll(dir)
+            dialogueDao.clearAllSessionAudioPaths()
+            refreshDialogueStorageStats()
+        }
+    }
+
+    fun setCurrencySyncPolicy(policy: com.translive.app.data.model.CurrencySyncPolicy) {
+        settings.currencySyncPolicy = policy
+        _currencySyncPolicy.value = policy
+    }
+
+    fun refreshExchangeRates() {
+        if (_isCurrencyRefreshing.value) return
+        viewModelScope.launch {
+            _isCurrencyRefreshing.value = true
+            try {
+                exchangeRateRepository.refreshRates()
+            } finally {
+                _isCurrencyRefreshing.value = false
+            }
+        }
+    }
+
+    fun setDialogueAutoSpeak(value: Boolean) {
+        settings.dialogueAutoSpeak = value
+        _dialogueAutoSpeak.value = value
+    }
+
+    fun setDialogueRecordingEnabled(value: Boolean) {
+        settings.dialogueRecordingEnabled = value
+        _dialogueRecordingEnabled.value = value
+    }
+
+    fun setDialogueAudioFormat(value: com.translive.app.data.model.AudioRecordingFormat) {
+        settings.dialogueAudioFormat = value
+        _dialogueAudioFormat.value = value
+    }
 
     fun setHomeCurrency(value: String) {
         settings.homeCurrencyCode = value
@@ -119,6 +218,30 @@ class SettingsViewModel @Inject constructor(
     fun setTranslationPolicy(value: TranslationPolicy) {
         settings.translationPolicy = value
         _translationPolicy.value = value
+        if (value == TranslationPolicy.FAST) {
+            liteRtEngine.unloadModel()
+            engine.unloadModel()
+        }
+    }
+
+    fun setOverlayStyle(value: String) {
+        settings.overlayStyle = value
+        _overlayStyle.value = value
+    }
+
+    fun setScreenSyncTargetWithMain(value: Boolean) {
+        settings.screenSyncTargetWithMain = value
+        _screenSyncTargetWithMain.value = value
+    }
+
+    fun setScreenTargetLanguage(language: com.translive.app.data.model.Language) {
+        settings.screenTargetLanguage = language
+        _screenTargetLanguage.value = language
+    }
+
+    fun setScreenA11yShortcutBehavior(behavior: com.translive.app.data.ScreenA11yShortcutBehavior) {
+        settings.screenA11yShortcutBehavior = behavior
+        _screenA11yShortcutBehavior.value = behavior
     }
 
     fun activeModelSupportsCpu(): Boolean = modelRepository.getActiveVariant()?.supportsCpu ?: true

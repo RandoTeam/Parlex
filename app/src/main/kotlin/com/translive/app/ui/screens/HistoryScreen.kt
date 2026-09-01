@@ -31,6 +31,9 @@ import com.translive.app.data.model.DialogueSession
 import com.translive.app.data.model.TranslationEntry
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
+import com.translive.app.ui.components.history.DialogueAudioPlayerBar
+import com.translive.app.ui.components.history.DialogueLlmSummaryCard
+import com.translive.app.ui.components.history.DialogueSessionStatsCard
 import com.translive.app.ui.viewmodel.HistoryTab
 import com.translive.app.ui.viewmodel.HistoryViewModel
 import java.text.SimpleDateFormat
@@ -80,42 +83,67 @@ fun HistoryScreen(
                     )
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
-                Text(
-                    text = stringResource(R.string.nav_history),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (uiState.selectedSessionId != null) {
+                        IconButton(
+                            onClick = { viewModel.selectSession(null) },
+                            modifier = Modifier.size(32.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.ArrowBack,
+                                contentDescription = stringResource(R.string.cd_back),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                    }
+                    Text(
+                        text = if (uiState.selectedSessionId != null) {
+                            uiState.selectedSession?.title?.ifEmpty { stringResource(R.string.history_voice_session) }
+                                ?: stringResource(R.string.history_voice_session)
+                        } else {
+                            stringResource(R.string.nav_history)
+                        },
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
-            // Tabs
-            TabRow(
-                selectedTabIndex = uiState.tab.ordinal,
-                containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = MaterialTheme.colorScheme.primary
-            ) {
-                Tab(
-                    selected = uiState.tab == HistoryTab.ALL,
-                    onClick = { viewModel.setTab(HistoryTab.ALL) },
-                    text = { Text(stringResource(R.string.history_tab_all)) },
-                    icon = { Icon(Icons.Outlined.List, null, modifier = Modifier.size(18.dp)) }
-                )
-                Tab(
-                    selected = uiState.tab == HistoryTab.FAVORITES,
-                    onClick = { viewModel.setTab(HistoryTab.FAVORITES) },
-                    text = { Text(stringResource(R.string.history_tab_favorites)) },
-                    icon = { Icon(Icons.Outlined.Star, null, modifier = Modifier.size(18.dp)) }
-                )
-                Tab(
-                    selected = uiState.tab == HistoryTab.VOICE,
-                    onClick = { viewModel.setTab(HistoryTab.VOICE) },
-                    text = { Text(stringResource(R.string.history_tab_voice)) },
-                    icon = { Icon(Icons.Outlined.RecordVoiceOver, null, modifier = Modifier.size(18.dp)) }
-                )
-            }
+            // Tabs (hidden when viewing specific session timeline)
+            if (uiState.selectedSessionId == null) {
+                TabRow(
+                    selectedTabIndex = uiState.tab.ordinal,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Tab(
+                        selected = uiState.tab == HistoryTab.ALL,
+                        onClick = { viewModel.setTab(HistoryTab.ALL) },
+                        text = { Text(stringResource(R.string.history_tab_all)) },
+                        icon = { Icon(Icons.Outlined.List, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = uiState.tab == HistoryTab.FAVORITES,
+                        onClick = { viewModel.setTab(HistoryTab.FAVORITES) },
+                        text = { Text(stringResource(R.string.history_tab_favorites)) },
+                        icon = { Icon(Icons.Outlined.Star, null, modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = uiState.tab == HistoryTab.VOICE,
+                        onClick = { viewModel.setTab(HistoryTab.VOICE) },
+                        text = { Text(stringResource(R.string.history_tab_voice)) },
+                        icon = { Icon(Icons.Outlined.RecordVoiceOver, null, modifier = Modifier.size(18.dp)) }
+                    )
+                }
 
-            // Search bar
-            if (uiState.tab != HistoryTab.VOICE || uiState.selectedSessionId != null) {
+                // Search bar
                 OutlinedTextField(
                     value = uiState.searchQuery,
                     onValueChange = { viewModel.setSearchQuery(it) },
@@ -134,170 +162,136 @@ fun HistoryScreen(
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp)
                 )
-            }
 
-            // Language filter chips (not on voice sessions list)
-            if (uiState.tab != HistoryTab.VOICE) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = uiState.languageFilter == null,
-                        onClick = { viewModel.setLanguageFilter(null) },
-                        label = { Text(stringResource(R.string.history_tab_all)) }
-                    )
-                    FilterChip(
-                        selected = uiState.languageFilter == "ru-en",
-                        onClick = { viewModel.setLanguageFilter("ru-en") },
-                        label = { Text("🇷🇺 ↔ 🇬🇧") }
-                    )
-                    FilterChip(
-                        selected = uiState.languageFilter == "ru-zh",
-                        onClick = { viewModel.setLanguageFilter("ru-zh") },
-                        label = { Text("🇷🇺 ↔ 🇨🇳") }
-                    )
-                    FilterChip(
-                        selected = uiState.languageFilter == "en-zh",
-                        onClick = { viewModel.setLanguageFilter("en-zh") },
-                        label = { Text("🇬🇧 ↔ 🇨🇳") }
-                    )
+                // Language filter chips
+                if (uiState.tab != HistoryTab.VOICE) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = uiState.languageFilter == null,
+                            onClick = { viewModel.setLanguageFilter(null) },
+                            label = { Text(stringResource(R.string.history_tab_all)) }
+                        )
+                        FilterChip(
+                            selected = uiState.languageFilter == "ru-en",
+                            onClick = {
+                                viewModel.setLanguageFilter(
+                                    if (uiState.languageFilter == "ru-en") null else "ru-en"
+                                )
+                            },
+                            label = { Text("RU ↔ EN") }
+                        )
+                        FilterChip(
+                            selected = uiState.languageFilter == "ru-zh",
+                            onClick = {
+                                viewModel.setLanguageFilter(
+                                    if (uiState.languageFilter == "ru-zh") null else "ru-zh"
+                                )
+                            },
+                            label = { Text("RU ↔ ZH") }
+                        )
+                    }
                 }
             }
 
-            // Content
-            when (uiState.tab) {
-                HistoryTab.ALL, HistoryTab.FAVORITES -> {
-                    if (uiState.translations.isEmpty()) {
+            // Content Area
+            when {
+                // Detailed Dialogue Timeline View
+                uiState.selectedSessionId != null -> {
+                    DialogueTimelineDetailView(
+                        uiState = uiState,
+                        onTogglePlayPause = viewModel::toggleAudioPlayPause,
+                        onSeek = viewModel::seekAudio,
+                        onCycleSpeed = viewModel::cyclePlaybackSpeed,
+                        onSeekToTurn = viewModel::seekToTurn,
+                        onGenerateSummary = viewModel::generateAiSummary,
+                        onToggleFavorite = viewModel::toggleVoiceFavorite,
+                        onCopy = { text -> clipboardManager.setText(AnnotatedString(text)) }
+                    )
+                }
+
+                // Voice Sessions List
+                uiState.tab == HistoryTab.VOICE -> {
+                    val filteredSessions = if (uiState.searchQuery.isBlank()) {
+                        uiState.voiceSessions
+                    } else {
+                        uiState.voiceSessions.filter { it.title.contains(uiState.searchQuery, ignoreCase = true) }
+                    }
+
+                    if (filteredSessions.isEmpty()) {
                         EmptyState(
-                            if (uiState.tab == HistoryTab.ALL) stringResource(R.string.history_no_translations)
-                            else stringResource(R.string.history_no_favorites),
-                            modifier = Modifier.weight(1f)
+                            icon = Icons.Outlined.RecordVoiceOver,
+                            message = stringResource(R.string.history_no_voice_sessions)
                         )
                     } else {
                         LazyColumn(
-                            modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            items(
-                                uiState.translations,
-                                key = { it.id },
-                                contentType = { "translation" }
-                            ) { entry ->
-                                TranslationHistoryCard(
-                                    entry = entry,
-                                    onToggleFavorite = { viewModel.toggleFavorite(entry) },
-                                    onCopy = {
-                                        clipboardManager.setText(AnnotatedString(entry.translatedText))
-                                    },
-                                    onDelete = { viewModel.deleteTranslation(entry) },
-                                    modifier = Modifier.animateItem()
+                            items(filteredSessions, key = { it.id }) { session ->
+                                SessionCard(
+                                    session = session,
+                                    onClick = { viewModel.selectSession(session.id) },
+                                    onDelete = { viewModel.deleteSession(session) }
                                 )
                             }
                         }
                     }
                 }
 
-                HistoryTab.VOICE -> {
-                    if (uiState.selectedSessionId != null) {
-                        // Session messages view
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                // Favorites or All Translations List
+                else -> {
+                    if (uiState.translations.isEmpty() && (uiState.tab != HistoryTab.FAVORITES || uiState.favoriteVoiceMessages.isEmpty())) {
+                        EmptyState(
+                            icon = if (uiState.tab == HistoryTab.FAVORITES) Icons.Outlined.Star else Icons.Outlined.History,
+                            message = if (uiState.tab == HistoryTab.FAVORITES)
+                                stringResource(R.string.history_no_favorites)
+                            else
+                                stringResource(R.string.history_no_translations)
+                        )
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            IconButton(onClick = { viewModel.selectSession(null) }) {
-                                Icon(Icons.Filled.ArrowBack, stringResource(R.string.cd_back))
+                            items(uiState.translations, key = { "t_${it.id}" }) { entry ->
+                                HistoryCard(
+                                    entry = entry,
+                                    onToggleFavorite = { viewModel.toggleFavorite(entry) },
+                                    onCopy = {
+                                        clipboardManager.setText(AnnotatedString(entry.translatedText))
+                                    },
+                                    onDelete = { viewModel.deleteTranslation(entry) }
+                                )
                             }
-                            Text(
-                                stringResource(R.string.history_session_messages),
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Medium
-                            )
-                        }
 
-                        if (uiState.selectedSessionMessages.isEmpty()) {
-                            EmptyState(stringResource(R.string.history_no_messages), modifier = Modifier.weight(1f))
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                items(
-                                    uiState.selectedSessionMessages,
-                                    key = { it.id },
-                                    contentType = { "voice_msg" }
-                                ) { msg ->
+                            if (uiState.tab == HistoryTab.FAVORITES && uiState.favoriteVoiceMessages.isNotEmpty()) {
+                                item {
+                                    Text(
+                                        text = stringResource(R.string.history_tab_voice),
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp)
+                                    )
+                                }
+                                items(uiState.favoriteVoiceMessages, key = { "vm_${it.id}" }) { msg ->
                                     VoiceMessageCard(
                                         message = msg,
                                         onToggleFavorite = { viewModel.toggleVoiceFavorite(msg) },
                                         onCopy = {
-                                            clipboardManager.setText(AnnotatedString("${msg.originalText}\n${msg.translatedText}"))
-                                        },
-                                        modifier = Modifier.animateItem()
+                                            clipboardManager.setText(AnnotatedString(msg.translatedText))
+                                        }
                                     )
                                 }
                             }
                         }
-                    } else {
-                        // Sessions list
-                        if (uiState.voiceSessions.isEmpty()) {
-                            EmptyState(stringResource(R.string.history_no_voice_sessions), modifier = Modifier.weight(1f))
-                        } else {
-                            LazyColumn(
-                                modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                items(
-                                    uiState.voiceSessions,
-                                    key = { it.id },
-                                    contentType = { "session" }
-                                ) { session ->
-                                    SessionCard(
-                                        session = session,
-                                        onClick = { viewModel.selectSession(session.id) },
-                                        onDelete = { viewModel.deleteSession(session) },
-                                        modifier = Modifier.animateItem()
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Favorites from voice (shown below sessions on FAVORITES tab)
-            if (uiState.tab == HistoryTab.FAVORITES && uiState.favoriteVoiceMessages.isNotEmpty()) {
-                Text(
-                    text = stringResource(R.string.history_favorite_voice),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    items(
-                        uiState.favoriteVoiceMessages,
-                        key = { "voice_${it.id}" },
-                        contentType = { "voice_msg" }
-                    ) { msg ->
-                        VoiceMessageCard(
-                            message = msg,
-                            onToggleFavorite = { viewModel.toggleVoiceFavorite(msg) },
-                            onCopy = {
-                                clipboardManager.setText(AnnotatedString("${msg.originalText}\n${msg.translatedText}"))
-                            },
-                            modifier = Modifier.animateItem()
-                        )
                     }
                 }
             }
@@ -306,66 +300,121 @@ fun HistoryScreen(
 }
 
 @Composable
-private fun EmptyState(text: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center
+private fun DialogueTimelineDetailView(
+    uiState: com.translive.app.ui.viewmodel.HistoryUiState,
+    onTogglePlayPause: () -> Unit,
+    onSeek: (Long) -> Unit,
+    onCycleSpeed: () -> Unit,
+    onSeekToTurn: (DialogueMessage) -> Unit,
+    onGenerateSummary: () -> Unit,
+    onToggleFavorite: (DialogueMessage) -> Unit,
+    onCopy: (String) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                Icons.Outlined.Inbox, null,
-                modifier = Modifier.size(48.dp),
-                tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+        // 1. Session Analytics Header Card
+        item {
+            DialogueSessionStatsCard(stats = uiState.selectedSessionStats)
+        }
+
+        // 2. Synchronized Audio Player Bar (if session was recorded)
+        if (uiState.audioState.isReady) {
+            item {
+                DialogueAudioPlayerBar(
+                    audioState = uiState.audioState,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onSeek = onSeek,
+                    onCycleSpeed = onCycleSpeed
+                )
+            }
+        }
+
+        // 3. Local LiteRT Gemma 2 LLM Session Summary Card
+        item {
+            DialogueLlmSummaryCard(
+                summaryState = uiState.summaryState,
+                onGenerateClicked = onGenerateSummary
             )
-            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // 4. Chronological Turns Timeline Header
+        item {
             Text(
-                text = text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
+                text = stringResource(R.string.history_stats_turns),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+        }
+
+        // 5. Chronological Turn Cards
+        items(uiState.selectedSessionMessages, key = { it.id }) { message ->
+            val isPlayingThisTurn = uiState.audioState.activeTurnId == message.id
+            ChronologicalTurnCard(
+                message = message,
+                isPlaying = isPlayingThisTurn,
+                hasAudio = uiState.audioState.isReady,
+                onPlayTurn = { onSeekToTurn(message) },
+                onToggleFavorite = { onToggleFavorite(message) },
+                onCopy = { onCopy(message.translatedText) }
             )
         }
     }
 }
 
-private val dateFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
-private fun formatTime(timestamp: Long): String = dateFormat.format(Date(timestamp))
-
 @Composable
-private fun TranslationHistoryCard(
-    entry: TranslationEntry,
+private fun ChronologicalTurnCard(
+    message: DialogueMessage,
+    isPlaying: Boolean,
+    hasAudio: Boolean,
+    onPlayTurn: () -> Unit,
     onToggleFavorite: () -> Unit,
     onCopy: () -> Unit,
-    onDelete: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    val srcBadge = "[${message.originalLanguage.uppercase(Locale.ROOT)}]"
+    val tgtBadge = "[${message.translatedLanguage.uppercase(Locale.ROOT)}]"
 
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { expanded = !expanded },
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (entry.isFavorite)
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.2f)
-            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            containerColor = when {
+                isPlaying -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                message.isFavorite -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+            }
         )
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
-            // Top row: language pair + time
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "$srcBadge → $tgtBadge",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    if (message.wordCount > 0) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${message.wordCount} w",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
                 Text(
-                    text = "${flagForLang(entry.sourceLanguage)} → ${flagForLang(entry.targetLanguage)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = formatTime(entry.timestamp),
+                    text = formatTime(message.timestamp),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline
                 )
@@ -373,55 +422,58 @@ private fun TranslationHistoryCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Source text
             Text(
-                text = entry.sourceText,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis
+                text = message.originalText,
+                style = MaterialTheme.typography.bodyMedium
             )
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Translation
             Text(
-                text = entry.translatedText,
+                text = message.translatedText,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = if (expanded) Int.MAX_VALUE else 2,
-                overflow = TextOverflow.Ellipsis
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary
             )
 
-            // Action row
-            AnimatedVisibility(visible = expanded) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onToggleFavorite, modifier = Modifier.size(32.dp)) {
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (hasAudio) {
+                    IconButton(
+                        onClick = onPlayTurn,
+                        modifier = Modifier.size(30.dp)
+                    ) {
                         Icon(
-                            if (entry.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                            stringResource(R.string.history_tab_favorites),
-                            tint = if (entry.isFavorite) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                            contentDescription = stringResource(R.string.cd_play),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    IconButton(onClick = onCopy, modifier = Modifier.size(32.dp)) {
+                } else {
+                    Spacer(modifier = Modifier.width(1.dp))
+                }
+
+                Row {
+                    IconButton(onClick = onToggleFavorite, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            if (message.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                            stringResource(R.string.history_tab_favorites),
+                            modifier = Modifier.size(16.dp),
+                            tint = if (message.isFavorite) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(onClick = onCopy, modifier = Modifier.size(28.dp)) {
                         Icon(
                             Icons.Outlined.ContentCopy, stringResource(R.string.cd_copy),
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(16.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                        Icon(
-                            Icons.Outlined.Delete, stringResource(R.string.cd_delete),
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.error
                         )
                     }
                 }
@@ -465,11 +517,29 @@ private fun SessionCard(
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = formatTime(session.updatedAt),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = formatTime(session.updatedAt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline
+                    )
+                    if (session.totalTurns > 0) {
+                        Text(
+                            text = " • ${session.totalTurns} turns",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                    if (session.isRecorded || !session.audioFilePath.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Outlined.Audiotrack,
+                            contentDescription = stringResource(R.string.history_audio_recording_available),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
             }
             Icon(
                 Icons.Filled.ChevronRight, null,
@@ -488,15 +558,98 @@ private fun SessionCard(
 }
 
 @Composable
+private fun HistoryCard(
+    entry: TranslationEntry,
+    onToggleFavorite: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (entry.isFavorite)
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "[${entry.sourceLanguage.uppercase(Locale.ROOT)}] → [${entry.targetLanguage.uppercase(Locale.ROOT)}]",
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = formatTime(entry.timestamp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = entry.sourceText,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = entry.translatedText,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.primary,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onToggleFavorite, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        if (entry.isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                        stringResource(R.string.history_tab_favorites),
+                        tint = if (entry.isFavorite) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                IconButton(onClick = onCopy, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Outlined.ContentCopy, stringResource(R.string.cd_copy),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(
+                        Icons.Outlined.Delete, stringResource(R.string.cd_delete),
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun VoiceMessageCard(
     message: DialogueMessage,
     onToggleFavorite: () -> Unit,
     onCopy: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val srcFlag = flagForLang(message.originalLanguage)
-    val tgtFlag = flagForLang(message.translatedLanguage)
-
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
@@ -513,8 +666,9 @@ private fun VoiceMessageCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "$srcFlag → $tgtFlag",
+                    text = "[${message.originalLanguage.uppercase(Locale.ROOT)}] → [${message.translatedLanguage.uppercase(Locale.ROOT)}]",
                     style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
@@ -563,14 +717,35 @@ private fun VoiceMessageCard(
     }
 }
 
-private fun flagForLang(code: String): String = when {
-    code.startsWith("ru") -> "🇷🇺"
-    code.startsWith("en") -> "🇬🇧"
-    code.startsWith("zh") -> "🇨🇳"
-    code.startsWith("de") -> "🇩🇪"
-    code.startsWith("fr") -> "🇫🇷"
-    code.startsWith("es") -> "🇪🇸"
-    code.startsWith("ja") -> "🇯🇵"
-    code.startsWith("ko") -> "🇰🇷"
-    else -> "🌐"
+@Composable
+private fun EmptyState(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    message: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+            modifier = Modifier.size(64.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.outline,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+private fun formatTime(timestamp: Long): String {
+    val sdf = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+    return sdf.format(Date(timestamp))
 }

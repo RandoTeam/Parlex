@@ -38,6 +38,7 @@ class MiniOverlayHudView @JvmOverloads constructor(
         fun onTargetLanguageSelected(language: Language)
         fun onEngineModeChanged(isLlm: Boolean)
         fun onScanRequested()
+        fun onSaveScreenshotRequested()
         fun onCloseRequested()
         fun onDismissRequested()
     }
@@ -216,8 +217,19 @@ class MiniOverlayHudView @JvmOverloads constructor(
             gravity = Gravity.CENTER_VERTICAL
         }
 
-        val primaryLangs = Language.primaryLanguages
-        for (lang in primaryLangs) {
+        val popularLangs = listOf(
+            Language.RUSSIAN,
+            Language.ENGLISH,
+            Language.CHINESE_SIMPLIFIED,
+            Language.GERMAN,
+            Language.FRENCH,
+            Language.SPANISH,
+            Language.VIETNAMESE,
+            Language.JAPANESE,
+            Language.KOREAN
+        )
+        val sortedLangs = popularLangs + Language.primaryLanguages.filter { it !in popularLangs }
+        for (lang in sortedLangs) {
             val chip = createLanguageChip(lang)
             langChipViews[lang.code] = chip
             langChipsContainer.addView(chip)
@@ -225,6 +237,25 @@ class MiniOverlayHudView @JvmOverloads constructor(
 
         scrollContainer.addView(langChipsContainer)
         mainCard.addView(scrollContainer)
+
+        val saveScreenshotBtn = TextView(context).apply {
+            text = "Save Screenshot"
+            textSize = 12f
+            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
+            setTextColor(colorOnSurface)
+            gravity = Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                (36 * density).toInt()
+            ).apply {
+                bottomMargin = pad8
+            }
+            background = createRipplePillDrawable(colorSurfaceVariant, colorOutline)
+            setOnClickListener {
+                animateDismiss { listener?.onSaveScreenshotRequested() }
+            }
+        }
+        mainCard.addView(saveScreenshotBtn)
 
         val actionRow = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL

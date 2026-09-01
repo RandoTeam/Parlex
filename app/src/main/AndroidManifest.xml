@@ -71,6 +71,68 @@
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
+        <service
+            android:name=".service.ScreenTranslateTileService"
+            android:icon="@drawable/ic_qs_screen_translate"
+            android:label="@string/screen_translate_title"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- Digital Assistant (VoiceInteractionService) -->
+        <service
+            android:name=".service.assist.ParlexVoiceInteractionService"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/voice_interaction_service_config" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".service.assist.ParlexVoiceInteractionSessionService"
+            android:permission="android.permission.BIND_VOICE_INTERACTION"
+            android:exported="true" />
+
+        <!-- Accessibility Service for Silent Screen Capture (Zero-Dialog) -->
+        <service
+            android:name=".service.accessibility.ScreenAccessibilityService"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Assist & ColorOS Power Button Trigger Activity -->
+        <activity
+            android:name=".service.assist.AssistTriggerActivity"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <!-- ColorOS XiaoBu Power Key Interception Hooks -->
+            <intent-filter>
+                <action android:name="heytap.intent.action.ACTIVATE_SPEECH_ASSIST" />
+                <action android:name="coloros.speech.action.THIRD_PARTY_MESSAGE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

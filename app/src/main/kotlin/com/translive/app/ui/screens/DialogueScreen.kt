@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -186,24 +187,20 @@ fun DialogueScreen(
                     }
                 }
 
-                // Main action button
-                Box(
+                // Apple Translate Single Hands-Free Control
+                AppleConversationControl(
+                    isActive = uiState.isConversationActive,
+                    phase = uiState.phase,
+                    sourceLanguage = uiState.sourceLanguage,
+                    targetLanguage = uiState.targetLanguage,
+                    isAutoSpeakEnabled = uiState.isAutoSpeakEnabled,
+                    onToggleAutoSpeak = { viewModel.toggleAutoSpeak() },
+                    onStart = { viewModel.startConversation() },
+                    onStop = { viewModel.stopConversation() },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(24.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    ConversationButton(
-                        isActive = uiState.isConversationActive,
-                        phase = uiState.phase,
-                        sourceLanguage = uiState.sourceLanguage,
-                        targetLanguage = uiState.targetLanguage,
-                        onStart = { viewModel.startConversation() },
-                        onStop = { viewModel.stopConversation() },
-                        onSpeakSource = viewModel::speakFromSourceLanguage,
-                        onSpeakTarget = viewModel::speakFromTargetLanguage
-                    )
-                }
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                )
             }
         }
     }
@@ -458,104 +455,161 @@ private fun DialogueLanguageSelector(
     }
 }
 
+/**
+ * Apple Translate Conversation Control:
+ * Single floating pulsating Mic FAB, live sound wave indicator, and bilingual status capsule.
+ */
 @Composable
-private fun ConversationButton(
+private fun AppleConversationControl(
     isActive: Boolean,
     phase: DialoguePhase,
     sourceLanguage: Language,
     targetLanguage: Language,
+    isAutoSpeakEnabled: Boolean,
+    onToggleAutoSpeak: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onSpeakSource: () -> Unit,
-    onSpeakTarget: () -> Unit
+    modifier: Modifier = Modifier
 ) {
-    // Pulsing animation when listening
-    val scale by animateFloatAsState(
-        targetValue = if (phase == DialoguePhase.LISTENING) 1.1f else 1.0f,
-        animationSpec = if (phase == DialoguePhase.LISTENING) {
-            infiniteRepeatable(
-                animation = tween(800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            )
-        } else {
-            tween(300)
-        },
-        label = "pulse"
+    val infiniteTransition = rememberInfiniteTransition(label = "halo")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = if (isActive && phase == DialoguePhase.LISTENING) 1.15f else 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
     )
 
-    val buttonColor = if (isActive) MaterialTheme.colorScheme.error
-    else MaterialTheme.colorScheme.primary
+    val haloAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = if (isActive && phase == DialoguePhase.LISTENING) 0.0f else 0.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "haloAlpha"
+    )
 
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        if (isActive) {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                FilledTonalButton(
-                    onClick = onSpeakSource,
-                    enabled = phase == DialoguePhase.LISTENING,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Filled.Mic, null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(end = 6.dp)
-                    ) {
-                        Text(
-                            text = sourceLanguage.code.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
-                    Text(
-                        text = sourceLanguage.nativeName,
-                        style = MaterialTheme.typography.labelMedium
+    val buttonColor = if (isActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Bilingual Hands-Free Status Chip
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                    else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+            modifier = Modifier.padding(bottom = 12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                if (isActive) {
+                    Icon(
+                        Icons.Filled.GraphicEq,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
                     )
-                }
-                FilledTonalButton(
-                    onClick = onSpeakTarget,
-                    enabled = phase == DialoguePhase.LISTENING,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    Icon(Icons.Filled.Mic, null, modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(end = 6.dp)
-                    ) {
-                        Text(
-                            text = targetLanguage.code.uppercase(),
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
                     Text(
-                        text = targetLanguage.nativeName,
-                        style = MaterialTheme.typography.labelMedium
+                        text = "Слушаю: [${sourceLanguage.code.uppercase()}] ${sourceLanguage.displayName} или [${targetLanguage.code.uppercase()}] ${targetLanguage.displayName}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                } else {
+                    Icon(
+                        Icons.Outlined.HeadsetMic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "${sourceLanguage.displayName} ↔ ${targetLanguage.displayName}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(14.dp))
         }
-        FloatingActionButton(
-            onClick = { if (isActive) onStop() else onStart() },
-            modifier = Modifier
-                .size(80.dp)
-                .scale(scale),
-            containerColor = buttonColor,
-            contentColor = Color.White,
-            shape = CircleShape
-        ) {
-            Icon(
-                if (isActive) Icons.Filled.Stop else Icons.Filled.Mic,
-                contentDescription = if (isActive) stringResource(R.string.dialogue_stop) else stringResource(R.string.dialogue_start),
-                modifier = Modifier.size(36.dp)
+
+        // Live Waveform Indicator when active
+        if (isActive) {
+            LiveAudioWaveformBar(
+                phase = phase,
+                modifier = Modifier
+                    .fillMaxWidth(0.6f)
+                    .height(24.dp)
+                    .padding(bottom = 8.dp)
             )
+        }
+
+        // Central Pulsing FAB + Balanced Mute Toggle Dock
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Symmetrical spacer so the central FAB remains perfectly centered
+            Spacer(modifier = Modifier.size(48.dp))
+            Spacer(modifier = Modifier.width(20.dp))
+
+            Box(
+                modifier = Modifier.size(96.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                if (isActive && phase == DialoguePhase.LISTENING) {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .scale(pulseScale * 1.15f)
+                            .clip(CircleShape)
+                            .background(buttonColor.copy(alpha = haloAlpha))
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = { if (isActive) onStop() else onStart() },
+                    modifier = Modifier
+                        .size(76.dp)
+                        .scale(if (isActive && phase == DialoguePhase.LISTENING) pulseScale else 1.0f),
+                    containerColor = buttonColor,
+                    contentColor = Color.White,
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        if (isActive) Icons.Filled.Stop else Icons.Filled.Mic,
+                        contentDescription = if (isActive) stringResource(R.string.dialogue_stop) else stringResource(R.string.dialogue_start_conversation),
+                        modifier = Modifier.size(36.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(20.dp))
+
+            FilledTonalIconButton(
+                onClick = onToggleAutoSpeak,
+                modifier = Modifier.size(48.dp),
+                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                    containerColor = if (isAutoSpeakEnabled) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                    contentColor = if (isAutoSpeakEnabled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                )
+            ) {
+                Icon(
+                    imageVector = if (isAutoSpeakEnabled) Icons.AutoMirrored.Filled.VolumeUp else Icons.AutoMirrored.Filled.VolumeOff,
+                    contentDescription = if (isAutoSpeakEnabled) stringResource(R.string.cd_mute_auto_speak) else stringResource(R.string.cd_unmute_auto_speak),
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -564,8 +618,54 @@ private fun ConversationButton(
             text = if (isActive) stringResource(R.string.dialogue_stop) else stringResource(R.string.dialogue_start_conversation),
             style = MaterialTheme.typography.labelLarge,
             color = buttonColor,
-            fontWeight = FontWeight.Medium
+            fontWeight = FontWeight.SemiBold
         )
+    }
+}
+
+/**
+ * Animated sound bars reflecting listening/recognizing/speaking states.
+ */
+@Composable
+private fun LiveAudioWaveformBar(
+    phase: DialoguePhase,
+    modifier: Modifier = Modifier
+) {
+    val barCount = 7
+    val infiniteTransition = rememberInfiniteTransition(label = "waveform")
+
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        for (i in 0 until barCount) {
+            val animDuration = 400 + (i * 90)
+            val animatedHeight by infiniteTransition.animateFloat(
+                initialValue = 4f,
+                targetValue = if (phase == DialoguePhase.LISTENING || phase == DialoguePhase.SPEAKING) 20f else 4f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(animDuration, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "bar_$i"
+            )
+
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(animatedHeight.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(
+                        when (phase) {
+                            DialoguePhase.SPEAKING -> MaterialTheme.colorScheme.primary
+                            DialoguePhase.LISTENING -> MaterialTheme.colorScheme.primary
+                            DialoguePhase.RECOGNIZING -> MaterialTheme.colorScheme.secondary
+                            else -> MaterialTheme.colorScheme.outlineVariant
+                        }
+                    )
+            )
+        }
     }
 }
 

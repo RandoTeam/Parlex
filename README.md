@@ -4,10 +4,10 @@ Parlex is an offline AI translator for Android. The project targets text
 translation, two-way voice dialogue, and beta camera/photo translation without
 sending user content to the network.
 
-Latest public signed release: `v1.4.2`.
+Latest public signed release: `v1.5.1-beta.1`.
 
-This beta is signed with a new 2026 release key. Devices that already have an
-older Parlex APK signed with the previous key must uninstall the old build before
+This beta is signed with the 2026 release key. Devices that already have an
+older Parlex APK signed with a different key must uninstall the old build before
 installing this one.
 
 ## Product Status

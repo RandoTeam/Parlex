@@ -56,6 +56,7 @@ data class DialogueUiState(
     val isTranslationModelReady: Boolean = false,
     val isSttReady: Boolean = false,
     val isTtsReady: Boolean = true,
+    val isAutoSpeakEnabled: Boolean = true,
     val hasMicPermission: Boolean = false,
     val sourceLanguage: Language = Language.RUSSIAN,
     val targetLanguage: Language = Language.ENGLISH,
@@ -80,7 +81,8 @@ class DialogueViewModel @Inject constructor(
     private val speechEngine: SpeechEngine,
     private val dialogueDao: DialogueDao,
     private val arbiter: DialogueLanguageArbiter,
-    private val texts: LocalizedTextProvider
+    private val texts: LocalizedTextProvider,
+    private val audioRecorder: com.translive.app.engine.audio.DialogueAudioRecorder
 ) : AndroidViewModel(app) {
 
     companion object {
@@ -94,34 +96,30 @@ class DialogueViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(
         DialogueUiState(
             sourceLanguage = settings.dialogueSourceLanguage,
-            targetLanguage = settings.dialogueTargetLanguage
+            targetLanguage = settings.dialogueTargetLanguage,
+            isAutoSpeakEnabled = settings.dialogueAutoSpeak
         )
     )
     val uiState: StateFlow<DialogueUiState> = _uiState.asStateFlow()
+
+    fun toggleAutoSpeak() {
+        val newValue = !_uiState.value.isAutoSpeakEnabled
+        settings.dialogueAutoSpeak = newValue
+        _uiState.update { it.copy(isAutoSpeakEnabled = newValue) }
+    }
 
     /** Current session ID in Room */
     private var currentSessionId: Long? = null
     private var turnContext = DialogueTurnContext.EMPTY
     private val turnMutex = Mutex()
+    private var sessionStartTimeMs = 0L
+    private var totalWordsCount = 0
+    private var totalCharactersCount = 0
+    private var turnIndexCounter = 0
 
     init {
         systemTts.initialize()
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val sttReady = speechEngine.areModelsDownloaded()
-            var modelReady = isTranslationModelLoaded()
-            if (!modelReady && modelRepository.getActiveModelPath() != null) {
-                modelReady = loadActiveTranslationModel()
-            }
-
-            _uiState.update {
-                it.copy(
-                    isTranslationModelReady = modelReady,
-                    isSttReady = sttReady,
-                    isTtsReady = true
-                )
-            }
-        }
+        refreshReadiness()
 
         // Bridge SpeechEngine state to UI phase
         viewModelScope.launch {
@@ -138,10 +136,38 @@ class DialogueViewModel @Inject constructor(
                             _uiState.update { it.copy(phase = DialoguePhase.LISTENING) }
                         }
                     }
+                    ListeningState.ERROR -> {
+                        _uiState.update { it.copy(phase = DialoguePhase.ERROR, error = tr(R.string.error_stt_init_failed)) }
+                    }
                     else -> Unit
                 }
             }
         }
+    }
+
+    fun refreshReadiness() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val state = _uiState.value
+            val sttReady = speechEngine.areModelsDownloaded()
+            val translationReady = checkTranslationReadiness(state.sourceLanguage, state.targetLanguage)
+
+            _uiState.update {
+                it.copy(
+                    isTranslationModelReady = translationReady,
+                    isSttReady = sttReady,
+                    isTtsReady = true
+                )
+            }
+        }
+    }
+
+    private suspend fun checkTranslationReadiness(source: Language, target: Language): Boolean {
+        val policy = settings.translationPolicy
+        if (policy == TranslationPolicy.FAST || policy == TranslationPolicy.FAST_WITH_LLM_IMPROVE) {
+            val status = fastTranslateEngine.getPackageStatus(source.code, target.code)
+            if (status.isReady) return true
+        }
+        return isTranslationModelLoaded() || modelRepository.getActiveModelPath() != null
     }
 
     private fun isTranslationModelLoaded(): Boolean =
@@ -192,11 +218,13 @@ class DialogueViewModel @Inject constructor(
     fun setSourceLanguage(lang: Language) {
         _uiState.update { it.copy(sourceLanguage = lang) }
         settings.dialogueSourceLanguage = lang
+        refreshReadiness()
     }
 
     fun setTargetLanguage(lang: Language) {
         _uiState.update { it.copy(targetLanguage = lang) }
         settings.dialogueTargetLanguage = lang
+        refreshReadiness()
     }
 
     fun swapLanguages() {
@@ -206,6 +234,7 @@ class DialogueViewModel @Inject constructor(
         val state = _uiState.value
         settings.dialogueSourceLanguage = state.sourceLanguage
         settings.dialogueTargetLanguage = state.targetLanguage
+        refreshReadiness()
     }
 
     fun startConversation() {
@@ -214,6 +243,8 @@ class DialogueViewModel @Inject constructor(
             _uiState.update { it.copy(error = tr(R.string.error_no_mic_permission)) }
             return
         }
+
+        val state = _uiState.value
 
         _uiState.update {
             it.copy(
@@ -225,28 +256,35 @@ class DialogueViewModel @Inject constructor(
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                if (!isTranslationModelLoaded()) {
-                    val path = modelRepository.getActiveModelPath()
-                    if (path == null) {
-                        _uiState.update {
-                            it.copy(
-                                isConversationActive = false,
-                                phase = DialoguePhase.ERROR,
-                                error = tr(R.string.error_translation_model_missing)
-                            )
+                val fastActivated = fastTranslateEngine.activateDownloadedPair(
+                    state.sourceLanguage.code,
+                    state.targetLanguage.code
+                )
+
+                if (!fastActivated) {
+                    if (!isTranslationModelLoaded()) {
+                        val path = modelRepository.getActiveModelPath()
+                        if (path == null) {
+                            _uiState.update {
+                                it.copy(
+                                    isConversationActive = false,
+                                    phase = DialoguePhase.ERROR,
+                                    error = tr(R.string.error_translation_model_missing)
+                                )
+                            }
+                            return@launch
                         }
-                        return@launch
-                    }
-                    val loaded = loadActiveTranslationModel()
-                    if (!loaded) {
-                        _uiState.update {
-                            it.copy(
-                                isConversationActive = false,
-                                phase = DialoguePhase.ERROR,
-                                error = tr(R.string.error_translation_model_load_failed)
-                            )
+                        val loaded = loadActiveTranslationModel()
+                        if (!loaded) {
+                            _uiState.update {
+                                it.copy(
+                                    isConversationActive = false,
+                                    phase = DialoguePhase.ERROR,
+                                    error = tr(R.string.error_translation_model_load_failed)
+                                )
+                            }
+                            return@launch
                         }
-                        return@launch
                     }
                 }
 
@@ -261,17 +299,40 @@ class DialogueViewModel @Inject constructor(
                     return@launch
                 }
 
+                // Setup Audio Recording if enabled
+                val recordingEnabled = settings.dialogueRecordingEnabled
+                val format = settings.dialogueAudioFormat
+                var recordedFile: java.io.File? = null
+
+                if (recordingEnabled) {
+                    recordedFile = audioRecorder.startSession(format)
+                    speechEngine.onPcmSamplesRead = { samples, read ->
+                        audioRecorder.writePcmSamples(samples, read)
+                    }
+                } else {
+                    speechEngine.onPcmSamplesRead = null
+                }
+
+                sessionStartTimeMs = System.currentTimeMillis()
+                totalWordsCount = 0
+                totalCharactersCount = 0
+                turnIndexCounter = 0
+
                 // Zero-Emoji Material 3 Room Session Title (e.g., "Russian - English")
-                val state = _uiState.value
                 val session = DialogueSession(
                     languageA = state.sourceLanguage.code,
                     languageB = state.targetLanguage.code,
-                    title = "${state.sourceLanguage.displayName} - ${state.targetLanguage.displayName}"
+                    title = "${state.sourceLanguage.displayName} - ${state.targetLanguage.displayName}",
+                    createdAt = sessionStartTimeMs,
+                    updatedAt = sessionStartTimeMs,
+                    isRecorded = recordingEnabled,
+                    audioFilePath = recordedFile?.absolutePath,
+                    audioFormat = if (recordingEnabled) format.id else null
                 )
                 currentSessionId = dialogueDao.insertSession(session)
                 turnContext = DialogueTurnContext.EMPTY
 
-                // Launch continuous bidirectional listening loop
+                // Launch continuous bidirectional hands-free listening loop
                 speechEngine.startListening(language = "", singleShot = false) { result ->
                     processDialogueTurn(result)
                 }
@@ -290,12 +351,22 @@ class DialogueViewModel @Inject constructor(
 
     fun stopConversation() {
         speechEngine.stopListening()
+        speechEngine.onPcmSamplesRead = null
         systemTts.stop()
 
+        val recordingResult = audioRecorder.stopSession()
         val sessionId = currentSessionId
         if (sessionId != null) {
             viewModelScope.launch(Dispatchers.IO) {
-                dialogueDao.updateSessionTime(sessionId)
+                val totalDuration = recordingResult?.durationMs ?: (System.currentTimeMillis() - sessionStartTimeMs).coerceAtLeast(0L)
+                dialogueDao.updateSessionStatistics(
+                    sessionId = sessionId,
+                    durationMs = totalDuration,
+                    totalTurns = turnIndexCounter,
+                    totalWords = totalWordsCount,
+                    totalCharacters = totalCharactersCount,
+                    updatedAt = System.currentTimeMillis()
+                )
             }
         }
         currentSessionId = null
@@ -306,23 +377,6 @@ class DialogueViewModel @Inject constructor(
                 isConversationActive = false,
                 phase = DialoguePhase.IDLE
             )
-        }
-    }
-
-    fun speakFromSourceLanguage() = startRecognitionTurn(_uiState.value.sourceLanguage)
-
-    fun speakFromTargetLanguage() = startRecognitionTurn(_uiState.value.targetLanguage)
-
-    private fun startRecognitionTurn(fromLang: Language) {
-        if (!_uiState.value.isConversationActive || _uiState.value.phase != DialoguePhase.LISTENING) return
-        viewModelScope.launch(Dispatchers.IO) {
-            if (!speechEngine.initialize(fromLang.code)) {
-                _uiState.update { it.copy(phase = DialoguePhase.ERROR, error = tr(R.string.error_stt_init_failed)) }
-                return@launch
-            }
-            speechEngine.startListening(language = fromLang.code, singleShot = true) { result ->
-                processDialogueTurn(result)
-            }
         }
     }
 
@@ -370,7 +424,14 @@ class DialogueViewModel @Inject constructor(
                     val srcTrans = if (settings.showTransliteration) transliterationEngine.transliterate(rawText, fromLang) else null
                     val tgtTrans = if (settings.showTransliteration) transliterationEngine.transliterate(translated, toLang) else null
 
-                    // 3. Save zero-emoji record to Room database
+                    // 3. Save zero-emoji record to Room database with audio timing & stats
+                    val wordsInTurn = com.translive.app.data.model.DialogueSessionStats.countWords(rawText)
+                    val charsInTurn = rawText.length
+                    totalWordsCount += wordsInTurn
+                    totalCharactersCount += charsInTurn
+                    turnIndexCounter++
+
+                    val currentOffset = audioRecorder.getRelativeOffsetMs()
                     val sessionId = currentSessionId
                     var insertedDbId: Long? = null
                     if (sessionId != null) {
@@ -380,10 +441,21 @@ class DialogueViewModel @Inject constructor(
                             originalText = rawText,
                             translatedText = translated,
                             originalLanguage = fromLang.code,
-                            translatedLanguage = toLang.code
+                            translatedLanguage = toLang.code,
+                            timestamp = System.currentTimeMillis(),
+                            audioStartTimeMs = currentOffset,
+                            audioDurationMs = 2500L,
+                            wordCount = wordsInTurn,
+                            characterCount = charsInTurn
                         )
                         insertedDbId = dialogueDao.insertMessage(dbMsg)
-                        dialogueDao.updateSessionTime(sessionId)
+                        dialogueDao.updateSessionStatistics(
+                            sessionId = sessionId,
+                            durationMs = (System.currentTimeMillis() - sessionStartTimeMs).coerceAtLeast(0L),
+                            totalTurns = turnIndexCounter,
+                            totalWords = totalWordsCount,
+                            totalCharacters = totalCharactersCount
+                        )
                     }
 
                     // 4. Update UI message list
@@ -399,21 +471,25 @@ class DialogueViewModel @Inject constructor(
                         dbMessageId = insertedDbId
                     )
 
+                    val autoSpeak = _uiState.value.isAutoSpeakEnabled
+
                     _uiState.update {
                         it.copy(
                             messages = it.messages + uiMessage,
-                            phase = DialoguePhase.SPEAKING
+                            phase = if (autoSpeak) DialoguePhase.SPEAKING else DialoguePhase.LISTENING
                         )
                     }
 
-                    // 5. TTS Playback with Hardware AEC frame suppression
-                    speechEngine.notifyTtsPlaybackStarted()
-                    systemTts.speakAndWait(translated, toLang.code)
-                    speechEngine.notifyTtsPlaybackFinished()
+                    // 5. Conditional TTS Playback with Hardware AEC frame suppression
+                    if (autoSpeak) {
+                        speechEngine.notifyTtsPlaybackStarted()
+                        systemTts.speakAndWait(translated, toLang.code)
+                        speechEngine.notifyTtsPlaybackFinished()
 
-                    // 6. Post-TTS acoustic reverb cooldown
-                    delay(REVERB_COOLDOWN_MS)
-                    speechEngine.resetVad()
+                        // 6. Post-TTS acoustic reverb cooldown
+                        delay(REVERB_COOLDOWN_MS)
+                        speechEngine.resetVad()
+                    }
 
                     // 7. Advance turn context for alternation prior heuristics
                     turnContext = DialogueTurnContext(

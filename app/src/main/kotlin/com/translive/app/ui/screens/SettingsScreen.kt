@@ -3,6 +3,11 @@ package com.translive.app.ui.screens
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -28,8 +33,12 @@ import com.translive.app.R
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.TranslationPolicy
 import com.translive.app.i18n.AppLocale
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
+import com.translive.app.ui.components.SystemPermissionsSettingsCard
 import com.translive.app.ui.viewmodel.SettingsViewModel
 
 @Composable
@@ -50,9 +59,36 @@ fun SettingsScreen(
     val showTechnicalTranslationStats by viewModel.showTechnicalTranslationStats.collectAsState()
     val showTransliteration by viewModel.showTransliteration.collectAsState()
     val translationPolicy by viewModel.translationPolicy.collectAsState()
+    val overlayStyle by viewModel.overlayStyle.collectAsState()
     val homeCurrency by viewModel.homeCurrency.collectAsState()
     val enableCurrencyConversion by viewModel.enableCurrencyConversion.collectAsState()
+    val currencySyncPolicy by viewModel.currencySyncPolicy.collectAsState()
+    val currencyLastUpdated by viewModel.currencyLastUpdated.collectAsState()
+    val isCurrencyRefreshing by viewModel.isCurrencyRefreshing.collectAsState()
+    val dialogueAutoSpeak by viewModel.dialogueAutoSpeak.collectAsState()
+    val dialogueRecordingEnabled by viewModel.dialogueRecordingEnabled.collectAsState()
+    val dialogueAudioFormat by viewModel.dialogueAudioFormat.collectAsState()
+    val dialogueStorageStats by viewModel.dialogueStorageStats.collectAsState()
+    val screenSyncTargetWithMain by viewModel.screenSyncTargetWithMain.collectAsState()
+    val screenTargetLanguage by viewModel.screenTargetLanguage.collectAsState()
+    val screenA11yShortcutBehavior by viewModel.screenA11yShortcutBehavior.collectAsState()
     val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
+    val systemPermissionsState by viewModel.systemPermissionsState.collectAsState()
+    var showClearStorageDialog by remember { mutableStateOf(false) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshSystemPermissions()
+                viewModel.refreshDialogueStorageStats()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Scaffold(
         bottomBar = {
@@ -93,6 +129,91 @@ fun SettingsScreen(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary
                 )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // --- System Integration & Permissions Section ---
+            SectionHeader(
+                icon = Icons.Outlined.AdminPanelSettings,
+                title = stringResource(R.string.settings_system_permissions_section)
+            )
+            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                SystemPermissionsSettingsCard(
+                    permissionsState = systemPermissionsState,
+                    onRefreshPermissions = { viewModel.refreshSystemPermissions() }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // --- Screen Translation & Overlay Section ---
+            SectionHeader(
+                icon = Icons.Outlined.Screenshot,
+                title = stringResource(R.string.settings_screen_translate_section)
+            )
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text(stringResource(R.string.settings_screen_shortcut_behavior_title), style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    stringResource(R.string.settings_screen_shortcut_behavior_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                TranslationPolicyOption(
+                    label = stringResource(R.string.settings_screen_shortcut_single_shot),
+                    description = stringResource(R.string.settings_screen_shortcut_single_shot_desc),
+                    selected = screenA11yShortcutBehavior == com.translive.app.data.ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE,
+                    onClick = { viewModel.setScreenA11yShortcutBehavior(com.translive.app.data.ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE) }
+                )
+                TranslationPolicyOption(
+                    label = stringResource(R.string.settings_screen_shortcut_toggle_bubble),
+                    description = stringResource(R.string.settings_screen_shortcut_toggle_bubble_desc),
+                    selected = screenA11yShortcutBehavior == com.translive.app.data.ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE,
+                    onClick = { viewModel.setScreenA11yShortcutBehavior(com.translive.app.data.ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE) }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.settings_screen_sync_target_title), style = MaterialTheme.typography.titleSmall)
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.settings_screen_sync_target_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = screenSyncTargetWithMain,
+                        onCheckedChange = { viewModel.setScreenSyncTargetWithMain(it) }
+                    )
+                }
+
+                if (!screenSyncTargetWithMain) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(stringResource(R.string.settings_screen_target_lang_title), style = MaterialTheme.typography.labelMedium)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        com.translive.app.data.model.Language.entries.forEach { lang ->
+                            FilterChip(
+                                selected = screenTargetLanguage == lang,
+                                onClick = { viewModel.setScreenTargetLanguage(lang) },
+                                label = { Text(lang.displayName, style = MaterialTheme.typography.bodySmall) }
+                            )
+                        }
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -172,6 +293,29 @@ fun SettingsScreen(
                     description = "Качественный перевод без промежуточного результата",
                     selected = translationPolicy == TranslationPolicy.LLM_ONLY,
                     onClick = { viewModel.setTranslationPolicy(TranslationPolicy.LLM_ONLY) }
+                )
+            }
+
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Text("Стиль наложения", style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "Как отображается переведенный текст на экране.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                TranslationPolicyOption(
+                    label = "Темные плашки",
+                    description = "Белый текст на темном фоне поверх оригинала",
+                    selected = overlayStyle == SettingsRepository.OVERLAY_STYLE_DARK,
+                    onClick = { viewModel.setOverlayStyle(SettingsRepository.OVERLAY_STYLE_DARK) }
+                )
+                TranslationPolicyOption(
+                    label = "Заливка фоном",
+                    description = "Копирует цвет фона оригинального изображения",
+                    selected = overlayStyle == SettingsRepository.OVERLAY_STYLE_INPAINTING,
+                    onClick = { viewModel.setOverlayStyle(SettingsRepository.OVERLAY_STYLE_INPAINTING) }
                 )
             }
 
@@ -388,8 +532,8 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // --- Currency conversion section ---
-            SectionHeader(icon = Icons.Outlined.Payments, title = "Конвертер валют")
+            // --- Currency conversion section (Attribution, Sync & Zero-Emoji) ---
+            SectionHeader(icon = Icons.Outlined.Payments, title = stringResource(R.string.settings_currency_section_title))
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -397,10 +541,10 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Автоконвертация цен", style = MaterialTheme.typography.titleSmall)
+                        Text(stringResource(R.string.settings_currency_auto_convert), style = MaterialTheme.typography.titleSmall)
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            "Распознавать иностранные валюты на экране и в тексте, добавляя эквивалент в скобках (≈ 4 580 ₽)",
+                            stringResource(R.string.settings_currency_auto_convert_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -414,31 +558,74 @@ fun SettingsScreen(
 
                 if (enableCurrencyConversion) {
                     HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
-                    Text("Домашняя валюта", style = MaterialTheme.typography.titleSmall)
+                    
+                    // 1. Data Source Attribution Banner
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .size(20.dp)
+                                    .padding(top = 2.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.settings_currency_source_title),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = stringResource(R.string.settings_currency_source_desc),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // 2. Home Currency Selector (Strict Zero-Emoji, ISO-4217 Codes & Symbols)
+                    Text(stringResource(R.string.settings_currency_home_title), style = MaterialTheme.typography.titleSmall)
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        "Валюта, в которую переводятся все найденные цены:",
+                        stringResource(R.string.settings_currency_home_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
-                    val majorCurrencies = listOf(
-                        "AUTO" to "⚡ Авто (по языку)",
-                        "RUB" to "🇷🇺 RUB (₽)",
-                        "USD" to "🇺🇸 USD ($)",
-                        "EUR" to "🇪🇺 EUR (€)",
-                        "VND" to "🇻🇳 VND (₫)",
-                        "CNY" to "🇨🇳 CNY (¥)",
-                        "KZT" to "🇰🇿 KZT (₸)",
-                        "TRY" to "🇹🇷 TRY (₺)",
-                        "AED" to "🇦🇪 AED (د.إ)",
-                        "THB" to "🇹🇭 THB (฿)",
-                        "GBP" to "🇬🇧 GBP (£)"
+                    val cleanCurrencyOptions = listOf(
+                        "AUTO" to stringResource(R.string.currency_code_auto_label),
+                        "RUB" to "RUB (₽) — Российский рубль",
+                        "USD" to "USD ($) — Доллар США",
+                        "EUR" to "EUR (€) — Евро",
+                        "VND" to "VND (₫) — Вьетнамский донг",
+                        "CNY" to "CNY (¥) — Китайский юань",
+                        "KZT" to "KZT (₸) — Казахстанский тенге",
+                        "TRY" to "TRY (₺) — Турецкая лира",
+                        "AED" to "AED (د.إ) — Дирхам ОАЭ",
+                        "THB" to "THB (฿) — Тайский бат",
+                        "GBP" to "GBP (£) — Британский фунт"
                     )
 
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        majorCurrencies.forEach { (code, label) ->
+                        cleanCurrencyOptions.forEach { (code, label) ->
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -460,36 +647,552 @@ fun SettingsScreen(
                             }
                         }
                     }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // 3. Sync Policy Preference
+                    Text(stringResource(R.string.settings_currency_sync_policy_title), style = MaterialTheme.typography.titleSmall)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        stringResource(R.string.settings_currency_sync_policy_desc),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    val syncPolicies = listOf(
+                        com.translive.app.data.model.CurrencySyncPolicy.DAILY to (stringResource(R.string.settings_currency_sync_daily) to stringResource(R.string.settings_currency_sync_daily_desc)),
+                        com.translive.app.data.model.CurrencySyncPolicy.ON_LAUNCH to (stringResource(R.string.settings_currency_sync_on_launch) to stringResource(R.string.settings_currency_sync_on_launch_desc)),
+                        com.translive.app.data.model.CurrencySyncPolicy.MANUAL to (stringResource(R.string.settings_currency_sync_manual) to stringResource(R.string.settings_currency_sync_manual_desc))
+                    )
+
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        syncPolicies.forEach { (policy, textPair) ->
+                            val (title, desc) = textPair
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.setCurrencySyncPolicy(policy) },
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (currencySyncPolicy == policy) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    RadioButton(
+                                        selected = currencySyncPolicy == policy,
+                                        onClick = { viewModel.setCurrencySyncPolicy(policy) }
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Column {
+                                        Text(title, style = MaterialTheme.typography.bodyMedium, fontWeight = if (currencySyncPolicy == policy) FontWeight.SemiBold else FontWeight.Normal)
+                                        Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                    // 4. Last Updated Status & Manual Refresh Button
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val relativeTime = com.translive.app.data.CurrencyAttributionFormatter.formatLastUpdated(
+                        lastUpdatedMillis = currencyLastUpdated ?: 0L,
+                        nowMillis = System.currentTimeMillis()
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.settings_currency_status_title),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = if (currencyLastUpdated == null || currencyLastUpdated == 0L) {
+                                    stringResource(R.string.settings_currency_status_baseline)
+                                } else {
+                                    stringResource(R.string.settings_currency_status_cached, relativeTime)
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        OutlinedButton(
+                            onClick = viewModel::refreshExchangeRates,
+                            enabled = !isCurrencyRefreshing,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            if (isCurrencyRefreshing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Outlined.Sync,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = stringResource(
+                                    if (isCurrencyRefreshing) R.string.settings_currency_refreshing
+                                    else R.string.settings_currency_refresh_now
+                                ),
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            SectionHeader(icon = Icons.Outlined.Analytics, title = "Диагностика устройства")
+            // --- Dialogue & Voice section ---
+            SectionHeader(icon = Icons.Outlined.RecordVoiceOver, title = stringResource(R.string.settings_dialogue_section))
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                Text("Проверка CPU, RAM, Vulkan и OpenCL", style = MaterialTheme.typography.titleSmall)
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    "Не загружает модель. Отчёт показывает доступность системных библиотек и реальный статус GGUF-бэкенда.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedButton(onClick = viewModel::runRuntimeDiagnostics) {
-                    Icon(Icons.Outlined.Analytics, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Запустить проверку")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { viewModel.setDialogueAutoSpeak(!dialogueAutoSpeak) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.settings_dialogue_auto_speak),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.settings_dialogue_auto_speak_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = dialogueAutoSpeak,
+                        onCheckedChange = viewModel::setDialogueAutoSpeak
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { viewModel.setDialogueRecordingEnabled(!dialogueRecordingEnabled) },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.settings_dialogue_record_audio),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            stringResource(R.string.settings_dialogue_record_audio_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = dialogueRecordingEnabled,
+                        onCheckedChange = viewModel::setDialogueRecordingEnabled
+                    )
+                }
+
+                AnimatedVisibility(visible = dialogueRecordingEnabled) {
+                    Column(modifier = Modifier.padding(top = 12.dp)) {
+                        Text(
+                            text = stringResource(R.string.settings_dialogue_audio_format),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val aacSelected = dialogueAudioFormat == com.translive.app.data.model.AudioRecordingFormat.AAC
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.setDialogueAudioFormat(com.translive.app.data.model.AudioRecordingFormat.AAC) }
+                                    .border(
+                                        1.dp,
+                                        if (aacSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        RoundedCornerShape(10.dp)
+                                    ),
+                                color = if (aacSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = "AAC (.m4a)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (aacSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = stringResource(R.string.settings_dialogue_format_aac_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+
+                            val wavSelected = dialogueAudioFormat == com.translive.app.data.model.AudioRecordingFormat.WAV
+                            Surface(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { viewModel.setDialogueAudioFormat(com.translive.app.data.model.AudioRecordingFormat.WAV) }
+                                    .border(
+                                        1.dp,
+                                        if (wavSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
+                                        RoundedCornerShape(10.dp)
+                                    ),
+                                color = if (wavSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(
+                                        text = "WAV (.wav)",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (wavSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = stringResource(R.string.settings_dialogue_format_wav_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        fontSize = 11.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                // Storage info & cleanup
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.settings_dialogue_storage_title),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(
+                                R.string.settings_dialogue_storage_count_format,
+                                dialogueStorageStats.fileCount,
+                                dialogueStorageStats.formattedSize
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    OutlinedButton(
+                        onClick = { showClearStorageDialog = true },
+                        enabled = dialogueStorageStats.fileCount > 0,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DeleteSweep,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = if (dialogueStorageStats.fileCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = stringResource(R.string.settings_dialogue_btn_clear_storage),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (dialogueStorageStats.fileCount > 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        )
+                    }
                 }
             }
 
-            // --- Info ---
+            if (showClearStorageDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearStorageDialog = false },
+                    icon = {
+                        Icon(
+                            imageVector = Icons.Default.DeleteSweep,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    },
+                    title = {
+                        Text(text = stringResource(R.string.settings_dialogue_clear_dialog_title))
+                    },
+                    text = {
+                        Text(
+                            text = stringResource(
+                                R.string.settings_dialogue_clear_dialog_desc,
+                                dialogueStorageStats.fileCount,
+                                dialogueStorageStats.formattedSize
+                            )
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                viewModel.clearAllDialogueRecordings()
+                                showClearStorageDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Text(stringResource(R.string.settings_dialogue_clear_dialog_confirm))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showClearStorageDialog = false }) {
+                            Text(stringResource(R.string.settings_dialogue_clear_dialog_cancel))
+                        }
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // --- About App Section (v1.5.0-beta.1) ---
             SectionHeader(icon = Icons.Outlined.Info, title = stringResource(R.string.settings_about))
+
+            // 1. Hero Branding & Version Card
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                InfoRow(stringResource(R.string.settings_version), "1.4.0-beta.1")
-                InfoRow(stringResource(R.string.settings_translation_model), "Hy-MT 1.5 1.8B")
-                InfoRow("TTS", stringResource(R.string.settings_tts_engine_value))
-                InfoRow("STT", "Whisper Tiny + Silero VAD")
-                InfoRow(stringResource(R.string.settings_engine), "llama.cpp")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        MaterialTheme.colorScheme.primary,
+                                        MaterialTheme.colorScheme.secondary
+                                    )
+                                ),
+                                RoundedCornerShape(12.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Translate,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.app_name),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = stringResource(R.string.about_app_tagline),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                    ) {
+                        Text(
+                            text = "v1.5.0-beta.1",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = "Build 15000",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant
+                    ) {
+                        Text(
+                            text = "arm64-v8a",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            // 2. Offline Privacy Guarantee Banner
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = Color(0xFF004D40).copy(alpha = 0.25f)
+                ),
+                border = CardDefaults.outlinedCardBorder().copy(
+                    brush = Brush.horizontalGradient(
+                        listOf(Color(0xFF1DE9B6).copy(alpha = 0.6f), Color(0xFF00B0FF).copy(alpha = 0.3f))
+                    )
+                )
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Shield,
+                        contentDescription = null,
+                        tint = Color(0xFF1DE9B6),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .padding(top = 2.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = stringResource(R.string.about_privacy_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF1DE9B6)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.about_privacy_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
+                        )
+                    }
+                }
+            }
+
+            // 3. Active On-Device Engines Card
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.Memory,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.about_engines_section),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                AboutEngineRow(stringResource(R.string.about_engine_nmt_title), "llama.cpp", stringResource(R.string.about_engine_nmt_desc))
+                AboutEngineRow(stringResource(R.string.about_engine_stt_title), "Sherpa-ONNX", stringResource(R.string.about_engine_stt_desc))
+                AboutEngineRow(stringResource(R.string.about_engine_fast_nmt_title), "ML Kit NMT", stringResource(R.string.about_engine_fast_nmt_desc))
+                AboutEngineRow(stringResource(R.string.about_engine_ocr_title), "MNN VisionKit", stringResource(R.string.about_engine_ocr_desc))
+                AboutEngineRow(stringResource(R.string.about_engine_litert_title), "LiteRT-LM", stringResource(R.string.about_engine_litert_desc))
+                AboutEngineRow(stringResource(R.string.about_engine_gpu_title), "OpenCL 2.0", stringResource(R.string.about_engine_gpu_desc))
+            }
+
+            // 4. Core Capabilities Card
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.about_capabilities_section),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+
+                AboutCapabilityRow(Icons.Outlined.RecordVoiceOver, stringResource(R.string.about_cap_dialogue), stringResource(R.string.about_cap_dialogue_desc))
+                AboutCapabilityRow(Icons.Outlined.Layers, stringResource(R.string.about_cap_screen_ar), stringResource(R.string.about_cap_screen_ar_desc))
+                AboutCapabilityRow(Icons.Outlined.Payments, stringResource(R.string.about_cap_currency), stringResource(R.string.about_cap_currency_desc))
+                AboutCapabilityRow(Icons.Outlined.PictureAsPdf, stringResource(R.string.about_cap_pdf), stringResource(R.string.about_cap_pdf_desc))
+                AboutCapabilityRow(Icons.Outlined.MenuBook, stringResource(R.string.about_cap_dictionaries), stringResource(R.string.about_cap_dictionaries_desc))
+                AboutCapabilityRow(Icons.Outlined.GraphicEq, stringResource(R.string.about_cap_timeline), stringResource(R.string.about_cap_timeline_desc))
+            }
+
+            // 5. System Metadata & Diagnostics Card
+            SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                InfoRow(stringResource(R.string.settings_version), "1.5.0-beta.1 (15000)")
+                InfoRow("Target SDK", "Android 15 (API 36)")
+                InfoRow("Architecture", "arm64-v8a (64-bit)")
+                InfoRow("Text-to-Speech", stringResource(R.string.settings_tts_engine_value))
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                OutlinedButton(
+                    onClick = viewModel::runRuntimeDiagnostics,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Outlined.Analytics, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(stringResource(R.string.about_run_diagnostics_button))
+                }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
@@ -682,5 +1385,83 @@ private fun InfoRow(label: String, value: String) {
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+@Composable
+private fun AboutEngineRow(
+    title: String,
+    runtimeBadge: String,
+    description: String
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+            ) {
+                Text(
+                    text = runtimeBadge,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(2.dp))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun AboutCapabilityRow(
+    icon: ImageVector,
+    title: String,
+    description: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .size(18.dp)
+                .padding(top = 2.dp)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

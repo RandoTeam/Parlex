@@ -210,7 +210,8 @@ data class CameraUiState(
     val selectedWordDictionaryEntries: List<DictionaryEntry> = emptyList(),
     val isSpeaking: Boolean = false,
     val subtitleState: LiveSubtitleUiState = LiveSubtitleUiState(),
-    val isLlmTranslating: Boolean = false
+    val isLlmTranslating: Boolean = false,
+    val isLlmModelAvailable: Boolean = false
 ) {
     val isCaptureProcessing: Boolean get() = captureStatus == CaptureStatus.PROCESSING
 }
@@ -273,6 +274,7 @@ class CameraViewModel @Inject constructor(
     private var lastLivePairWarningKey: String? = null
 
     init {
+        checkLlmModelAvailable()
         // Observe ML Kit translation readiness
         viewModelScope.launch {
             fastTranslateEngine.isReady.collect { ready ->
@@ -328,8 +330,21 @@ class CameraViewModel @Inject constructor(
         prepareNmt()
     }
 
+    fun checkLlmModelAvailable(): Boolean {
+        val modelPath = modelRepository.getActiveModelPath()
+        val ready = if (modelPath.isNullOrBlank()) {
+            false
+        } else {
+            val file = java.io.File(modelPath)
+            file.exists() && file.length() > 0L
+        }
+        _uiState.update { it.copy(isLlmModelAvailable = ready) }
+        return ready
+    }
+
     fun setTranslationMode(mode: CameraTranslationMode) {
         if (_uiState.value.translationMode == mode) return
+        checkLlmModelAvailable()
         _uiState.update {
             it.copy(
                 translationMode = mode,
@@ -343,6 +358,16 @@ class CameraViewModel @Inject constructor(
     fun improveCaptureWithLlm() {
         val bitmap = _uiState.value.capturedBitmap ?: return
         if (_uiState.value.isCaptureProcessing || _uiState.value.isLlmTranslating) return
+
+        if (!checkLlmModelAvailable()) {
+            _uiState.update {
+                it.copy(
+                    captureStatus = CaptureStatus.ERROR,
+                    captureMessage = texts.text(R.string.camera_llm_model_missing_error)
+                )
+            }
+            return
+        }
 
         translateJob?.cancel()
         translateJob = viewModelScope.launch(Dispatchers.IO) {
@@ -368,7 +393,7 @@ class CameraViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         captureStatus = CaptureStatus.ERROR,
-                        captureMessage = texts.text(R.string.camera_capture_processing_error)
+                        captureMessage = e.message ?: texts.text(R.string.camera_capture_processing_error)
                     )
                 }
             } finally {
@@ -2229,11 +2254,14 @@ class CameraViewModel @Inject constructor(
         sourceLanguage: Language,
         targetLanguage: Language
     ): List<String> {
-        val texts = block.lines.map { it.text }
-        if (sourceLanguage.code == targetLanguage.code) return texts
+        val originalTexts = block.lines.map { it.text }
+        if (sourceLanguage.code == targetLanguage.code) return originalTexts
 
         if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && !translationEngine.isLoaded) {
-            return texts
+            val loaded = ensureLlmModelLoaded()
+            if (!loaded) {
+                error(this@CameraViewModel.texts.text(R.string.camera_llm_model_missing_error))
+            }
         }
 
         return if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) {
@@ -2249,7 +2277,7 @@ class CameraViewModel @Inject constructor(
                 )
             } catch (e: Exception) {
                 Log.e("CameraVM", "Structured HY-MT failed for ${sourceLanguage.code}: ${e.message}")
-                texts
+                originalTexts
             }
         } else {
             translateCaptureLinesWithCameraModel(block.lines, sourceLanguage, targetLanguage)

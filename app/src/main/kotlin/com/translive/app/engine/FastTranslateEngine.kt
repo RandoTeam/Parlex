@@ -55,6 +55,16 @@ class FastTranslateEngine @Inject constructor() {
     private val _isDownloading = MutableStateFlow(false)
     val isDownloading: StateFlow<Boolean> = _isDownloading.asStateFlow()
 
+    private val _currentDownloadingLanguage = MutableStateFlow<String?>(null)
+    val currentDownloadingLanguage: StateFlow<String?> = _currentDownloadingLanguage.asStateFlow()
+
+    @Volatile
+    private var isBatchCancelled = false
+
+    fun cancelBatchDownload() {
+        isBatchCancelled = true
+    }
+
     data class PackageStatus(
         val supported: Boolean,
         /** ML Kit language codes required for the current language pair. */
@@ -83,12 +93,16 @@ class FastTranslateEngine @Inject constructor() {
 
     /**
      * Map our Language codes to ML Kit TranslateLanguage codes.
-     * ML Kit supports 59 languages — most of ours are covered.
+     * ML Kit supports 59 languages.
      */
     fun toMlKitLang(code: String): String? {
-        return when (code) {
+        val normalized = when (code) {
+            "fil" -> "tl"
+            else -> code
+        }
+        return when (normalized) {
             "en" -> TranslateLanguage.ENGLISH
-            "zh", "zh-Hant" -> TranslateLanguage.CHINESE
+            "zh", "zh-Hant", "yue", "nan" -> TranslateLanguage.CHINESE
             "ja" -> TranslateLanguage.JAPANESE
             "ko" -> TranslateLanguage.KOREAN
             "fr" -> TranslateLanguage.FRENCH
@@ -116,12 +130,39 @@ class FastTranslateEngine @Inject constructor() {
             "vi" -> TranslateLanguage.VIETNAMESE
             "id" -> TranslateLanguage.INDONESIAN
             "ms" -> TranslateLanguage.MALAY
-            "fil" -> TranslateLanguage.TAGALOG
-            // Dialects — map to closest supported
-            "yue", "nan" -> TranslateLanguage.CHINESE
-            // Not in ML Kit Translation
-            "my", "km", "mn", "bo", "ug" -> null
-            else -> null
+            "tl" -> TranslateLanguage.TAGALOG
+            "af" -> TranslateLanguage.AFRIKAANS
+            "sq" -> TranslateLanguage.ALBANIAN
+            "be" -> TranslateLanguage.BELARUSIAN
+            "bg" -> TranslateLanguage.BULGARIAN
+            "ca" -> TranslateLanguage.CATALAN
+            "hr" -> TranslateLanguage.CROATIAN
+            "da" -> TranslateLanguage.DANISH
+            "eo" -> TranslateLanguage.ESPERANTO
+            "et" -> TranslateLanguage.ESTONIAN
+            "fi" -> TranslateLanguage.FINNISH
+            "gl" -> TranslateLanguage.GALICIAN
+            "ka" -> TranslateLanguage.GEORGIAN
+            "el" -> TranslateLanguage.GREEK
+            "ht" -> TranslateLanguage.HAITIAN_CREOLE
+            "hu" -> TranslateLanguage.HUNGARIAN
+            "is" -> TranslateLanguage.ICELANDIC
+            "ga" -> TranslateLanguage.IRISH
+            "kn" -> TranslateLanguage.KANNADA
+            "lv" -> TranslateLanguage.LATVIAN
+            "lt" -> TranslateLanguage.LITHUANIAN
+            "mk" -> TranslateLanguage.MACEDONIAN
+            "mt" -> TranslateLanguage.MALTESE
+            "no" -> TranslateLanguage.NORWEGIAN
+            "ro" -> TranslateLanguage.ROMANIAN
+            "sk" -> TranslateLanguage.SLOVAK
+            "sl" -> TranslateLanguage.SLOVENIAN
+            "sw" -> TranslateLanguage.SWAHILI
+            "sv" -> TranslateLanguage.SWEDISH
+            "cy" -> TranslateLanguage.WELSH
+            // Regional / unsupported in ML Kit Translation:
+            "my", "km", "mn", "bo", "ug", "kk", "hy", "az" -> null
+            else -> TranslateLanguage.fromLanguageTag(normalized)
         }
     }
 
@@ -200,6 +241,7 @@ class FastTranslateEngine @Inject constructor() {
             val manager = RemoteModelManager.getInstance()
             val conditions = DownloadConditions.Builder().build()
             status.missingLanguageCodes.forEach { language ->
+                _currentDownloadingLanguage.value = language
                 val model = TranslateRemoteModel.Builder(language).build()
                 suspendCancellableCoroutine<Unit> { cont ->
                     manager.download(model, conditions)
@@ -214,6 +256,7 @@ class FastTranslateEngine @Inject constructor() {
             Log.e(TAG, "ML Kit language pack download failed", error)
             false
         } finally {
+            _currentDownloadingLanguage.value = null
             _isDownloading.value = false
         }
     }
@@ -232,6 +275,7 @@ class FastTranslateEngine @Inject constructor() {
             val manager = RemoteModelManager.getInstance()
             val conditions = DownloadConditions.Builder().build()
             missing.forEach { language ->
+                _currentDownloadingLanguage.value = language
                 val model = TranslateRemoteModel.Builder(language).build()
                 suspendCancellableCoroutine<Unit> { cont ->
                     manager.download(model, conditions)
@@ -246,6 +290,7 @@ class FastTranslateEngine @Inject constructor() {
             Log.e(TAG, "ML Kit language package download failed", error)
             false
         } finally {
+            _currentDownloadingLanguage.value = null
             _isDownloading.value = false
         }
     }
@@ -256,6 +301,7 @@ class FastTranslateEngine @Inject constructor() {
     suspend fun downloadAllPackages(
         onProgress: suspend (completed: Int, total: Int) -> Unit = { _, _ -> }
     ): Boolean {
+        isBatchCancelled = false
         val supportedCodes = availableLanguagePackages()
             .filter { it.fastSupported }
             .map { it.modelLanguageCode }
@@ -277,6 +323,11 @@ class FastTranslateEngine @Inject constructor() {
             onProgress(completedCount, totalCount)
 
             for (languageCode in missing) {
+                if (isBatchCancelled) {
+                    Log.i(TAG, "ML Kit batch package download cancelled by user")
+                    return false
+                }
+                _currentDownloadingLanguage.value = languageCode
                 val model = TranslateRemoteModel.Builder(languageCode).build()
                 suspendCancellableCoroutine<Unit> { cont ->
                     manager.download(model, conditions)
@@ -290,10 +341,16 @@ class FastTranslateEngine @Inject constructor() {
             }
             true
         } catch (error: Throwable) {
+            if (error is kotlinx.coroutines.CancellationException) {
+                Log.i(TAG, "ML Kit batch package download cancelled")
+                throw error
+            }
             Log.e(TAG, "ML Kit batch package download failed", error)
             false
         } finally {
+            _currentDownloadingLanguage.value = null
             _isDownloading.value = false
+            isBatchCancelled = false
         }
     }
 

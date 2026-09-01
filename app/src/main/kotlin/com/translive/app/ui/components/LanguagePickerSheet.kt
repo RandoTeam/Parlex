@@ -13,6 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.translive.app.R
 import com.translive.app.data.model.Language
@@ -26,6 +27,7 @@ fun LanguagePickerSheet(
     autoOptionLabel: String? = null,
     autoOptionDescription: String? = null,
     isAutoSelected: Boolean = false,
+    showFlags: Boolean = true,
     onAutoSelected: (() -> Unit)? = null,
     onLanguageSelected: (Language) -> Unit,
     onDismiss: () -> Unit
@@ -109,6 +111,7 @@ fun LanguagePickerSheet(
                         LanguageItem(
                             language = lang,
                             isSelected = lang == selectedLanguage,
+                            showFlag = showFlags,
                             onClick = { onLanguageSelected(lang) }
                         )
                     }
@@ -127,6 +130,7 @@ fun LanguagePickerSheet(
                     LanguageItem(
                         language = lang,
                         isSelected = lang == selectedLanguage,
+                        showFlag = showFlags,
                         onClick = { onLanguageSelected(lang) }
                     )
                 }
@@ -182,14 +186,37 @@ private fun AutoLanguageItem(
 private fun LanguageItem(
     language: Language,
     isSelected: Boolean,
+    showFlag: Boolean = true,
     onClick: () -> Unit
 ) {
     ListItem(
         headlineContent = {
-            Text(
-                text = "${language.flag}  ${language.displayName}",
-                style = MaterialTheme.typography.bodyLarge
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (showFlag) {
+                    Text(
+                        text = "${language.flag}  ${language.displayName}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = language.code.uppercase(),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = language.displayName,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+            }
         },
         supportingContent = {
             Text(

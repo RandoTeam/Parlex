@@ -4,6 +4,9 @@ import android.util.Log
 import com.translive.app.data.db.ExchangeRateDao
 import com.translive.app.data.model.ExchangeRateEntity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -26,6 +29,9 @@ class ExchangeRateRepository @Inject constructor(
     private val memoryRates = mutableMapOf<String, Double>()
     private var lastLoadedTime = 0L
 
+    private val _lastUpdatedMillis = kotlinx.coroutines.flow.MutableStateFlow<Long?>(null)
+    val lastUpdatedMillis: kotlinx.coroutines.flow.StateFlow<Long?> = _lastUpdatedMillis.asStateFlow()
+
     companion object {
         private const val TAG = "ExchangeRateRepo"
         const val TTL_MILLIS = 24 * 60 * 60 * 1000L // 24 Hours
@@ -34,6 +40,13 @@ class ExchangeRateRepository @Inject constructor(
     init {
         // Seed immediately from offline baseline
         memoryRates.putAll(ExchangeRateBaseline.RATES_TO_USD)
+    }
+
+    suspend fun getLastUpdatedTimestamp(): Long? = withContext(Dispatchers.IO) {
+        val dbList = exchangeRateDao.getAllRatesList()
+        val ts = dbList.firstOrNull()?.lastUpdatedMillis
+        _lastUpdatedMillis.value = ts
+        ts
     }
 
     suspend fun getRate(fromCurrency: String, toCurrency: String): Double = withContext(Dispatchers.IO) {
@@ -57,19 +70,26 @@ class ExchangeRateRepository @Inject constructor(
 
         try {
             val dbList = exchangeRateDao.getAllRatesList()
+            val lastSync = dbList.firstOrNull()?.lastUpdatedMillis ?: 0L
+            _lastUpdatedMillis.value = if (lastSync > 0) lastSync else null
+
             if (dbList.isNotEmpty()) {
                 synchronized(memoryRates) {
                     for (entity in dbList) {
                         memoryRates[entity.currencyCode] = entity.rateToUsd
                     }
-                    lastLoadedTime = dbList.firstOrNull()?.lastUpdatedMillis ?: System.currentTimeMillis()
+                    lastLoadedTime = lastSync
                 }
             }
 
             val now = System.currentTimeMillis()
-            val isExpired = dbList.isEmpty() || (now - (dbList.firstOrNull()?.lastUpdatedMillis ?: 0L) > TTL_MILLIS)
+            val shouldAutoSync = CurrencySyncEvaluator.shouldSync(
+                policy = settingsRepository.currencySyncPolicy,
+                lastSyncMillis = lastSync,
+                currentMillis = now
+            )
 
-            if (isExpired && settingsRepository.enableCurrencyConversion) {
+            if (shouldAutoSync && settingsRepository.enableCurrencyConversion) {
                 refreshRates()
             }
         } catch (e: Exception) {
@@ -79,9 +99,9 @@ class ExchangeRateRepository @Inject constructor(
 
     suspend fun refreshRates(): Boolean = withContext(Dispatchers.IO) {
         try {
-            val rates = fetchFromFloatRates()
+            val rates = fetchFromFrankfurter()
+                ?: fetchFromFloatRates()
                 ?: fetchFromOpenErApi()
-                ?: fetchFromFrankfurter()
 
             if (rates != null && rates.isNotEmpty()) {
                 val now = System.currentTimeMillis()
@@ -95,6 +115,7 @@ class ExchangeRateRepository @Inject constructor(
                     memoryRates.putAll(rates)
                     lastLoadedTime = now
                 }
+                _lastUpdatedMillis.value = now
                 Log.d(TAG, "Successfully refreshed ${rates.size} live exchange rates")
                 return@withContext true
             }

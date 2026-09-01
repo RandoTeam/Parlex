@@ -300,6 +300,97 @@ Parlex.
 4. [x] Полное соответствие Material 3 Zero-Emoji (включая очистку карточки словаря).
 5. [x] Покрыть модульными тестами (`FastTranslatePackageManagementTest.kt` - 12/12 тестов pass).
 
+
+## Фаза H: Dialogue Voice Recording, Timeline History & Local LLM Session Summary [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: непрерывная фоновая запись аудио диалогов в настраиваемом формате (AAC .m4a 48 кбит/с или несжатый WAV .wav) без конфликтов с микрофоном SpeechEngine/Silero VAD, сохранение метаданных и временных меток реплик в Room DB v5, хронологический таймлайн с аудиоплеером (скраббинг, скорость 1.0x–2.0x, синхронизированный переход к репликам), карточка мультиязычной статистики сессии (слова, символы, CJK, темп чередования спикеров) и локальная генерация структурированного резюме диалога нейросетью LiteRT (Gemma 2 2B).
+
+Шаги:
+
+1. [x] H1: Поддержка форматов записи (`AudioRecordingFormat.kt` - AAC/WAV) и потоковый кодировщик `DialogueAudioRecorder.kt`, перехватывающий 16 кГц PCM из `SpeechEngine.onPcmSamplesRead` без монопольного захвата `AudioRecord`.
+2. [x] H2: Миграция Room DB до версии 5 (`TransLiveDatabase.kt`, `Entities.kt`) с расширенными метаданными `DialogueSession` и `DialogueMessage` (аудио, статистика, резюме).
+3. [x] H3: Настройки записи звука в `SettingsScreen.kt` (тумблер включения и плашки форматов AAC/WAV).
+4. [x] H4: Синхронизированный плеер `DialogueAudioPlayer.kt` и локальный генератор резюме `DialogueSummaryEngine.kt` на базе LiteRT Gemma 2 2B.
+5. [x] H5: Компоненты UI (`DialogueSessionStatsCard.kt`, `DialogueAudioPlayerBar.kt`, `DialogueLlmSummaryCard.kt`) и обновленный `HistoryScreen.kt` с хронологическим таймлайном.
+## Фаза O: Floating Screen Translation UX Overhaul & AR Back Interception [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: полная модернизация плавающей кнопки перевода экрана и AR-оверлея: магнитная корзина удаления (Drag-to-Dismiss) с физикой притяжения и тактильным откликом, перехват аппаратного и жестового «Назад» (Predictive Back Gesture) без блокировки касаний хост-приложения, Liquid Glass редизайн с верхним бликом и векторной пиктограммой `A ⇄ 文` вместо текстовой «Т», адаптивное радиально-линейное меню Material 3 Expressive FAB Menu, полированный AR-оверлей с микро-панелью действий и композитный экспорт скриншотов.
+
+Шаги:
+
+1. [x] O1: Создать `DismissTrashView.kt` и `DragToDismissCalculator.kt` (магнитное притяжение, расчет границ экрана, тактильный тик и удаление сервиса).
+2. [x] O2: Реализовать `ArOverlayBackController.kt` и `ArOverlayWindowFlags.kt`, динамическое переключение `FLAG_NOT_TOUCH_MODAL` / `FLAG_WATCH_OUTSIDE_TOUCH` для перехвата жеста «Назад» без `FLAG_NOT_FOCUSABLE`.
+3. [x] O3: Редизайн `FloatingBubbleView.kt` (Liquid Glass дуга отражения, векторные стрелки перевода, состояние IDLE/SCAN/TRANSLATING).
+4. [x] O4: Интеграция `FabMenuLayoutCalculator.kt` и Material 3 Expressive FAB Menu.
+5. [x] O5 & O6: Полировка AR-оверлея и композитный экспорт (`ScreenTranslationExporter.kt`).
+6. [x] Модульные тесты pure JVM (`DragToDismissTest.kt`, `BackGestureInterceptionTest.kt`, `BubbleAndFabMenuTest.kt` - 100% pass) и верификация на устройстве.
+
+## Фаза V: Multi-Engine STT Architecture & Streaming Transducers [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: переход от моно-модели к мультидвижковой архитектуре распознавания речи: каталог моделей 2026 года (Zipformer streaming per-language, SenseVoice Small INT8 для ZH/EN/JA/KO, Whisper Tiny, Qwen3-ASR 0.6B), динамический селектор движка по активному языку и двухуровневый конвейер распознавания (потоковый 1-й проход + финальное уточнение 2-м проходом).
+
+Шаги:
+
+1. [x] V1-V3: Создать `SttEngineComponents.kt` (`SttEngineType`, `SttEngineDescriptor`, `SttEngineRegistry`, `SttEngineSelector`).
+2. [x] V4: Валидация языкового покрытия (SenseVoice ZH/EN/JA/KO/YUE без RU, Zipformer RU/EN/ZH/VI).
+3. [x] V5: `TwoPassSttPipeline.kt` с накоплением потоковых токенов и финальным уточнением.
+4. [x] Модульные тесты pure JVM (`MultiEngineSttTest.kt` - 100% pass).
+
+## Фаза AI: On-Device Vision LLM & Screen Analysis Pipeline [COMPLETED]
+
+Статус: выполнена (2026-08-31).
+
+Цель: локальный анализ и объяснение происходящего на экране с помощью компактных Vision-Language Models (MiniCPM-V 4.6, SmolVLM-2, Gemma 4 Edge E2B), алгоритм масштабирования изображений под лимиты памяти мобильных чипсетов и генерация структурированных промптов.
+
+Шаги:
+
+1. [x] AI1 & AI4: Создать `VisionLlmComponents.kt` (`VisionLlmModelType`, `VisionLlmModelDescriptor`, `VisionLlmCatalog`).
+2. [x] AI2: Алгоритм `ImageDimensionScaler` для безопасного масштабирования скриншотов с сохранением соотношения сторон.
+3. [x] AI3: `VisionPromptBuilder` для сценариев перевода, детального описания и суммаризации экрана.
+4. [x] AI5: `StreamingTextAccumulator` для потокового вывода ответа с поддержкой отмены.
+## Фаза M: Model Manager 5-Step Overhaul & Fast Translation Offline Sync [COMPLETED]
+
+Статус: выполнена (2026-09-01).
+
+Цель: 5-шаговая иерархическая структура раздела загрузок с единым стандартом прогресса скачивания (EMA сглаживание скорости, байты/сек, ETA), автономным экспортом/импортом моделей быстрого перевода (.parlex-fast), расширением каталога Fast NMT до 59 языков и строгим соответствием Material Design 3 Zero-Emoji.
+
+Шаги:
+
+1. [x] M1: `FastModelSyncComponents.kt` (`ParlexFastManifest`, `FastModelSyncPacker`, `FastModelArchiveValidator` с автономным JSON-парсером).
+2. [x] M2: Расширение `toMlKitLang` в `FastTranslateEngine.kt` до всех 59 языковых констант Google ML Kit Translation.
+3. [x] M3: `DownloadMetricsComponents.kt` (`DownloadMetricsTracker` с EMA альфа=0.25, `UniversalDownloadState`, `DownloadFormatter`).
+4. [x] M4: `UniversalDownloadComponents.kt` (`CircularDownloadButton`, `DownloadProgressRow`, `UniversalDownloadCard`).
+5. [x] M5: Реорганизация `ModelManagerScreen.kt` в 5 последовательных нумерованных разделов:
+   - Шаг 1: `1. Основной ИИ-переводчик (LLM)` (Hy-MT2 1.8B/7B, Gemma 4 LiteRT, TranslateGemma 4B, HY-MT 1.5, управление RAM).
+   - Шаг 2: `2. Быстрый перевод (Fast NMT)` (полный каталог 59 языков, поиск/фильтрация, «Скачать все», экспорт/импорт `.parlex-fast`).
+   - Шаг 3: `3. Голосовой ввод (STT)` (Silero VAD + Whisper Tiny, Qwen3-ASR 0.6B INT8).
+   - Шаг 4: `4. Зрительные модели (Vision & OCR)` (PP-OCRv6 tiny MNN).
+   - Шаг 5: `5. Офлайн-словари и данные` (Travel Packs Hub, встроенный словарь RU ↔ EN).
+## Фаза W: Zero-Latency Screen Translation, Volume Key Decoupling & Offline Pack Hardening [COMPLETED]
+
+Статус: выполнена (2026-09-01).
+
+Цель:
+1. Моментальное извлечение текста с экрана через `AccessibilityNodeInfo` (BFS обход, фильтрация геометрии, дедупликация контейнеров) без задержки и без вызова диалогов записи экрана, с 1-проходным пакетным переводом `FastBatchTranslator` (sentinel разделитель `\n\n<<<§>>>\n\n`) и авто-подгонкой плашек `ArBoundingBoxClusterer`.
+2. Архитектурное разделение кнопок громкости / шортката доступности и плавающей кнопки (`ScreenA11yShortcutBehavior`: `SINGLE_SHOT_NO_BUBBLE` — мгновенный оверлейный перевод без оставления плавающей кнопки vs `TOGGLE_FLOATING_BUBBLE` — переключение плавающей кнопки).
+3. Независимые настройки экранного перевода (синхронизация целевого языка с основным или независимый выбор целевого языка).
+4. Исправление загрузчика офлайн-словарей и Travel Packs (автоматическое скачивание Whisper/VAD STT компонентов вместе с пакетами и отображение спиннера загрузки для индивидуальных пакетов в Шаге 2).
+
+Шаги:
+1. [x] W1: `FastBatchTranslator.kt` с разделителем `\n\n<<<§>>>\n\n` и unit-тестами `FastBatchTranslatorTest.kt`.
+2. [x] W1: `ArBoundingBoxClusterer.kt` с обновленными порогами (`maxVerticalGapFactor = 1.25f`, `minHorizontalOverlapRatio = 0.45f`), JVM test-совместимой геометрией и unit-тестами `ArBoundingBoxClustererTest.kt`.
+3. [x] W1: Внедрение `extractVisibleTextNodesFast(maxNodes = 600)` в `ScreenAccessibilityService.kt` и гибридного 0ms AR-конвейера в `ScreenTranslateOverlayService.kt`.
+4. [x] W2: Настройки поведения шортката `ScreenA11yShortcutBehavior` и языковые маршруты в `SettingsRepository.kt` с unit-тестами `ScreenSettingsTest.kt`.
+5. [x] W2: UI карточка экранного перевода и действий кнопок громкости в `SettingsScreen.kt`.
+6. [x] W3: Исправление индикатора загрузки `isThisDownloading` в `ModelManagerScreen.kt` и автодокачивание STT в `ModelManagerViewModel.kt` / `LanguagePackRepository.kt`.
+7. [x] W-VERIFY: Полная компиляция `:app:compileDebugKotlin`, сборка `:app:assembleDebug`, 100% прохождение unit-тестов.
+
 ## Governance
 
 - Один PR должен решать одну тему.
@@ -307,5 +398,7 @@ Parlex.
   одном PR.
 - Debug CI проверяет качество, но не выпускает APK.
 - Подписанные beta/release APK остаются ручным контролируемым процессом.
+
+
 
 

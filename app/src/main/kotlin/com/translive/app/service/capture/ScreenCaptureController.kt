@@ -13,6 +13,8 @@ import android.os.Process
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
@@ -44,28 +46,30 @@ class ScreenCaptureController {
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
+    private val captureMutex = Mutex()
+    private val isCapturingFlag = AtomicBoolean(false)
+
     var currentMetrics: CaptureDisplayMetrics = CaptureDisplayMetrics(0, 0, 0)
         private set
 
-    private val capturing = AtomicBoolean(false)
     var state: ScreenCaptureState = ScreenCaptureState.UNATTACHED
         private set
 
     val isAttached: Boolean
-        get() = mediaProjection != null
+        get() = mediaProjection != null && state != ScreenCaptureState.RELEASED
 
     val isReady: Boolean
-        get() = state == ScreenCaptureState.READY
+        get() = state == ScreenCaptureState.READY && virtualDisplay != null
 
     val isCapturing: Boolean
-        get() = capturing.get()
+        get() = isCapturingFlag.get()
 
     private var onProjectionStoppedListener: (() -> Unit)? = null
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
             Log.i(TAG, "MediaProjection was terminated by the system")
-            cleanupInternal(releaseProjection = false)
+            cleanupSurfaces()
             mediaProjection = null
             state = ScreenCaptureState.RELEASED
             onProjectionStoppedListener?.invoke()
@@ -94,22 +98,41 @@ class ScreenCaptureController {
             return false
         }
 
-        releaseResources(releaseProjection = true)
-
+        cleanupSurfaces()
         currentMetrics = CaptureDisplayMetrics(width, height, densityDpi)
         mediaProjection = projection
 
         val handler = backgroundHandler ?: return false
         return try {
             projection.registerCallback(projectionCallback, handler)
+            setupPersistentDisplay(width, height, densityDpi)
             state = ScreenCaptureState.READY
-            Log.i(TAG, "Attached MediaProjection: ${width}x${height} @ ${densityDpi}dpi")
+            Log.i(TAG, "Attached MediaProjection and persistent VirtualDisplay: ${width}x${height} @ ${densityDpi}dpi")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to register MediaProjection callback", e)
+            Log.e(TAG, "Failed initializing MediaProjection session", e)
             release()
             false
         }
+    }
+
+    private fun setupPersistentDisplay(width: Int, height: Int, densityDpi: Int) {
+        val handler = backgroundHandler ?: return
+        val proj = mediaProjection ?: return
+
+        val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
+        imageReader = reader
+
+        virtualDisplay = proj.createVirtualDisplay(
+            VIRTUAL_DISPLAY_NAME,
+            width,
+            height,
+            densityDpi,
+            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            reader.surface,
+            null,
+            handler
+        )
     }
 
     /**
@@ -135,6 +158,7 @@ class ScreenCaptureController {
             vd.resize(width, height, densityDpi)
             vd.surface = newReader.surface
 
+            oldReader?.setOnImageAvailableListener(null, null)
             oldReader?.close()
         }
         return true
@@ -145,91 +169,78 @@ class ScreenCaptureController {
     }
 
     /**
-     * Captures a single uncompressed screen frame safely within a coroutine context.
+     * Captures a single uncompressed screen frame safely from the persistent VirtualDisplay.
      * Returns null if projection is detached, capturing times out, or buffer conversion fails.
      */
     suspend fun acquireLatestFrame(timeoutMillis: Long = CAPTURE_TIMEOUT_MS): Bitmap? = withContext(Dispatchers.Default) {
-        val projection = mediaProjection ?: run {
+        if (!isAttached) {
             Log.w(TAG, "acquireLatestFrame aborted: MediaProjection is not attached")
             return@withContext null
         }
 
-        if (!capturing.compareAndSet(false, true)) {
-            Log.w(TAG, "acquireLatestFrame aborted: Capture already in progress")
-            return@withContext null
-        }
-        state = ScreenCaptureState.CAPTURING
+        captureMutex.withLock {
+            if (!isCapturingFlag.compareAndSet(false, true)) {
+                Log.w(TAG, "acquireLatestFrame aborted: Capture already in progress")
+                return@withLock null
+            }
+            state = ScreenCaptureState.CAPTURING
 
-        val width = currentMetrics.width
-        val height = currentMetrics.height
-        val density = currentMetrics.densityDpi
-        val handler = backgroundHandler
+            val reader = imageReader
+            val handler = backgroundHandler
+            val width = currentMetrics.width
+            val height = currentMetrics.height
 
-        if (width <= 0 || height <= 0 || density <= 0 || handler == null) {
-            capturing.set(false)
-            state = if (mediaProjection != null) ScreenCaptureState.READY else ScreenCaptureState.UNATTACHED
-            return@withContext null
-        }
+            if (reader == null || handler == null || width <= 0 || height <= 0) {
+                isCapturingFlag.set(false)
+                state = if (isAttached) ScreenCaptureState.READY else ScreenCaptureState.UNATTACHED
+                return@withLock null
+            }
 
-        var localReader: ImageReader? = null
-        var localDisplay: VirtualDisplay? = null
-
-        try {
-            withTimeoutOrNull(timeoutMillis) {
-                suspendCancellableCoroutine { continuation ->
-                    val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
-                    localReader = reader
-
-                    reader.setOnImageAvailableListener({ source ->
-                        val image = runCatching { source.acquireLatestImage() }.getOrNull()
-                        if (image != null) {
-                            try {
-                                val bitmap = convertImageToBitmap(image, width, height)
-                                if (continuation.isActive) {
-                                    continuation.resume(bitmap)
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed converting image buffer to Bitmap", e)
-                                if (continuation.isActive) {
-                                    continuation.resume(null)
-                                }
-                            } finally {
-                                image.close()
-                            }
-                        }
-                    }, handler)
-
+            try {
+                val immediateImage = runCatching { reader.acquireLatestImage() }.getOrNull()
+                if (immediateImage != null) {
                     try {
-                        localDisplay = projection.createVirtualDisplay(
-                            VIRTUAL_DISPLAY_NAME,
-                            width,
-                            height,
-                            density,
-                            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                            reader.surface,
-                            null,
-                            handler
-                        )
+                        return@withLock convertImageToBitmap(immediateImage, width, height)
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to create VirtualDisplay", e)
-                        if (continuation.isActive) {
-                            continuation.resume(null)
-                        }
-                    }
-
-                    continuation.invokeOnCancellation {
-                        runCatching { reader.setOnImageAvailableListener(null, null) }
-                        runCatching { localDisplay?.release() }
-                        runCatching { reader.close() }
+                        Log.e(TAG, "Failed converting immediate image buffer", e)
+                    } finally {
+                        immediateImage.close()
                     }
                 }
+
+                withTimeoutOrNull(timeoutMillis) {
+                    suspendCancellableCoroutine { continuation ->
+                        reader.setOnImageAvailableListener({ source ->
+                            val image = runCatching { source.acquireLatestImage() }.getOrNull()
+                            if (image != null) {
+                                try {
+                                    val bitmap = convertImageToBitmap(image, width, height)
+                                    if (continuation.isActive) {
+                                        reader.setOnImageAvailableListener(null, null)
+                                        continuation.resume(bitmap)
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e(TAG, "Failed converting image buffer to Bitmap", e)
+                                    if (continuation.isActive) {
+                                        reader.setOnImageAvailableListener(null, null)
+                                        continuation.resume(null)
+                                    }
+                                } finally {
+                                    image.close()
+                                }
+                            }
+                        }, handler)
+
+                        continuation.invokeOnCancellation {
+                            runCatching { reader.setOnImageAvailableListener(null, null) }
+                        }
+                    }
+                }
+            } finally {
+                runCatching { reader.setOnImageAvailableListener(null, null) }
+                isCapturingFlag.set(false)
+                state = if (isAttached) ScreenCaptureState.READY else ScreenCaptureState.UNATTACHED
             }
-        } finally {
-            runCatching { localReader?.setOnImageAvailableListener(null, null) }
-            runCatching { localDisplay?.release() }
-            runCatching { localReader?.close() }
-            capturing.set(false)
-            state = if (mediaProjection != null) ScreenCaptureState.READY else ScreenCaptureState.UNATTACHED
         }
     }
 
@@ -263,43 +274,34 @@ class ScreenCaptureController {
         }
     }
 
-    private fun cleanupVirtualDisplayAndReader() {
+    private fun cleanupSurfaces() {
+        runCatching { imageReader?.setOnImageAvailableListener(null, null) }
         runCatching { virtualDisplay?.release() }
         virtualDisplay = null
         runCatching { imageReader?.close() }
         imageReader = null
     }
 
-    private fun cleanupInternal(releaseProjection: Boolean) {
-        cleanupVirtualDisplayAndReader()
-        if (releaseProjection) {
-            val proj = mediaProjection
-            mediaProjection = null
-            if (proj != null) {
-                runCatching { proj.unregisterCallback(projectionCallback) }
-                runCatching { proj.stop() }
-            }
-        }
-    }
-
     @Synchronized
     fun release() {
-        releaseResources(releaseProjection = true)
+        cleanupSurfaces()
+        val proj = mediaProjection
+        mediaProjection = null
+        if (proj != null) {
+            runCatching { proj.unregisterCallback(projectionCallback) }
+            runCatching { proj.stop() }
+        }
         state = ScreenCaptureState.RELEASED
+        isCapturingFlag.set(false)
         backgroundThread?.quitSafely()
         backgroundThread = null
         backgroundHandler = null
-        Log.i(TAG, "ScreenCaptureController released")
-    }
-
-    private fun releaseResources(releaseProjection: Boolean) {
-        cleanupInternal(releaseProjection)
-        capturing.set(false)
+        Log.i(TAG, "ScreenCaptureController completely released")
     }
 
     companion object {
         private const val TAG = "ScreenCaptureController"
-        private const val VIRTUAL_DISPLAY_NAME = "ParlexCaptureDisplay"
-        private const val CAPTURE_TIMEOUT_MS = 3000L
+        private const val VIRTUAL_DISPLAY_NAME = "ParlexPersistentDisplay"
+        private const val CAPTURE_TIMEOUT_MS = 2500L
     }
 }

@@ -32,18 +32,36 @@ open class SettingsRepository @Inject constructor(
         private const val KEY_CAMERA_SOURCE_LANGUAGE = "camera_source_language"
         private const val KEY_CAMERA_SOURCE_AUTO = "camera_source_auto"
         private const val KEY_CAMERA_TARGET_LANGUAGE = "camera_target_language"
+        private const val KEY_SCREEN_SOURCE_LANGUAGE = "screen_source_language"
+        private const val KEY_SCREEN_SOURCE_AUTO = "screen_source_auto"
+        private const val KEY_SCREEN_TARGET_LANGUAGE = "screen_target_language"
+        private const val KEY_SCREEN_SYNC_TARGET_WITH_MAIN = "screen_sync_target_with_main"
+        private const val KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR = "screen_a11y_shortcut_behavior"
         private const val KEY_DIALOGUE_SOURCE_LANGUAGE = "dialogue_source_language"
         private const val KEY_DIALOGUE_TARGET_LANGUAGE = "dialogue_target_language"
+        private const val KEY_DIALOGUE_AUTO_SPEAK = "dialogue_auto_speak"
+        private const val KEY_DIALOGUE_RECORDING_ENABLED = "dialogue_recording_enabled"
+        private const val KEY_DIALOGUE_AUDIO_FORMAT = "dialogue_audio_format"
         private const val KEY_SPEECH_MODEL = "speech_model"
         private const val KEY_APP_LANGUAGE = "app_language"
         private const val KEY_HOME_CURRENCY_CODE = "home_currency_code"
         private const val KEY_ENABLE_CURRENCY_CONVERSION = "enable_currency_conversion"
+        private const val KEY_CURRENCY_SYNC_POLICY = "currency_sync_policy"
+        private const val KEY_OVERLAY_STYLE = "camera_overlay_style"
+
+        const val OVERLAY_STYLE_DARK = "dark_blocks"
+        const val OVERLAY_STYLE_INPAINTING = "inpainting"
 
         const val BACKEND_CPU = "cpu"
         const val BACKEND_GPU = "gpu"
 
         const val SPEECH_MODEL_WHISPER_TINY = "whisper_tiny"
         const val SPEECH_MODEL_QWEN3_ASR_06B = "qwen3_asr_0_6b"
+
+        const val KEY_TRANSLATION_MODE = "translation_mode"
+        const val TRANSLATION_MODE_FAST_ONLY = "fast_only"
+        const val TRANSLATION_MODE_FAST_IMPROVE = "fast_improve"
+        const val TRANSLATION_MODE_LLM_DIRECT = "llm_direct"
 
         val THREAD_OPTIONS = listOf(1, 2, 3, 4, 6, 8)
         val TIMEOUT_OPTIONS = listOf(0, 1, 2, 5, 10, 30) // 0 = never unload
@@ -77,7 +95,7 @@ open class SettingsRepository @Inject constructor(
         get() = prefs?.getBoolean(KEY_TEXT_SOURCE_AUTO, false) ?: false
         set(value) = prefs?.edit()?.putBoolean(KEY_TEXT_SOURCE_AUTO, value)?.apply() ?: Unit
 
-    var textTargetLanguage: Language
+    open var textTargetLanguage: Language
         get() = getLanguage(KEY_TEXT_TARGET_LANGUAGE, Language.ENGLISH)
         set(value) = prefs?.edit()?.putString(KEY_TEXT_TARGET_LANGUAGE, value.code)?.apply() ?: Unit
 
@@ -96,9 +114,37 @@ open class SettingsRepository @Inject constructor(
         get() = prefs?.getBoolean(KEY_SHOW_TRANSLITERATION, true) ?: true
         set(value) = prefs?.edit()?.putBoolean(KEY_SHOW_TRANSLITERATION, value)?.apply() ?: Unit
 
+    open var translationMode: String
+        get() {
+            val persisted = prefs?.getString(KEY_TRANSLATION_MODE, null)
+            if (persisted != null) return persisted
+            return when (translationPolicy) {
+                TranslationPolicy.FAST -> TRANSLATION_MODE_FAST_ONLY
+                TranslationPolicy.LLM_ONLY -> TRANSLATION_MODE_LLM_DIRECT
+                TranslationPolicy.FAST_WITH_LLM_IMPROVE -> TRANSLATION_MODE_FAST_IMPROVE
+            }
+        }
+        set(value) {
+            prefs?.edit()?.putString(KEY_TRANSLATION_MODE, value)?.apply()
+            val mappedPolicy = when (value) {
+                TRANSLATION_MODE_FAST_ONLY -> TranslationPolicy.FAST
+                TRANSLATION_MODE_LLM_DIRECT -> TranslationPolicy.LLM_ONLY
+                else -> TranslationPolicy.FAST_WITH_LLM_IMPROVE
+            }
+            prefs?.edit()?.putString(KEY_TRANSLATION_POLICY, mappedPolicy.persistedValue)?.apply()
+        }
+
     var translationPolicy: TranslationPolicy
         get() = TranslationPolicy.fromPersisted(prefs?.getString(KEY_TRANSLATION_POLICY, null))
-        set(value) = prefs?.edit()?.putString(KEY_TRANSLATION_POLICY, value.persistedValue)?.apply() ?: Unit
+        set(value) {
+            prefs?.edit()?.putString(KEY_TRANSLATION_POLICY, value.persistedValue)?.apply()
+            val mappedMode = when (value) {
+                TranslationPolicy.FAST -> TRANSLATION_MODE_FAST_ONLY
+                TranslationPolicy.LLM_ONLY -> TRANSLATION_MODE_LLM_DIRECT
+                TranslationPolicy.FAST_WITH_LLM_IMPROVE -> TRANSLATION_MODE_FAST_IMPROVE
+            }
+            prefs?.edit()?.putString(KEY_TRANSLATION_MODE, mappedMode)?.apply()
+        }
 
     var cameraSourceLanguage: Language
         get() = getLanguage(KEY_CAMERA_SOURCE_LANGUAGE, Language.RUSSIAN)
@@ -120,6 +166,21 @@ open class SettingsRepository @Inject constructor(
         get() = getLanguage(KEY_DIALOGUE_TARGET_LANGUAGE, Language.ENGLISH)
         set(value) = prefs?.edit()?.putString(KEY_DIALOGUE_TARGET_LANGUAGE, value.code)?.apply() ?: Unit
 
+    /** Automatically speak translations in continuous voice dialogue. Default: true. */
+    open var dialogueAutoSpeak: Boolean
+        get() = prefs?.getBoolean(KEY_DIALOGUE_AUTO_SPEAK, true) ?: true
+        set(value) = prefs?.edit()?.putBoolean(KEY_DIALOGUE_AUTO_SPEAK, value)?.apply() ?: Unit
+
+    /** Enable audio recording during continuous dialogue sessions. Default: false. */
+    open var dialogueRecordingEnabled: Boolean
+        get() = prefs?.getBoolean(KEY_DIALOGUE_RECORDING_ENABLED, false) ?: false
+        set(value) = prefs?.edit()?.putBoolean(KEY_DIALOGUE_RECORDING_ENABLED, value)?.apply() ?: Unit
+
+    /** Format for dialogue audio recordings (AAC or WAV). Default: AAC (.m4a). */
+    open var dialogueAudioFormat: com.translive.app.data.model.AudioRecordingFormat
+        get() = com.translive.app.data.model.AudioRecordingFormat.fromId(prefs?.getString(KEY_DIALOGUE_AUDIO_FORMAT, com.translive.app.data.model.AudioRecordingFormat.AAC.id))
+        set(value) = prefs?.edit()?.putString(KEY_DIALOGUE_AUDIO_FORMAT, value.id)?.apply() ?: Unit
+
     /** The speech model explicitly selected in Models. Whisper stays the small, fast default. */
     var speechModel: String
         get() = when (prefs?.getString(KEY_SPEECH_MODEL, SPEECH_MODEL_WHISPER_TINY)) {
@@ -138,8 +199,53 @@ open class SettingsRepository @Inject constructor(
         get() = prefs?.getBoolean(KEY_ENABLE_CURRENCY_CONVERSION, true) ?: true
         set(value) = prefs?.edit()?.putBoolean(KEY_ENABLE_CURRENCY_CONVERSION, value)?.apply() ?: Unit
 
+    /** Currency synchronization policy: DAILY, ON_LAUNCH, or MANUAL */
+    open var currencySyncPolicy: com.translive.app.data.model.CurrencySyncPolicy
+        get() = com.translive.app.data.model.CurrencySyncPolicy.fromId(prefs?.getString(KEY_CURRENCY_SYNC_POLICY, null))
+        set(value) = prefs?.edit()?.putString(KEY_CURRENCY_SYNC_POLICY, value.id)?.apply() ?: Unit
+
+    var overlayStyle: String
+        get() = prefs?.getString(KEY_OVERLAY_STYLE, OVERLAY_STYLE_DARK) ?: OVERLAY_STYLE_DARK
+        set(value) { prefs?.edit()?.putString(KEY_OVERLAY_STYLE, value)?.apply() }
+
+    open var screenSyncTargetWithMain: Boolean
+        get() = prefs?.getBoolean(KEY_SCREEN_SYNC_TARGET_WITH_MAIN, true) ?: true
+        set(value) = prefs?.edit()?.putBoolean(KEY_SCREEN_SYNC_TARGET_WITH_MAIN, value)?.apply() ?: Unit
+
+    open var screenTargetLanguage: Language
+        get() = getLanguage(KEY_SCREEN_TARGET_LANGUAGE, Language.RUSSIAN)
+        set(value) = prefs?.edit()?.putString(KEY_SCREEN_TARGET_LANGUAGE, value.code)?.apply() ?: Unit
+
+    open var screenSourceLanguage: Language
+        get() = getLanguage(KEY_SCREEN_SOURCE_LANGUAGE, Language.ENGLISH)
+        set(value) = prefs?.edit()?.putString(KEY_SCREEN_SOURCE_LANGUAGE, value.code)?.apply() ?: Unit
+
+    open var isScreenSourceAuto: Boolean
+        get() = prefs?.getBoolean(KEY_SCREEN_SOURCE_AUTO, true) ?: true
+        set(value) = prefs?.edit()?.putBoolean(KEY_SCREEN_SOURCE_AUTO, value)?.apply() ?: Unit
+
+    val effectiveScreenTargetLanguage: Language
+        get() = if (screenSyncTargetWithMain) textTargetLanguage else screenTargetLanguage
+
+    open var screenA11yShortcutBehavior: ScreenA11yShortcutBehavior
+        get() = ScreenA11yShortcutBehavior.fromId(prefs?.getString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, null))
+        set(value) = prefs?.edit()?.putString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, value.id)?.apply() ?: Unit
+
     private fun getLanguage(key: String, default: Language): Language {
         val code = prefs?.getString(key, null) ?: return default
         return Language.entries.find { it.code == code } ?: default
     }
 }
+
+enum class ScreenA11yShortcutBehavior(val id: String) {
+    /** Instant AR translation overlay without leaving floating bubble */
+    SINGLE_SHOT_NO_BUBBLE("single_shot_no_bubble"),
+    /** Toggles the persistent floating button on the screen edge */
+    TOGGLE_FLOATING_BUBBLE("toggle_floating_bubble");
+
+    companion object {
+        fun fromId(id: String?): ScreenA11yShortcutBehavior =
+            entries.find { it.id == id } ?: SINGLE_SHOT_NO_BUBBLE
+    }
+}
+

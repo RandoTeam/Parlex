@@ -83,11 +83,25 @@ struct TransLiveContext {
     std::string gpu_device;
 };
 
+static void translive_log_callback(enum ggml_log_level level, const char* text, void* /*user_data*/) {
+    if (!text || text[0] == '\0') return;
+    int prio = ANDROID_LOG_INFO;
+    switch (level) {
+        case GGML_LOG_LEVEL_ERROR: prio = ANDROID_LOG_ERROR; break;
+        case GGML_LOG_LEVEL_WARN:  prio = ANDROID_LOG_WARN; break;
+        case GGML_LOG_LEVEL_INFO:  prio = ANDROID_LOG_INFO; break;
+        case GGML_LOG_LEVEL_DEBUG: prio = ANDROID_LOG_DEBUG; break;
+        default:                   prio = ANDROID_LOG_INFO; break;
+    }
+    __android_log_print(prio, "TransLive-LLAMA", "%s", text);
+}
+
 static void ensure_backend_initialized() {
     static std::once_flag s_init_flag;
     std::call_once(s_init_flag, []() {
+        llama_log_set(translive_log_callback, nullptr);
         llama_backend_init();
-        LOGI("llama backend initialized");
+        LOGI("llama backend initialized with Android logcat bridge");
     });
 }
 

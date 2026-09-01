@@ -34,6 +34,8 @@ import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.DictionaryPopup
 import com.translive.app.ui.components.LanguagePickerSheet
+import com.translive.app.ui.components.TranslationModeBadge
+import com.translive.app.ui.components.TranslationQuickToolsRow
 import com.translive.app.ui.theme.Teal
 import com.translive.app.ui.viewmodel.TranslationViewModel
 
@@ -53,6 +55,7 @@ fun TranslationScreen(
     viewModel: TranslationViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val isOverlayRunning by com.translive.app.service.ScreenTranslateOverlayService.isServiceRunning.collectAsState()
     val clipboardManager = LocalClipboardManager.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -108,8 +111,10 @@ fun TranslationScreen(
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Header
-            Box(
+            val isTypingOrTranslated = uiState.sourceText.isNotBlank() || uiState.translatedText.isNotBlank()
+
+            // Header Row: Quick Tools migrate to the LEFT when typing/translated, 'Parlex' title on the RIGHT
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(
@@ -120,8 +125,44 @@ fun TranslationScreen(
                             )
                         )
                     )
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                // 2 Quick Tools: Appear on the LEFT when typing or translated
+                AnimatedVisibility(
+                    visible = isTypingOrTranslated,
+                    enter = fadeIn() + expandHorizontally(),
+                    exit = fadeOut() + shrinkHorizontally()
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(
+                            onClick = onStartScreenOverlay,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Layers,
+                                contentDescription = stringResource(R.string.screen_translate_title),
+                                tint = if (isOverlayRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        IconButton(
+                            onClick = onNavigateToDocument,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.PictureAsPdf,
+                                contentDescription = stringResource(R.string.document_translate_title),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+
                 Text(
                     text = "Parlex",
                     style = MaterialTheme.typography.headlineLarge,
@@ -136,7 +177,7 @@ fun TranslationScreen(
                 onSourceClick = { showSourceLangPicker = true },
                 onTargetClick = { showTargetLangPicker = true },
                 onSwap = { viewModel.swapLanguages() },
-                swapEnabled = !uiState.isSourceAuto,
+                swapEnabled = !uiState.isSourceAuto || uiState.detectedSourceLanguage != null,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
@@ -224,7 +265,7 @@ fun TranslationScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
                     .height(52.dp),
-                enabled = uiState.sourceText.isNotBlank() && !uiState.isTranslating && !uiState.isModelLoading && !uiState.isImprovingWithLlm,
+                enabled = uiState.sourceText.isNotBlank() && !uiState.isTranslating && !uiState.isImprovingWithLlm,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
@@ -245,36 +286,17 @@ fun TranslationScreen(
                 }
             }
 
-            OutlinedButton(
-                onClick = onRequestScreenCapture,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                shape = RoundedCornerShape(14.dp)
+            // Quick Tools Row (Adaptive collapse when typing or translation is present)
+            AnimatedVisibility(
+                visible = !isTypingOrTranslated,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
             ) {
-                Text(stringResource(R.string.screen_translate_action))
-            }
-
-            OutlinedButton(
-                onClick = onStartScreenOverlay,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Text(stringResource(R.string.screen_translate_overlay_action))
-            }
-
-            OutlinedButton(
-                onClick = onNavigateToDocument,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Filled.PictureAsPdf, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Перевод документов (PDF)")
+                TranslationQuickToolsRow(
+                    onToggleScreenOverlay = onStartScreenOverlay,
+                    onNavigateToDocument = onNavigateToDocument,
+                    isOverlayRunning = isOverlayRunning
+                )
             }
 
             // Model loading indicator
@@ -314,6 +336,37 @@ fun TranslationScreen(
                 }
             }
 
+            // LLM improve unavailable subtle info hint (Zero-Emoji, non-blocking)
+            if (uiState.error == null && uiState.llmImproveUnavailableReason != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = uiState.llmImproveUnavailableReason!!,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Translation result card
@@ -332,24 +385,14 @@ fun TranslationScreen(
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        // Mode badge
-                        if (uiState.isFastResult) {
-                            Row(
-                                modifier = Modifier.padding(bottom = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    shape = RoundedCornerShape(4.dp)
-                                ) {
-                                    Text(
-                                        text = "⚡ NMT",
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                                    )
-                                }
-                            }
+                        // Header Row: Top-Left Minimalist Mode Badge (Zero-Emoji)
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TranslationModeBadge(uiState = uiState)
                         }
                         Text(
                             text = uiState.translatedText,
