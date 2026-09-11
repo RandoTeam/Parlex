@@ -245,7 +245,8 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 
 ### 💖 Donation & Sponsorship Channels
 
-#### 🪙 Direct Cryptocurrency
+#### 🪙 Worldwide Support (Direct Cryptocurrency)
+*Decentralized, zero tracking, works globally.*
 
 | Asset | Network | Address |
 | :--- | :--- | :--- |
@@ -253,10 +254,11 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 | **TON** | TON Network | `EQB_parlex_support_developer_channel` |
 | **Bitcoin (BTC)** | Native SegWit | `bc1qparlexsolodeveloperhardwarefund` |
 
-#### 💳 Crowdfunding & Sponsorship
-- **Boosty**: [boosty.to/parlex](https://boosty.to/parlex)
-- **CloudTips / Tinkoff / SBP**: [pay.cloudtips.ru/p/parlex](https://pay.cloudtips.ru)
-- **GitHub Sponsors**: [github.com/sponsors/RandoTeam](https://github.com/sponsors/RandoTeam)
+#### 💳 Direct Banking & Regional Transfers
+- **T-Bank Money Collection** *(Russia & CIS / SBP & Cards)*: [www.tbank.ru/cf/9YuuZydrQlI](https://www.tbank.ru/cf/9YuuZydrQlI)  
+  *Direct 1-click transfer via Fast Payments System (SBP) or Russian bank cards.*
+- **Kaspi Bank** *(Kazakhstan & Central Asia)*: `+7 707 390-30-49`  
+  *Direct transfer via Kaspi Gold by phone number.*
 
 ---
 
