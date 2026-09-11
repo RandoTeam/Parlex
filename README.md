@@ -1,10 +1,10 @@
 ﻿<div align="center">
 
-<img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="128" height="128" alt="Parlex Logo" />
+<img src="docs/assets/parlex_logo.png" width="128" height="128" alt="Parlex Logo" />
 
 # Parlex
 
-**Next-Generation On-Device Neural Translation & AR Screen Intelligence for Android**
+**Next-Generation On-Device Neural Translation & AI Intelligence for Android**
 
 *100% Local Neural Inference • Zero Network Calls • Zero Telemetry • Complete Privacy*
 
@@ -61,27 +61,28 @@
 1. **100% Offline & Sovereign**: Operates seamlessly in airplane mode, remote regions, or high-security facilities. Zero network requests during translation.
 2. **Zero Telemetry**: No trackers, no user analytics, no logging of translated phrases or audio.
 3. **Instant Latency & Scalability**: Microsecond Fast NMT for daily instant interactions combined with full-parameter 1.8B/7B LLMs for complex, context-aware translation.
-4. **Transparent Asset Management**: Complete transparency regarding model origin, open-source licensing, memory bounds, and download integrity.
+4. **Complete Technical Transparency**: Honest, non-inflated feature status reporting across all modules.
 
 ---
 
 ## Feature Status Matrix
 
-| Feature Domain | Module / Implementation | Status | Description |
+To avoid false expectations, Parlex maintains an honest, transparent breakdown of what is fully reliable versus what is experimental or undergoing active refactoring:
+
+| Feature Domain | Module / Implementation | Status | Realistic Current State |
 | :--- | :--- | :---: | :--- |
-| **Text Translation** | `TranslationScreen.kt` | 🟢 **Stable** | Source auto-detection, bidirectional persistence, one-tap clipboard copy, TTS voice output, Room DB v5 history with favorites. |
-| **Voice Dialogue** | `DialogueScreen.kt` | 🟢 **Stable** | Hands-free continuous loop, synchronized dual-speaker waveform visualizer, AAC 48 kbps / 16-bit PCM WAV background recording, scrub/seek timeline (1.0x–2.0x), CJK & bilingual analytics card. |
-| **Model Management** | `ModelManagerScreen.kt` | 🟢 **Stable** | 5-step numbered offline downloads hierarchy, EMA-smoothed download metrics (speed, ETA, bytes), and `.parlex-fast` single-file catalog import/export. |
-| **Transliteration** | `IcuTransliterator.kt` | 🟢 **Stable** | Fully offline romanization for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul. |
-| **Offline Lexicon** | `TransLiveDatabase.kt` | 🟢 **Stable** | Fast grammatical dictionary lookups and offline TSV lexicon import. |
-| **Currency Converter** | `ExchangeRateRepository.kt` | 🟢 **Stable** | Real-time on-screen currency detection (`$`, `€`, `₫`, `₽`) with baseline offline conversion. |
-| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟡 **Beta** | Zero-latency direct `AccessibilityNodeInfo` BFS extraction (0ms on native apps, bypassing MediaProjection dialogue), 1-pass delimited batch translation (`FastBatchTranslator`), and in-place AR text replacement (`ArBoundingBoxClusterer`). |
-| **Hardware Key Trigger** | `ScreenAccessibilityService.kt` | 🟡 **Beta** | Decoupled volume key / shortcut triggers (`SINGLE_SHOT_NO_BUBBLE` for instant AR overlay without persistent bubble vs `TOGGLE_FLOATING_BUBBLE`). |
-| **Camera Travel Mode** | `CameraScreen.kt` | 🟡 **Beta** | Live CameraX capture, 2-stage OCR box clustering, luminance-aware gradient inpainting, interactive inspection sheet, and dietary allergen classification across 33 languages. |
-| **Floating HUD** | `MiniOverlayHudView.kt` | 🟡 **Beta** | Expandable docked HUD with Fast NMT vs Smart LLM toggle, quick language carousel, and one-tap screenshot export to `Pictures/Parlex/`. |
-| **LiteRT-LM Engine** | `LiteRtTranslationEngine.kt` | 🟠 **Experimental** | Google LiteRT-LM GPU runtime for Gemma 4 models (E2B / E4B). |
-| **Multimodal Vision LLM** | `VisionLlmComponents.kt` | 🟠 **Experimental** | On-device visual understanding via MiniCPM-V 4.6 (1.3B INT4), SmolVLM-2 (500M INT4), and Gemma 4 Edge E2B (2.0B INT4) for layout analysis. |
-| **AngelSlim Dequant** | `ggml-angelslim.c` (R&D) | 🟠 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim proprietary 1.25-bit (~440 MB) and 2-bit (~573 MB) weights. |
+| **Text Translation** | `TranslationScreen.kt` | 🟢 **Stable** | **Production-ready.** Automatic source language detection, persistent bidirectional language selection, one-tap clipboard copy, TTS voice playback, and SQLite Room DB v5 history with favorites. |
+| **Model Management** | `ModelManagerScreen.kt` | 🟢 **Stable** | **Production-ready.** 5-step numbered offline downloads hierarchy, EMA-smoothed download metrics (speed, ETA, bytes), and `.parlex-fast` single-file catalog import/export. |
+| **Transliteration** | `IcuTransliterator.kt` | 🟢 **Stable** | **Production-ready.** Fully offline romanization/transliteration for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul. |
+| **Offline Lexicon** | `TransLiveDatabase.kt` | 🟢 **Stable** | **Production-ready.** Fast grammatical dictionary lookups and offline TSV lexicon import. |
+| **Currency Converter** | `ExchangeRateRepository.kt` | 🟢 **Stable** | **Production-ready.** Real-time on-screen currency regex detection (`$`, `€`, `₫`, `₽`) with baseline offline conversion. |
+| **Voice Dialogue** | `DialogueScreen.kt` | 🟡 **Beta** | **Functional, undergoing acoustic tuning.** Two-way speech flow with Silero VAD turn detection, background audio recording (AAC 48 kbps / 16-bit PCM WAV), audio playback timeline with scrub/seek (1.0x–2.0x), and hardware AEC echo cancellation guard. Background noise suppression and CJK speech calibration are in progress. |
+| **Floating HUD** | `MiniOverlayHudView.kt` | 🟡 **Beta** | **Functional.** Docked edge controls with Fast NMT vs Smart LLM toggle, quick language carousel, and one-tap screenshot export to `Pictures/Parlex/`. |
+| **Camera & Photo Translation** | `CameraScreen.kt` | 🟠 **Alpha (Partial)** | **Partially working.** Live CameraX capture and printed document translation work well under clear lighting; struggles with low light, reflections, curved surfaces, and cursive handwriting. Requires OCR bounding-box stabilization. |
+| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🔴 **Prototype / Scaffold** | **Early scaffold — NOT ready for daily use.** While system services, accessibility bindings, and UI overlay windows launch successfully, the current node traversal and bounding box clusterer frequently scramble text or return garbled output ("каша"). Undergoing fundamental architectural reconstruction in Phase X. |
+| **LiteRT-LM Engine** | `LiteRtTranslationEngine.kt` | 🔴 **Experimental** | Google LiteRT-LM GPU runtime for Gemma 4 models (E2B / E4B). |
+| **Multimodal Vision LLMs** | `VisionLlmComponents.kt` | 🔴 **Experimental** | Research prototypes for MiniCPM-V 4.6, SmolVLM-2, and Gemma 4 Edge screen comprehension. |
+| **AngelSlim Dequant** | `ggml-angelslim.c` (R&D) | 🔴 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim proprietary 1.25-bit (~440 MB) and 2-bit (~573 MB) weights. |
 | **Snapdragon NPU Offload**| Qualcomm QNN / LiteRT NPU | 🔵 **Roadmap** | Direct neural offload to Qualcomm Hexagon Tensor Accelerator for cool, zero-throttling, battery-efficient inference. |
 
 ---
@@ -93,7 +94,7 @@ Parlex uses a multi-tier neural architecture. Models are downloaded on demand or
 ### 1. Fast NMT Engine (Google ML Kit CDN • On-Device)
 - **Profile**: ~30 ms inference latency, 0 MB LLM RAM consumption.
 - **Language Support**: **59 languages** covering Europe, the Americas, Asia, and the Middle East.
-- **Packaging**: Single-file `.parlex-fast` archive import/export with SHA-256 integrity verification.
+- **Offline Portability**: Single-file `.parlex-fast` archive import/export allows sharing complete translation packs directly between devices without internet access (via Bluetooth or local storage).
 - **License**: Apache 2.0 / Google ML Kit Terms of Service.
 
 ### 2. Primary Neural LLM Translators (llama.cpp GGUF)
@@ -108,9 +109,9 @@ Tencent's translation-specialized models are trained specifically for cross-ling
 | **Hy-MT2 Quality**| 7B | `Q4_K_M` ⭐ | 4.62 GB | ~6.5 GB | [tencent/Hy-MT2-7B-GGUF](https://huggingface.co/tencent/Hy-MT2-7B-GGUF) | Apache 2.0 |
 
 > **Quantization Guide for Mobile Devices:**
-> - `Q4_K_M` **(Recommended)**: The sweet spot for mobile RAM and execution speed. Delivers >98% of FP16 translation accuracy while running comfortably on phones with 8 GB+ RAM.
-> - `Q6_K` / `Q8_0` **(Premium / High Accuracy)**: Best for flagship devices with 12 GB–16 GB RAM where zero quantization loss is prioritized.
-> - `1.25bit` / `2bit` **(AngelSlim - R&D)**: Ultra-compact research models from Tencent. Standard GGML parsers reject these due to custom tensor types; Parlex is developing dedicated dequantization kernels for future releases.
+> - `Q4_K_M` **(Recommended for Daily Use)**: The proven sweet spot for mobile RAM and execution speed. Delivers >98% of FP16 translation accuracy while running comfortably on phones with 8 GB+ RAM.
+> - `Q6_K` / `Q8_0` **(Flagship Precision)**: Best suited for flagship devices with 12 GB–16 GB RAM where zero quantization loss is prioritized.
+> - `1.25bit` / `2bit` **(AngelSlim - Experimental R&D)**: Ultra-compact research models from Tencent. Standard GGML parsers reject these due to non-standard tensor structures; Parlex is actively researching dedicated dequantization kernels for future releases.
 
 #### Google TranslateGemma Family
 Specialized translation models derived from Google's Gemma architecture, optimized for 55 languages.
@@ -123,6 +124,13 @@ Specialized translation models derived from Google's Gemma architecture, optimiz
 - **Whisper Tiny (OpenAI / sherpa-onnx)**: Universal 99-language multilingual ASR (~75 MB).
 - **Qwen3-ASR 0.6B INT8**: High-accuracy compact speech model.
 - **Silero VAD**: Enterprise-grade Voice Activity Detection for clean, automatic speech turn segmentation.
+
+### 4. 1-Click Offline Travel Packs (Step 5)
+In the Model Manager, **Step 5 Travel Packs** provide unified 1-click bundles combining:
+1. Fast NMT translation model
+2. Bilingual offline grammar lexicon
+3. Whisper / SenseVoice STT offline voice recognition
+Available for high-frequency travel pairs: RU-EN, ZH-EN, VI-EN, ES-EN, JA-EN, DE-EN, and FR-EN.
 
 ---
 
@@ -147,7 +155,7 @@ Parlex features an adaptive hardware profiling engine (`AdrenoProfileRegistry.kt
 - **Memory Safety**: Queries `/proc/meminfo` (`MemAvailable`) dynamically prior to allocation to prevent Android Low Memory Killer (`LMK`) events.
 
 ### The Future: Qualcomm Hexagon NPU Offloading
-While GPU acceleration provides high throughput, prolonged conversational translation or continuous screen tracking on mobile GPUs consumes between 4W and 7W of power, causing device warming and battery drain.
+While GPU acceleration provides high throughput, prolonged conversational translation on mobile GPUs consumes between 4W and 7W of power, causing device warming and battery drain.
 
 **The NPU Architectural Plan:**
 1. **Hexagon Tensor Accelerator (HTA) Integration**: Native integration with the **Qualcomm AI Engine Direct (QNN) SDK** to execute neural weights directly on the Hexagon NPU.
