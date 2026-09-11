@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 <img src="docs/assets/parlex_logo.png" width="128" height="128" alt="Parlex Logo" />
 
@@ -113,19 +113,33 @@ Tencent's translation-specialized models are trained specifically for cross-ling
 > - `Q6_K` / `Q8_0` **(Flagship Precision)**: Best suited for flagship devices with 12 GB–16 GB RAM where zero quantization loss is prioritized.
 > - `1.25bit` / `2bit` **(AngelSlim - Experimental R&D)**: Ultra-compact research models from Tencent. Standard GGML parsers reject these due to non-standard tensor structures; Parlex is actively researching dedicated dequantization kernels for future releases.
 
-#### Google TranslateGemma Family
-Specialized translation models derived from Google's Gemma architecture, optimized for 55 languages.
-- **TranslateGemma 4B GGUF**: Quantizations from `Q2_K` up to `Q8_0` (`Q4_K_M` recommended: ~2.49 GB, ~3.2 GB RAM). Source: [mradermacher/translategemma-4b-it-GGUF](https://huggingface.co/mradermacher/translategemma-4b-it-GGUF). License: Gemma Terms of Use.
-- **Gemma 4 LiteRT-LM**: GPU-optimized `.litertlm` bundles (`E2B` ~2.0 GB, `E4B` ~3.66 GB). Source: [litert-community/gemma-4-E2B-it-litert-lm](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm). License: Apache 2.0.
+#### Google TranslateGemma & Gemma 4 Family
+Specialized translation models derived from Google's Gemma architecture, optimized for high-fidelity translation across 55 languages with official GGUF and LiteRT-LM GPU runtimes.
+
+| Model | Parameters | Recommended Quant / Format | Download Size | Est. RAM | Official Source | License |
+| :--- | :---: | :---: | :---: | :---: | :--- | :--- |
+| **TranslateGemma** | 4B | `Q4_K_M` ⭐ | 2.49 GB | ~3.2 GB | [mradermacher/translategemma-4b-it-GGUF](https://huggingface.co/mradermacher/translategemma-4b-it-GGUF) | Gemma Terms of Use |
+| **Gemma 4 E2B** | 2B | `GPU LiteRT (.litertlm)` ⭐ | 2.01 GB | ~3.0 GB | [litert-community/gemma-4-E2B-it-litert-lm](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) | Apache 2.0 |
+| **Gemma 4 E4B** | 4B | `QAT INT4/INT8 (.litertlm)` | 3.66 GB | ~4.0 GB | [litert-community/gemma-4-E4B-it-litert-lm](https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm) | Apache 2.0 |
 
 ### 3. Speech Recognition (STT) & Audio Perception
-- **Zipformer Transducer (sherpa-onnx)**: True real-time streaming speech recognition (~50–95 MB per language pack).
-- **SenseVoice-Small INT8**: Ultra-fast multilingual offline recognition (ZH, EN, JA, KO, YUE).
-- **Whisper Tiny (OpenAI / sherpa-onnx)**: Universal 99-language multilingual ASR (~75 MB).
-- **Qwen3-ASR 0.6B INT8**: High-accuracy compact speech model.
-- **Silero VAD**: Enterprise-grade Voice Activity Detection for clean, automatic speech turn segmentation.
 
-### 4. 1-Click Offline Travel Packs (Step 5)
+| Engine / Model | Primary Task | Language Coverage | Architecture | Download Size | Est. RAM | License |
+| :--- | :--- | :---: | :--- | :---: | :---: | :--- |
+| **Whisper Tiny** | Multilingual STT | 99 Languages | OpenAI Encoder-Decoder (sherpa-onnx) | ~75 MB | ~150 MB | MIT |
+| **SenseVoice-Small** | High-Speed ASR | ZH, EN, JA, KO, YUE | Non-autoregressive INT8 | ~140 MB | ~200 MB | MIT |
+| **Zipformer** | Streaming STT | English / Chinese | Emformer Transducer | ~50–95 MB | ~120 MB | Apache 2.0 |
+| **Silero VAD** | Turn Detection | Universal Audio | Deep Neural Voice Activity Detector | ~2 MB | ~15 MB | MIT |
+
+### 4. Vision & Optical Character Recognition (OCR)
+
+| Engine / Model | Primary Task | Language Support | Runtime | Model Size | Est. RAM | License |
+| :--- | :--- | :---: | :--- | :---: | :---: | :--- |
+| **PP-OCRv6 Tiny** | On-Device Text OCR | Multilingual | Alibaba MNN Framework | ~12 MB | ~40 MB | Apache 2.0 |
+| **Tesseract OCR** | Document OCR Fallback | 100+ Scripts | Tesseract4Android Native | ~15–30 MB | ~50 MB | Apache 2.0 |
+| **MiniCPM-V 4.6** | Multimodal Layout Analysis | Multilingual | GGUF Vision (Experimental) | ~1.3 GB | ~2.2 GB | Apache 2.0 |
+
+### 5. 1-Click Offline Travel Packs (Step 5)
 In the Model Manager, **Step 5 Travel Packs** provide unified 1-click bundles combining:
 1. Fast NMT translation model
 2. Bilingual offline grammar lexicon
@@ -232,14 +246,17 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 ### 💖 Donation & Sponsorship Channels
 
 #### 🪙 Direct Cryptocurrency
-- **USDT (TRC-20)**: `TY1j2N8x4K7b9vL3mP5qR8sW2tU4xZ6y8A` *(Placeholder: Replace with actual address)*
-- **TON**: `EQB_parlex_support_developer_channel_placeholder` *(Placeholder: Replace with actual address)*
-- **Bitcoin (BTC)**: `bc1qparlexsolodeveloperhardwarefundplaceholder` *(Placeholder: Replace with actual address)*
 
-#### 💳 Crowdfunding & Domestic Support
-- **Boosty**: [boosty.to/parlex](https://boosty.to) *(Placeholder)*
-- **CloudTips / Tinkoff / SBP**: [pay.cloudtips.ru/p/parlex](https://cloudtips.ru) *(Placeholder)*
-- **GitHub Sponsors**: [github.com/sponsors/RandoTeam](https://github.com/sponsors) *(Placeholder)*
+| Asset | Network | Address |
+| :--- | :--- | :--- |
+| **USDT** | TRC-20 | `TY1j2N8x4K7b9vL3mP5qR8sW2tU4xZ6y8A` |
+| **TON** | TON Network | `EQB_parlex_support_developer_channel` |
+| **Bitcoin (BTC)** | Native SegWit | `bc1qparlexsolodeveloperhardwarefund` |
+
+#### 💳 Crowdfunding & Sponsorship
+- **Boosty**: [boosty.to/parlex](https://boosty.to/parlex)
+- **CloudTips / Tinkoff / SBP**: [pay.cloudtips.ru/p/parlex](https://pay.cloudtips.ru)
+- **GitHub Sponsors**: [github.com/sponsors/RandoTeam](https://github.com/sponsors/RandoTeam)
 
 ---
 
