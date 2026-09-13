@@ -4,6 +4,7 @@ import android.graphics.Rect
 import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import com.translive.app.service.ScreenTextNoiseFilter
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -175,7 +176,8 @@ object NativeScreenTextExtractor {
         }
 
         val deduplicated = filterAndDeduplicate(rawNodes)
-        return sortByReadingOrder(deduplicated)
+        val ordered = sortByReadingOrder(deduplicated)
+        return ordered.filter { !ScreenTextNoiseFilter.isNoise(it.text) }
     }
 
     private fun isAcceptableTextDescription(desc: String, className: String?): Boolean {

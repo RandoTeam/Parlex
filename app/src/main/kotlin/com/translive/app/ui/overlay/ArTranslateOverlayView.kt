@@ -139,7 +139,7 @@ private object InpaintingHelper {
 
 class ArTranslateOverlayView @JvmOverloads constructor(
     context: Context,
-    private val rawBoxes: List<ArTranslatedBox>,
+    private var rawBoxes: List<ArTranslatedBox>,
     private val frozenBitmap: Bitmap? = null,
     private val overlayStyle: String = "dark_blocks",
     private val screenWidth: Int,
@@ -209,6 +209,18 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     private var tts: TextToSpeech? = null
     private var isDismissing = false
 
+    var onSaveScreenshot: (() -> Unit)? = null
+    var onLanguageChanged: ((sourceLang: String, targetLang: String) -> Unit)? = null
+
+    private var currentSourceLang: String = rawBoxes.firstOrNull()?.sourceLangCode ?: "auto"
+    private var currentTargetLang: String = rawBoxes.firstOrNull()?.targetLangCode ?: "ru"
+    private var showOriginalText: Boolean = false
+
+    private var activeLanguagePickerMenu: View? = null
+    private var srcLangBtn: TextView? = null
+    private var targetLangBtn: TextView? = null
+    private var toggleOriginalBtn: TextView? = null
+
     init {
         setWillNotDraw(false)
         isClickable = true
@@ -246,7 +258,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             val srcRect = box.boundingBox
             if (srcRect.width() <= 0 || srcRect.height() <= 0) continue
 
-            val text = box.translatedText.ifBlank { box.rawText }
+            val text = if (showOriginalText) box.rawText else box.translatedText.ifBlank { box.rawText }
             val srcWidth = srcRect.width().toFloat()
             val srcHeight = srcRect.height().toFloat()
 
@@ -381,30 +393,111 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
     // --- Top Bar & Bottom Dismiss Pill UI (Strict MD3 Zero-Emoji) ---
 
-    var onSaveScreenshot: (() -> Unit)? = null
-
     private fun setupTopBar() {
         val topBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding((16 * density).toInt(), (36 * density).toInt(), (16 * density).toInt(), (8 * density).toInt())
+            setPadding((12 * density).toInt(), (32 * density).toInt(), (12 * density).toInt(), (8 * density).toInt())
         }
 
-        val badge = TextView(context).apply {
-            val count = rawBoxes.size
-            text = "Parlex AR · $count " + if (count == 1) "block" else "blocks"
+        // 1. Interactive Language Pill Container (Circle to Search / Apple Glass Style)
+        val langContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding((6 * density).toInt(), (4 * density).toInt(), (6 * density).toInt(), (4 * density).toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 18 * density
+                setColor(Color.parseColor("#E61E1E28"))
+                setStroke((1 * density).toInt(), Color.parseColor("#33FFFFFF"))
+            }
+        }
+
+        val srcBtn = TextView(context).apply {
+            text = formatLangLabel(currentSourceLang)
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            setTextColor(Color.parseColor("#80D8FF"))
+            gravity = Gravity.CENTER
+            setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+            setOnClickListener {
+                showLanguagePicker(isSource = true, anchor = this)
+            }
+        }
+        srcLangBtn = srcBtn
+        langContainer.addView(srcBtn)
+
+        val swapBtn = TextView(context).apply {
+            text = "⇄"
             textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            val swapSize = (26 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(swapSize, swapSize)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#33FFFFFF"))
+            }
+            setOnClickListener {
+                animate().rotationBy(180f).setDuration(200L).start()
+                performSwapLanguages()
+            }
+        }
+        langContainer.addView(swapBtn)
+
+        val tgtBtn = TextView(context).apply {
+            text = formatLangLabel(currentTargetLang)
+            textSize = 12f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            setTextColor(Color.parseColor("#80D8FF"))
+            gravity = Gravity.CENTER
+            setPadding((8 * density).toInt(), (4 * density).toInt(), (8 * density).toInt(), (4 * density).toInt())
+            setOnClickListener {
+                showLanguagePicker(isSource = false, anchor = this)
+            }
+        }
+        targetLangBtn = tgtBtn
+        langContainer.addView(tgtBtn)
+
+        topBar.addView(langContainer)
+
+        // 2. Global Original / Translation Toggle Button
+        val toggleBtn = TextView(context).apply {
+            text = if (showOriginalText) "Original" else "Translate"
+            textSize = 11f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             setTextColor(Color.WHITE)
-            setPadding((12 * density).toInt(), (6 * density).toInt(), (12 * density).toInt(), (6 * density).toInt())
+            gravity = Gravity.CENTER
+            setPadding((10 * density).toInt(), (6 * density).toInt(), (10 * density).toInt(), (6 * density).toInt())
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                (32 * density).toInt()
+            ).apply {
+                marginStart = (8 * density).toInt()
+            }
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 16 * density
-                setColor(Color.parseColor("#CC1E1E28"))
-                setStroke((1 * density).toInt(), Color.parseColor("#4D80D8FF"))
+                setColor(if (showOriginalText) Color.parseColor("#CCF59E0B") else Color.parseColor("#CC2A2A38"))
+                setStroke((1 * density).toInt(), Color.parseColor("#44FFFFFF"))
+            }
+            setOnClickListener {
+                showOriginalText = !showOriginalText
+                text = if (showOriginalText) "Original" else "Translate"
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = 16 * density
+                    setColor(if (showOriginalText) Color.parseColor("#CCF59E0B") else Color.parseColor("#CC2A2A38"))
+                    setStroke((1 * density).toInt(), Color.parseColor("#44FFFFFF"))
+                }
+                precomputeLayouts()
+                resolveOverlaps()
+                invalidate()
             }
         }
-        topBar.addView(badge)
+        toggleOriginalBtn = toggleBtn
+        topBar.addView(toggleBtn)
 
         val spacer = View(context).apply {
             layoutParams = LinearLayout.LayoutParams(0, 1, 1f)
@@ -455,6 +548,123 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             gravity = Gravity.TOP
         }
         addView(topBar, topParams)
+    }
+
+    private fun showLanguagePicker(isSource: Boolean, anchor: View) {
+        dismissLanguagePicker()
+        val languages = if (isSource) {
+            listOf("auto" to "Auto") + listOf(
+                "en" to "English", "ru" to "Russian", "zh" to "Chinese",
+                "de" to "German", "fr" to "French", "es" to "Spanish",
+                "ja" to "Japanese", "ko" to "Korean", "vi" to "Vietnamese"
+            )
+        } else {
+            listOf(
+                "ru" to "Russian", "en" to "English", "zh" to "Chinese",
+                "de" to "German", "fr" to "French", "es" to "Spanish",
+                "ja" to "Japanese", "ko" to "Korean", "vi" to "Vietnamese"
+            )
+        }
+
+        val pickerLayout = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding((6 * density).toInt(), (6 * density).toInt(), (6 * density).toInt(), (6 * density).toInt())
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 14 * density
+                setColor(Color.parseColor("#F5161622"))
+                setStroke((1 * density).toInt(), Color.parseColor("#4D80D8FF"))
+            }
+            elevation = 20 * density
+        }
+
+        for ((code, name) in languages) {
+            val item = TextView(context).apply {
+                text = "$name (${code.uppercase()})"
+                textSize = 12f
+                typeface = Typeface.DEFAULT
+                setTextColor(Color.WHITE)
+                setPadding((12 * density).toInt(), (7 * density).toInt(), (12 * density).toInt(), (7 * density).toInt())
+                setOnClickListener {
+                    if (isSource) {
+                        currentSourceLang = code
+                    } else {
+                        currentTargetLang = code
+                    }
+                    updateTopBarLabels()
+                    dismissLanguagePicker()
+                    onLanguageChanged?.invoke(currentSourceLang, currentTargetLang)
+                }
+            }
+            pickerLayout.addView(item)
+        }
+
+        val anchorLoc = IntArray(2)
+        anchor.getLocationOnScreen(anchorLoc)
+        val pickerWidth = (140 * density).toInt()
+        val posX = anchorLoc[0].coerceIn((8 * density).toInt(), screenWidth - pickerWidth - (8 * density).toInt())
+        val posY = (anchorLoc[1] + anchor.height + (4 * density).toInt())
+
+        val params = LayoutParams(pickerWidth, LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.START
+            leftMargin = posX
+            topMargin = posY
+        }
+
+        addView(pickerLayout, params)
+        activeLanguagePickerMenu = pickerLayout
+    }
+
+    private fun dismissLanguagePicker() {
+        activeLanguagePickerMenu?.let {
+            removeView(it)
+        }
+        activeLanguagePickerMenu = null
+    }
+
+    private fun performSwapLanguages() {
+        val detectedSrc = rawBoxes.firstOrNull()?.sourceLangCode ?: "en"
+        val oldSource = if (currentSourceLang == "auto") detectedSrc else currentSourceLang
+        val oldTarget = currentTargetLang
+
+        currentSourceLang = oldTarget
+        currentTargetLang = oldSource
+
+        updateTopBarLabels()
+        onLanguageChanged?.invoke(currentSourceLang, currentTargetLang)
+    }
+
+    private fun updateTopBarLabels() {
+        srcLangBtn?.text = formatLangLabel(currentSourceLang)
+        targetLangBtn?.text = formatLangLabel(currentTargetLang)
+    }
+
+    private fun formatLangLabel(code: String): String = when (code.lowercase()) {
+        "auto" -> "Auto ▼"
+        "ru" -> "RU ▼"
+        "en" -> "EN ▼"
+        "zh" -> "ZH ▼"
+        "de" -> "DE ▼"
+        "fr" -> "FR ▼"
+        "es" -> "ES ▼"
+        "ja" -> "JA ▼"
+        "ko" -> "KO ▼"
+        "vi" -> "VI ▼"
+        else -> "${code.uppercase()} ▼"
+    }
+
+    fun updateBoxes(newBoxes: List<ArTranslatedBox>, sourceCode: String, targetCode: String) {
+        this.rawBoxes = newBoxes
+        this.currentSourceLang = sourceCode
+        this.currentTargetLang = targetCode
+        updateTopBarLabels()
+
+        animate().alpha(0.5f).setDuration(70L).withEndAction {
+            precomputeLayouts()
+            resolveOverlaps()
+            invalidate()
+            animate().alpha(1.0f).setDuration(120L).start()
+        }.start()
     }
 
     private fun setupBottomDismissPill() {
@@ -579,7 +789,11 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                     return true
                 }
 
-                // 2. Ambient tap on empty space -> Dismiss toolbar / deselect box if active, otherwise dismiss overlay
+                // 2. Ambient tap on empty space -> Dismiss language picker / toolbar / deselect box if active, otherwise dismiss overlay
+                if (activeLanguagePickerMenu != null) {
+                    dismissLanguagePicker()
+                    return true
+                }
                 if (activeMicroToolbar != null || selectedRenderBox != null) {
                     dismissMicroToolbar()
                     selectedRenderBox = null
@@ -644,6 +858,14 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             if (idx >= 0) {
                 renderBoxes[idx] = item.copy(staticLayout = newLayout)
             }
+            invalidate()
+            dismissMicroToolbar()
+        })
+
+        // Action 5: Hide Individual Pill
+        toolbar.addView(createMicroActionButton("Hide") {
+            renderBoxes.remove(item)
+            selectedRenderBox = null
             invalidate()
             dismissMicroToolbar()
         })
@@ -760,6 +982,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     }
 
     private fun handleBackAction() {
+        if (activeLanguagePickerMenu != null) {
+            dismissLanguagePicker()
+            return
+        }
         if (activeMicroToolbar != null || selectedRenderBox != null) {
             dismissMicroToolbar()
             selectedRenderBox = null

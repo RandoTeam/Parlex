@@ -58,4 +58,38 @@ class ScreenTranslateOverlayTest {
         assertEquals(160, box2.boundingBox.top)
         assertEquals(200, box2.boundingBox.bottom)
     }
+
+    @Test
+    fun screenTextNoiseFilter_filtersNonTranslatableUiArtifacts() {
+        val candidateTexts = listOf(
+            "12:45",
+            "98%",
+            "Settings and Profile",
+            "https://example.com",
+            "1,234.50",
+            "Order Confirmation",
+            "..."
+        )
+
+        val translatable = candidateTexts.filter { ScreenTextNoiseFilter.isTranslatable(it) }
+        assertEquals(listOf("Settings and Profile", "Order Confirmation"), translatable)
+    }
+
+    @Test
+    fun arTranslatedBox_supportsLanguagePairUpdate() {
+        val original = ArTranslatedBox("Hello world", "Привет мир", Rect(0, 0, 100, 50), "en", "ru")
+        val retranslated = original.copy(
+            translatedText = "Hallo Welt",
+            targetLangCode = "de"
+        )
+
+        assertEquals("Hello world", retranslated.rawText)
+        assertEquals("Hallo Welt", retranslated.translatedText)
+        assertEquals("en", retranslated.sourceLangCode)
+        assertEquals("de", retranslated.targetLangCode)
+        assertEquals(original.boundingBox.left, retranslated.boundingBox.left)
+        assertEquals(original.boundingBox.top, retranslated.boundingBox.top)
+        assertEquals(original.boundingBox.right, retranslated.boundingBox.right)
+        assertEquals(original.boundingBox.bottom, retranslated.boundingBox.bottom)
+    }
 }

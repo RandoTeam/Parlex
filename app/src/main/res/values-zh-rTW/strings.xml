@@ -199,4 +199,6 @@
     <string name="camera_translate_with_llm">使用大模型翻譯</string>
     <string name="camera_improving_with_llm">正在使用本地大模型深度翻譯…</string>
     <string name="screen_overlay_capture_failed">螢幕畫面擷取失敗</string>
+    <string name="screen_overlay_timeout">翻譯超時</string>
+    <string name="screen_overlay_cancelled">翻譯已取消</string>
 </resources>

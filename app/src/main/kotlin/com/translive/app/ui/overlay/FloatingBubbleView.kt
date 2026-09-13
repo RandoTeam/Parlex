@@ -365,7 +365,12 @@ class FloatingBubbleView @JvmOverloads constructor(
                 performMicroHaptic(HapticFeedbackType.WARNING)
                 mainHandler.postDelayed(errorResetRunnable, 2000L)
             }
-            BubbleState.COMPLETE, BubbleState.IDLE, BubbleState.DISABLED -> {
+            BubbleState.COMPLETE -> {
+                stopScanRotation()
+                stopPulseAnimation()
+                mainHandler.postDelayed(errorResetRunnable, 2500L)
+            }
+            BubbleState.IDLE, BubbleState.DISABLED -> {
                 stopScanRotation()
                 stopPulseAnimation()
             }
@@ -515,6 +520,7 @@ class FloatingBubbleView @JvmOverloads constructor(
             MotionEvent.ACTION_CANCEL -> {
                 mainHandler.removeCallbacks(longPressRunnable)
                 if (isDragging) {
+                    isDragging = false
                     val isDismissed = listener?.onDragRelease() ?: false
                     if (!isDismissed) {
                         performAutoDocking(0f, 0f)
