@@ -18,9 +18,9 @@ processed locally whenever the selected feature is available offline.
 
 - Repository: `https://github.com/RandoTeam/Parlex.git`
 - Main branch: `main`
-- Latest public signed beta: `v1.4.1-beta.1`
+- Latest public signed beta: `v1.5.1-beta.2`
 - App package: `com.translive.app`
-- Current app version in Gradle: `1.4.1-beta.1`, `versionCode` 9
+- Current app version in Gradle: `1.5.1-beta.2`, `versionCode` 15101
 - Supported ABI: `arm64-v8a`
 - Native translation runtime: `llama.cpp` through JNI
 - Stable model format: GGUF
@@ -30,13 +30,15 @@ Current release signing state:
 
 - The original release signing key was not available after the workstation
   rebuild.
-- `v1.4.1-beta.1` is signed with a newly generated 2026 Parlex release key.
-- Users with older Parlex APKs signed by the previous key must uninstall the old
+- `v1.5.1-beta.2` is signed with the 2026 Parlex release key (`CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`).
+- Users with older Parlex APKs signed by keys before rotation must uninstall the old
   app before installing this beta.
 - Do not use debug APKs as releases.
 
 ## What Is Implemented
 
+- **Screen Text Reconstruction, Interactive In-Place AR & Resilience (Phase X)**: Direct vector parsing via `NativeScreenTextExtractor` (`TYPE_APPLICATION`, leaf node priority, semantic icon label filtering, topological line banding) eliminating multi-line "каша" without OCR clustering; selective noise filtering (`ScreenTextNoiseFilter`) removing isolated timestamps, battery levels, URLs, pure digits, and symbols; interactive Liquid Glass top bar with Source (`Auto ▼` / code) and Target (`RU ▼`) chips, quick-swap button `⇄` with 180° rotation, 0ms in-place candidate re-translation (`retranslateCurrentScreen`), global `[Translate ⇄ Original]` toggle, individual pill `Hide`, lease-based self-healing mutex (>10s lock breaker), 8s/15s coroutine timeouts, and 10s watchdog handler runnable.
+- **Zero-Latency Screen Translation & Volume Key Decoupling (Phase W)**: High-speed zero-dialogue screen translation pipeline with direct `AccessibilityNodeInfo` BFS vector text extraction (`extractVisibleTextNodesFast`), 1-pass delimited batch translation (`FastBatchTranslator`), volume shortcut decoupling (`ScreenA11yShortcutBehavior`: `SINGLE_SHOT_NO_BUBBLE` vs `TOGGLE_FLOATING_BUBBLE`), and offline travel pack download hardening with automatic Whisper/VAD STT bundling.
 - **Text & Dialogue Multi-Tier Translation**: Fast NMT (ML Kit, zero LLM RAM), Fast + LLM Improve, and LLM Direct across all 33 primary languages and 5 dialects with ICU Transliteration subtitles.
 - **Screen Translation & Floating HUD**: Draggable overlay button, in-place text replacement card, continuous Auto-Live AR stream, animated pulsating HUD, on-screen language switcher, and zero-key currency augmentation.
 - **Live Zero-Key Currency Converter**: Lexical/symbol parser ($50, 100€, 10 000₫, 1 500₽) with baseline offline conversion table for 35+ fiat currencies and customizable user home currency.
