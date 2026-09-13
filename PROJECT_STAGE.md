@@ -1,21 +1,21 @@
 # Project Stage Snapshot
 
-Snapshot date: 2026-09-01
+Snapshot date: 2026-09-14
 
 ## Repository
 
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
 - Baseline head before this release pass: `c579621`
-- Latest public signed prerelease: `v1.5.1-beta.1`
-- Latest public APK asset: `Parlex-v1.5.1-beta.1-release.apk`
+- Latest public signed prerelease: `v1.5.1-beta.2`
+- Latest public APK asset: `Parlex-v1.5.1-beta.2-release.apk`
 - Public APK SHA-256:
-  `63b9bcfb22b1a8964fe512c5a6592b641f82cb4fa7548436b2827ab7519a853d`
+  `5d08b9132c225ee6b149df716acbf827e7a24619d7a8d6b5900fead617506b77`
 
 ## App Version
 
-- `versionCode`: 15100
-- `versionName`: `1.5.1-beta.1`
+- `versionCode`: 15101
+- `versionName`: `1.5.1-beta.2`
 - `compileSdk`: 36
 - `targetSdk`: 36
 - `minSdk`: 26

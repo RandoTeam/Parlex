@@ -8,7 +8,7 @@
 
 *100% Local Neural Inference • Zero Network Calls • Zero Telemetry • Complete Privacy*
 
-[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.1-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.1)
+[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.2-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.2)
 [![Android](https://img.shields.io/badge/Android-8.0%20%E2%80%94%2016%20(API%2026--36)-34A853?logo=android&logoColor=white&style=flat-square)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Arch-arm64--v8a-blue?style=flat-square)](https://developer.android.com/ndk/guides/abis)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
@@ -221,7 +221,7 @@ git -C app/src/main/cpp/llama.cpp checkout 5dcb71166686799f0d873eab7386234302d05
 .\gradlew.bat assembleRelease --no-daemon
 ```
 
-### Verification & Signatures (v1.5.1-beta.1)
+### Verification & Signatures (v1.5.1-beta.2)
 ```powershell
 # Verify APK Signature Scheme v2
 & "$env:ANDROID_HOME\build-tools\37.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
@@ -231,9 +231,9 @@ git -C app/src/main/cpp/llama.cpp checkout 5dcb71166686799f0d873eab7386234302d05
 ```
 
 - **Package**: `com.translive.app`
-- **Version**: `1.5.1-beta.1` (`versionCode: 15100`)
+- **Version**: `1.5.1-beta.2` (`versionCode: 15101`)
 - **Target SDK**: `36` • **Min SDK**: `26`
-- **Official APK SHA-256**: `63b9bcfb22b1a8964fe512c5a6592b641f82cb4fa7548436b2827ab7519a853d`
+- **Official APK SHA-256**: `5d08b9132c225ee6b149df716acbf827e7a24619d7a8d6b5900fead617506b77`
 
 ---
 
