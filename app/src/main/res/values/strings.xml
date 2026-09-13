@@ -290,6 +290,9 @@
     <string name="settings_screen_shortcut_toggle_bubble_desc">Opens or hides the persistent floating button on the screen edge.</string>
     <string name="settings_screen_sync_target_title">Sync Target Language with Main</string>
     <string name="settings_screen_sync_target_desc">Screen translate always translates into the current text translator target language.</string>
+    <string name="settings_screen_source_lang_title">Screen Source Language</string>
+    <string name="settings_screen_source_lang_desc">Specify which language is read on the screen, or leave on auto-detect.</string>
+    <string name="settings_screen_source_auto">Auto-Detect</string>
     <string name="settings_screen_target_lang_title">Screen Target Language</string>
 
     <!-- System Integration & Permissions Section -->

@@ -140,8 +140,10 @@ private object InpaintingHelper {
 class ArTranslateOverlayView @JvmOverloads constructor(
     context: Context,
     private var rawBoxes: List<ArTranslatedBox>,
+    private val initialSourceLang: String = "auto",
+    private val initialTargetLang: String = "ru",
     private val frozenBitmap: Bitmap? = null,
-    private val overlayStyle: String = "dark_blocks",
+    private val overlayStyle: String = "inpainting",
     private val screenWidth: Int,
     private val screenHeight: Int,
     private val onDismiss: () -> Unit,
@@ -159,12 +161,12 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
     // Paints
     private val backdropPaint = Paint().apply {
-        color = Color.argb(120, 10, 10, 16) // Subtle dim background to pop translations
+        color = Color.argb(110, 10, 10, 16) // Subtle dim background to pop translations
         style = Paint.Style.FILL
     }
 
     private val pillFillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#EE12121E") // Deep dark high-contrast backplate
+        color = Color.parseColor("#FF13131F") // Fallback solid dark backplate
         style = Paint.Style.FILL
     }
 
@@ -174,27 +176,15 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     }
 
     private val pillStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#5580D8FF") // Subtle cyan-tinted accent border
+        color = Color.TRANSPARENT // Seamless native look (no cyan electrical tape)
         style = Paint.Style.STROKE
-        strokeWidth = 1.2f * density
+        strokeWidth = 1f * density
     }
 
     private val pillStrokeSelectedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.parseColor("#FF00E5FF") // High-contrast selected border
+        color = Color.parseColor("#FF00E5FF") // High-contrast selected accent border
         style = Paint.Style.STROKE
-        strokeWidth = 2.4f * density
-    }
-
-    private val perimeterGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 2.5f * density
-        color = Color.parseColor("#9900E5FF")
-    }
-
-    private val perimeterHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 10f * density
-        color = Color.parseColor("#337C4DFF")
+        strokeWidth = 2.2f * density
     }
 
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -212,8 +202,8 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     var onSaveScreenshot: (() -> Unit)? = null
     var onLanguageChanged: ((sourceLang: String, targetLang: String) -> Unit)? = null
 
-    private var currentSourceLang: String = rawBoxes.firstOrNull()?.sourceLangCode ?: "auto"
-    private var currentTargetLang: String = rawBoxes.firstOrNull()?.targetLangCode ?: "ru"
+    private var currentSourceLang: String = initialSourceLang
+    private var currentTargetLang: String = initialTargetLang
     private var showOriginalText: Boolean = false
 
     private var activeLanguagePickerMenu: View? = null
@@ -231,7 +221,6 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         precomputeLayouts()
         resolveOverlaps()
         setupTopBar()
-        setupBottomDismissPill()
     }
 
     private fun initTts() {
@@ -250,37 +239,54 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         renderBoxes.clear()
 
         val minTextSizePx = 11f * density
-        val maxTextSizePx = 22f * density
+        val maxTextSizePx = 20f * density
         val maxScreenW = screenWidth.toFloat()
         val maxScreenH = screenHeight.toFloat()
+
+        val statusBarHeight = run {
+            val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (resId > 0) context.resources.getDimensionPixelSize(resId) else (38 * density).toInt()
+        }
+        val topMinY = statusBarHeight + (44f * density)
+        val bottomMaxY = maxScreenH - (56f * density)
 
         for (box in rawBoxes) {
             val srcRect = box.boundingBox
             if (srcRect.width() <= 0 || srcRect.height() <= 0) continue
 
-            val text = if (showOriginalText) box.rawText else box.translatedText.ifBlank { box.rawText }
+            val rawText = if (showOriginalText) box.rawText else box.translatedText.ifBlank { box.rawText }
+            // Collapse single newlines within sentences so StaticLayout wraps naturally
+            val text = rawText.replace(Regex("""(?<!\n)\n(?!\n)"""), " ").trim()
             val srcWidth = srcRect.width().toFloat()
             val srcHeight = srcRect.height().toFloat()
 
-            // 1. Estimate initial font size based on original OCR line height
-            var candidateTextSize = (srcHeight * 0.72f).coerceIn(minTextSizePx, maxTextSizePx)
+            // 1. Line-height estimation for multi-line blocks to prevent 22sp headline blowup
+            val approxLineHeight = 20f * density
+            val estimatedLineCount = max(1, (srcHeight / approxLineHeight).toInt())
+            val lineHeightPx = srcHeight / estimatedLineCount
+            var candidateTextSize = if (estimatedLineCount > 1) {
+                (lineHeightPx * 0.74f).coerceIn(12f * density, 15f * density)
+            } else {
+                (srcHeight * 0.70f).coerceIn(minTextSizePx, maxTextSizePx)
+            }
             textPaint.textSize = candidateTextSize
 
-            // 2. Determine target layout width (expand slightly if original box is narrow)
+            // 2. Determine target layout width
             var targetWidth = max(srcWidth, 48f * density)
             var staticLayout = createStaticLayout(text, textPaint, targetWidth.toInt())
 
             // 3. Auto-fit step-down: refine font size & width if text overflows significantly
             var attempts = 0
-            while (attempts < 4 && candidateTextSize > minTextSizePx && staticLayout.height > srcHeight * 2.2f) {
-                candidateTextSize = max(minTextSizePx, candidateTextSize * 0.85f)
+            val maxAllowedH = if (estimatedLineCount > 1) srcHeight * 1.5f else srcHeight * 2.0f
+            while (attempts < 5 && candidateTextSize > minTextSizePx && staticLayout.height > maxAllowedH) {
+                candidateTextSize = max(minTextSizePx, candidateTextSize * 0.88f)
                 textPaint.textSize = candidateTextSize
-                targetWidth = min(maxScreenW - (32f * density), max(targetWidth, staticLayout.maxLineWidth + padHorizontal * 2))
+                targetWidth = min(maxScreenW - (24f * density), max(targetWidth, staticLayout.maxLineWidth + padHorizontal * 2))
                 staticLayout = createStaticLayout(text, textPaint, targetWidth.toInt())
                 attempts++
             }
 
-            // 4. Calculate final backplate pill rectangle (centered over source bounding box)
+            // 4. Calculate final backplate pill rectangle
             val layoutW = staticLayout.maxLineWidth
             val layoutH = staticLayout.height.toFloat()
 
@@ -288,10 +294,16 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             val finalHeight = max(srcHeight, layoutH + (padVertical * 2))
 
             val centerX = srcRect.centerX().toFloat()
-            val centerY = srcRect.centerY().toFloat()
-
             val left = (centerX - finalWidth / 2f).coerceIn(8f * density, maxScreenW - finalWidth - 8f * density)
-            val top = (centerY - finalHeight / 2f).coerceIn(48f * density, maxScreenH - finalHeight - 56f * density)
+
+            // Top-anchoring for multi-line blocks prevents upward expansion over preceding headlines
+            val isMultiLine = staticLayout.lineCount > 1 || estimatedLineCount > 1
+            val top = if (isMultiLine) {
+                srcRect.top.toFloat().coerceIn(topMinY, bottomMaxY - finalHeight)
+            } else {
+                val centerY = srcRect.centerY().toFloat()
+                (centerY - finalHeight / 2f).coerceIn(topMinY, bottomMaxY - finalHeight)
+            }
             val right = left + finalWidth
             val bottom = top + finalHeight
 
@@ -312,7 +324,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                 bgColor = InpaintingHelper.getDominantEdgeColor(frozenBitmap, box.boundingBox)
                 txtColor = InpaintingHelper.getContrastTextColor(bgColor)
             } else {
-                bgColor = Color.parseColor("#EE12121E")
+                bgColor = Color.parseColor("#FF13131F")
                 txtColor = Color.WHITE
             }
 
@@ -333,29 +345,60 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     }
 
     /**
-     * Anti-overlap pass: if two pill rects intersect vertically, shift the lower one down.
-     * Prevents visual collision when translated text expands beyond original bounding box.
+     * Anti-overlap pass: multi-pass elastic relaxation to prevent visual collisions
+     * without freezing cards on top of each other.
      */
     private fun resolveOverlaps() {
         if (renderBoxes.size < 2) return
-        val sorted = renderBoxes.sortedBy { it.pillRect.top }
-        val gapPx = 4f * density
         val maxScreenH = screenHeight.toFloat()
+        val statusBarHeight = run {
+            val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (resId > 0) context.resources.getDimensionPixelSize(resId) else (38 * density).toInt()
+        }
+        val topMargin = statusBarHeight + (48f * density)
+        val bottomMargin = 56f * density
+        val gapPx = 3f * density
 
-        for (i in sorted.indices) {
-            for (j in i + 1 until sorted.size) {
+        for (pass in 0 until 3) {
+            val sorted = renderBoxes.sortedBy { it.pillRect.top }
+            var anyShifted = false
+            for (i in 0 until sorted.size - 1) {
                 val upper = sorted[i].pillRect
-                val lower = sorted[j].pillRect
+                val lower = sorted[i + 1].pillRect
                 if (RectF.intersects(upper, lower)) {
                     val overlap = upper.bottom - lower.top + gapPx
-                    if (overlap > 0 && lower.bottom + overlap < maxScreenH) {
-                        lower.offset(0f, overlap)
-                        // Also update touch rect and text offset synchronously
-                        sorted[j].touchRect.offset(0f, overlap)
-                        sorted[j].textOffsetY += overlap
+                    if (overlap > 0) {
+                        val availableBelow = (maxScreenH - bottomMargin) - lower.bottom
+                        if (availableBelow >= overlap) {
+                            lower.offset(0f, overlap)
+                            sorted[i + 1].touchRect.offset(0f, overlap)
+                            sorted[i + 1].textOffsetY += overlap
+                            anyShifted = true
+                        } else if (availableBelow > 0) {
+                            lower.offset(0f, availableBelow)
+                            sorted[i + 1].touchRect.offset(0f, availableBelow)
+                            sorted[i + 1].textOffsetY += availableBelow
+                            val remaining = overlap - availableBelow
+                            val availableAbove = upper.top - topMargin
+                            if (availableAbove >= remaining) {
+                                upper.offset(0f, -remaining)
+                                sorted[i].touchRect.offset(0f, -remaining)
+                                sorted[i].textOffsetY -= remaining
+                                anyShifted = true
+                            }
+                        } else {
+                            val availableAbove = upper.top - topMargin
+                            if (availableAbove >= overlap) {
+                                upper.offset(0f, -overlap)
+                                sorted[i].touchRect.offset(0f, -overlap)
+                                sorted[i].textOffsetY -= overlap
+                                anyShifted = true
+                            }
+                        }
                     }
                 }
             }
+            if (!anyShifted) break
         }
     }
 
@@ -364,8 +407,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             StaticLayout.Builder.obtain(text, 0, text.length, paint, safeWidth)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1.05f)
+                .setLineSpacing(0f, 1.15f)
                 .setIncludePad(false)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_BALANCED)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NORMAL)
                 .build()
         } else {
             @Suppress("DEPRECATION")
@@ -374,7 +419,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                 paint,
                 safeWidth,
                 Layout.Alignment.ALIGN_NORMAL,
-                1.05f,
+                1.15f,
                 0f,
                 false
             )
@@ -394,10 +439,14 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     // --- Top Bar & Bottom Dismiss Pill UI (Strict MD3 Zero-Emoji) ---
 
     private fun setupTopBar() {
+        val statusBarHeight = run {
+            val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+            if (resId > 0) context.resources.getDimensionPixelSize(resId) else (38 * density).toInt()
+        }
         val topBar = LinearLayout(context).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding((12 * density).toInt(), (32 * density).toInt(), (12 * density).toInt(), (8 * density).toInt())
+            setPadding((12 * density).toInt(), statusBarHeight + (8 * density).toInt(), (12 * density).toInt(), (8 * density).toInt())
         }
 
         // 1. Interactive Language Pill Container (Circle to Search / Apple Glass Style)
@@ -667,30 +716,6 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         }.start()
     }
 
-    private fun setupBottomDismissPill() {
-        val dismissPill = TextView(context).apply {
-            text = "Dismiss"
-            textSize = 13f
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            setTextColor(Color.parseColor("#E0E0E0"))
-            gravity = Gravity.CENTER
-            setPadding((20 * density).toInt(), (8 * density).toInt(), (20 * density).toInt(), (8 * density).toInt())
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.RECTANGLE
-                cornerRadius = 20 * density
-                setColor(Color.parseColor("#D91E1E26"))
-                setStroke((1 * density).toInt(), Color.parseColor("#33FFFFFF"))
-            }
-            setOnClickListener { dismissOverlay() }
-        }
-
-        val bottomParams = LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
-            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            bottomMargin = (24 * density).toInt()
-        }
-        addView(dismissPill, bottomParams)
-    }
-
     // --- Drawing Engine ---
 
     override fun onDraw(canvas: Canvas) {
@@ -731,18 +756,6 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             item.staticLayout.draw(canvas)
             canvas.restore()
         }
-
-        // 3. Perimeter Liquid Glass Glow Frame (Google/Apple Glass Edge Border)
-        val edgeInset = 2f * density
-        val edgeRect = RectF(
-            edgeInset,
-            edgeInset,
-            width.toFloat() - edgeInset,
-            height.toFloat() - edgeInset
-        )
-        val edgeCornerRadius = 24f * density
-        canvas.drawRoundRect(edgeRect, edgeCornerRadius, edgeCornerRadius, perimeterHaloPaint)
-        canvas.drawRoundRect(edgeRect, edgeCornerRadius, edgeCornerRadius, perimeterGlowPaint)
     }
 
     // --- Resilient Touch & Gesture Handling ---
@@ -820,17 +833,17 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = 14 * density
-                setColor(Color.parseColor("#F2181822"))
+                setColor(Color.parseColor("#F5181824"))
                 setStroke((1 * density).toInt(), Color.parseColor("#4D80D8FF"))
             }
-            elevation = 16 * density
         }
 
-        // Action 1: Copy Translation
+        // Action 1: Context-Aware Copy (copies active text: original or translated)
         toolbar.addView(createMicroActionButton("Copy") {
+            val textToCopy = if (item.isShowingOriginal) item.origin.rawText else item.origin.translatedText
             val clip = context.getSystemService(ClipboardManager::class.java)
-            clip?.setPrimaryClip(ClipData.newPlainText("Parlex Translation", item.origin.translatedText))
-            Toast.makeText(context, "Copied translation", Toast.LENGTH_SHORT).show()
+            clip?.setPrimaryClip(ClipData.newPlainText("Parlex", textToCopy))
+            Toast.makeText(context, if (item.isShowingOriginal) "Copied original" else "Copied translation", Toast.LENGTH_SHORT).show()
             dismissMicroToolbar()
         })
 
@@ -840,29 +853,22 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "ar_speak_${System.currentTimeMillis()}")
         })
 
-        // Action 3: Copy Original
-        toolbar.addView(createMicroActionButton("Original") {
-            val clip = context.getSystemService(ClipboardManager::class.java)
-            clip?.setPrimaryClip(ClipData.newPlainText("Parlex Original", item.origin.rawText))
-            Toast.makeText(context, "Copied original text", Toast.LENGTH_SHORT).show()
-            dismissMicroToolbar()
-        })
-
-        // Action 4: Toggle View (Original vs Translated)
-        toolbar.addView(createMicroActionButton(if (item.isShowingOriginal) "Show Translation" else "Show Original") {
+        // Action 3: Toggle Original / Translation for this specific card
+        val toggleLabel = if (item.isShowingOriginal) "Translate" else "Original"
+        toolbar.addView(createMicroActionButton(toggleLabel) {
             item.isShowingOriginal = !item.isShowingOriginal
             val displayText = if (item.isShowingOriginal) item.origin.rawText else item.origin.translatedText
             textPaint.textSize = item.staticLayout.paint.textSize
             val newLayout = createStaticLayout(displayText, textPaint, item.pillRect.width().toInt())
             val idx = renderBoxes.indexOf(item)
             if (idx >= 0) {
-                renderBoxes[idx] = item.copy(staticLayout = newLayout)
+                renderBoxes[idx] = item.copy(staticLayout = newLayout, isShowingOriginal = item.isShowingOriginal)
             }
             invalidate()
             dismissMicroToolbar()
         })
 
-        // Action 5: Hide Individual Pill
+        // Action 4: Hide Individual Pill
         toolbar.addView(createMicroActionButton("Hide") {
             renderBoxes.remove(item)
             selectedRenderBox = null
@@ -870,13 +876,22 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             dismissMicroToolbar()
         })
 
+        val scrollContainer = android.widget.HorizontalScrollView(context).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            elevation = 16 * density
+            addView(toolbar, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT))
+        }
+
         // Anchor positioning: Above pill by default; below if too close to top
-        val tbWidthEstimate = (280 * density).toInt()
+        val tbWidthEstimate = (220 * density).toInt()
         val tbHeightEstimate = (44 * density).toInt()
+        val maxAllowedWidth = screenWidth - (24 * density).toInt()
+        val effectiveWidth = min(tbWidthEstimate, maxAllowedWidth)
 
         val pill = item.pillRect
-        val posX = (pill.centerX() - tbWidthEstimate / 2f).toInt()
-            .coerceIn((12 * density).toInt(), screenWidth - tbWidthEstimate - (12 * density).toInt())
+        val posX = (pill.centerX() - effectiveWidth / 2f).toInt()
+            .coerceIn((12 * density).toInt(), screenWidth - effectiveWidth - (12 * density).toInt())
 
         var posY = (pill.top - tbHeightEstimate - (8 * density)).toInt()
         if (posY < (60 * density).toInt()) {
@@ -889,13 +904,13 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             topMargin = posY
         }
 
-        addView(toolbar, params)
-        activeMicroToolbar = toolbar
+        addView(scrollContainer, params)
+        activeMicroToolbar = scrollContainer
 
-        toolbar.scaleX = 0.85f
-        toolbar.scaleY = 0.85f
-        toolbar.alpha = 0f
-        toolbar.animate()
+        scrollContainer.scaleX = 0.85f
+        scrollContainer.scaleY = 0.85f
+        scrollContainer.alpha = 0f
+        scrollContainer.animate()
             .scaleX(1f)
             .scaleY(1f)
             .alpha(1f)

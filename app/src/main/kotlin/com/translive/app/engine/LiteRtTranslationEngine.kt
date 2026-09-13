@@ -78,9 +78,29 @@ class LiteRtTranslationEngine @Inject constructor(
                 return@withLock true
             }
 
+            // Fallback ladder: NPU -> GPU -> CPU
+            if (requestedBackend == SettingsRepository.BACKEND_NPU) {
+                val failure = lastLoadFailure ?: "NPU accelerator initialization failed"
+                Log.w(TAG, "Falling back to GPU backend after NPU failed: $failure")
+                closeLocked()
+                val gpuLoaded = loadWithBackendLocked(
+                    modelPath = modelPath,
+                    backendName = SettingsRepository.BACKEND_GPU,
+                    backend = Backend.GPU()
+                )
+                if (gpuLoaded) {
+                    backendStatus = LiteRtBackendStatus(
+                        requested = requestedBackend,
+                        active = SettingsRepository.BACKEND_GPU,
+                        fallbackReason = failure
+                    )
+                    return@withLock true
+                }
+            }
+
             if (requestedBackend != SettingsRepository.BACKEND_CPU) {
                 val failure = lastLoadFailure ?: "accelerator initialization failed"
-                Log.w(TAG, "Falling back to CPU backend after $requestedBackend failed: $failure")
+                Log.w(TAG, "Falling back to CPU backend after accelerator failed: $failure")
                 closeLocked()
                 val cpuLoaded = loadWithBackendLocked(
                     modelPath = modelPath,
@@ -160,12 +180,14 @@ class LiteRtTranslationEngine @Inject constructor(
 
     private fun backendFor(backendSetting: String, threads: Int): Backend =
         when (backendSetting) {
+            SettingsRepository.BACKEND_NPU -> Backend.NPU(context.applicationInfo.nativeLibraryDir)
             SettingsRepository.BACKEND_GPU -> Backend.GPU()
             else -> Backend.CPU(numOfThreads = threads.coerceAtLeast(1))
         }
 
     private fun normalizeBackend(backendSetting: String): String =
         when (backendSetting) {
+            SettingsRepository.BACKEND_NPU -> backendSetting
             SettingsRepository.BACKEND_GPU -> backendSetting
             else -> SettingsRepository.BACKEND_CPU
         }

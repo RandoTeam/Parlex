@@ -61,10 +61,10 @@ class DialogueSummaryEngine @Inject constructor(
         val accumulatedSummary = StringBuilder()
 
         try {
-            val backend = if (settingsRepository.backend == SettingsRepository.BACKEND_GPU) {
-                Backend.GPU()
-            } else {
-                Backend.CPU(numOfThreads = settingsRepository.threads.coerceAtLeast(2))
+            val backend = when (settingsRepository.backend) {
+                SettingsRepository.BACKEND_NPU -> Backend.NPU(context.applicationInfo.nativeLibraryDir)
+                SettingsRepository.BACKEND_GPU -> Backend.GPU()
+                else -> Backend.CPU(numOfThreads = settingsRepository.threads.coerceAtLeast(2))
             }
 
             val config = EngineConfig(

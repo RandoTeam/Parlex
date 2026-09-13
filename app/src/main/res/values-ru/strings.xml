@@ -290,6 +290,9 @@
     <string name="settings_screen_shortcut_toggle_bubble_desc">Показывает или скрывает постоянную плавающую кнопку на краю экрана.</string>
     <string name="settings_screen_sync_target_title">Синхронизировать целевой язык с основным</string>
     <string name="settings_screen_sync_target_desc">Экранный перевод всегда переводит на целевой язык текстового переводчика.</string>
+    <string name="settings_screen_source_lang_title">Исходный язык экрана</string>
+    <string name="settings_screen_source_lang_desc">Язык, текст на котором распознается на экране по умолчанию, либо автоопределение.</string>
+    <string name="settings_screen_source_auto">Автоопределение</string>
     <string name="settings_screen_target_lang_title">Целевой язык перевода экрана</string>
 
     <!-- Секция системных функций, разрешений и ассистента -->

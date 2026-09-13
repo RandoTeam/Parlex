@@ -1,10 +1,10 @@
 package com.translive.app.data.model
 
 enum class ModelPerformanceTier(val badgeLabel: String) {
-    FAST_BUDGET("⚡ Fast / Budget"),
-    BALANCED("⭐ Balanced"),
-    MAX_QUALITY("💎 Max Quality"),
-    GPU_ACCELERATED("🚀 GPU-Accelerated")
+    FAST_BUDGET("Fast / Budget"),
+    BALANCED("Balanced"),
+    MAX_QUALITY("Max Quality"),
+    GPU_ACCELERATED("GPU-Accelerated")
 }
 
 /**

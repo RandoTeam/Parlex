@@ -1,15 +1,18 @@
 package com.translive.app.data
 
 import com.translive.app.data.model.Language
-import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class ScreenSettingsTest {
 
     private class FakeSettingsRepository : SettingsRepository() {
-        override var screenSyncTargetWithMain: Boolean = true
+        override var screenSyncTargetWithMain: Boolean = false
         override var screenTargetLanguage: Language = Language.RUSSIAN
+        override var screenSourceLanguage: Language = Language.ENGLISH
+        override var isScreenSourceAuto: Boolean = true
         override var textTargetLanguage: Language = Language.ENGLISH
         override var screenA11yShortcutBehavior: ScreenA11yShortcutBehavior = ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE
     }
@@ -18,9 +21,22 @@ class ScreenSettingsTest {
     fun defaultValues_areCorrect() {
         val settings = SettingsRepository()
 
-        assertTrue(settings.screenSyncTargetWithMain)
-        assertEquals(Language.RUSSIAN, settings.screenTargetLanguage)
+        assertFalse(settings.screenSyncTargetWithMain)
         assertEquals(ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE, settings.screenA11yShortcutBehavior)
+    }
+
+    @Test
+    fun updateScreenLanguagePair_updatesBothLanguagesCorrectly() {
+        val settings = FakeSettingsRepository()
+
+        settings.updateScreenLanguagePair("en", "es")
+        assertFalse(settings.isScreenSourceAuto)
+        assertEquals(Language.ENGLISH, settings.screenSourceLanguage)
+        assertEquals(Language.SPANISH, settings.screenTargetLanguage)
+
+        settings.updateScreenLanguagePair("auto", "ru")
+        assertTrue(settings.isScreenSourceAuto)
+        assertEquals(Language.RUSSIAN, settings.screenTargetLanguage)
     }
 
     @Test

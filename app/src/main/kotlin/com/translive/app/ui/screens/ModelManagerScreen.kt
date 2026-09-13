@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -294,7 +295,7 @@ fun ModelManagerScreen(
                             isExporting = uiState.isExporting,
                             exportProgress = uiState.exportProgress,
                             modifier = Modifier
-                                .padding(start = 32.dp, end = 16.dp, top = 2.dp, bottom = 2.dp)
+                                .padding(start = 20.dp, end = 16.dp, top = 2.dp, bottom = 2.dp)
                                 .animateItem()
                         )
                     }
@@ -630,7 +631,10 @@ private fun FamilyHeader(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    FlowRow(
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
                             text = family.name,
                             style = MaterialTheme.typography.titleMedium,
@@ -639,8 +643,7 @@ private fun FamilyHeader(
                         if (family.isSpecialized) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f),
-                                modifier = Modifier.padding(start = 8.dp)
+                                color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
                             ) {
                                 Text(
                                     text = stringResource(R.string.model_category_translation),
@@ -653,8 +656,7 @@ private fun FamilyHeader(
                         if (familyState.hasActiveVariant) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                                modifier = Modifier.padding(start = 6.dp)
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                             ) {
                                 Text(
                                     text = stringResource(R.string.model_active_checked),
@@ -953,7 +955,7 @@ private fun ModelCard(
         )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
-            // Top row: name + badges
+            // Top row: variant name + primary status badge
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
@@ -962,41 +964,39 @@ private fun ModelCard(
                     text = variant.quantName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
                 )
-                Text(
-                    text = variant.backendLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 8.dp)
-                )
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = when (variant.performanceTier) {
-                        ModelPerformanceTier.FAST_BUDGET -> MaterialTheme.colorScheme.secondary.copy(alpha = 0.15f)
-                        ModelPerformanceTier.BALANCED -> MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                        ModelPerformanceTier.MAX_QUALITY -> MaterialTheme.colorScheme.tertiary.copy(alpha = 0.15f)
-                        ModelPerformanceTier.GPU_ACCELERATED -> MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
-                    },
-                    modifier = Modifier.padding(start = 6.dp)
-                ) {
-                    Text(
-                        text = variant.performanceTier.badgeLabel,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = when (variant.performanceTier) {
-                            ModelPerformanceTier.FAST_BUDGET -> MaterialTheme.colorScheme.secondary
-                            ModelPerformanceTier.BALANCED -> MaterialTheme.colorScheme.primary
-                            ModelPerformanceTier.MAX_QUALITY -> MaterialTheme.colorScheme.tertiary
-                            ModelPerformanceTier.GPU_ACCELERATED -> MaterialTheme.colorScheme.error
-                        },
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
-                if (variant.isRecommended) {
+                if (state.status == ModelStatus.ACTIVE) {
+                    Spacer(modifier = Modifier.width(8.dp))
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(start = 6.dp)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Check,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = stringResource(R.string.model_active_checked),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                } else if (variant.isRecommended) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                     ) {
                         Text(
                             text = stringResource(R.string.model_recommended),
@@ -1006,14 +1006,67 @@ private fun ModelCard(
                         )
                     }
                 }
-                if (state.status == ModelStatus.ACTIVE) {
+            }
+
+            // Second row: backend & performance metadata in a responsive FlowRow
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 4.dp)
+            ) {
+                // Backend pill
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
+                    Text(
+                        text = variant.backendLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+
+                // Performance Tier pill with Vector Icon (Zero-Emoji)
+                val (tierIcon, tierColor) = when (variant.performanceTier) {
+                    ModelPerformanceTier.FAST_BUDGET -> Icons.Outlined.Speed to MaterialTheme.colorScheme.secondary
+                    ModelPerformanceTier.BALANCED -> Icons.Outlined.Tune to MaterialTheme.colorScheme.primary
+                    ModelPerformanceTier.MAX_QUALITY -> Icons.Outlined.WorkspacePremium to MaterialTheme.colorScheme.tertiary
+                    ModelPerformanceTier.GPU_ACCELERATED -> Icons.Outlined.Bolt to MaterialTheme.colorScheme.error
+                }
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = tierColor.copy(alpha = 0.12f)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Icon(
+                            imageVector = tierIcon,
+                            contentDescription = null,
+                            tint = tierColor,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(modifier = Modifier.width(3.dp))
+                        Text(
+                            text = variant.performanceTier.badgeLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tierColor
+                        )
+                    }
+                }
+
+                if (state.status == ModelStatus.ACTIVE && variant.isRecommended) {
                     Surface(
                         shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                        modifier = Modifier.padding(start = 6.dp)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
                     ) {
                         Text(
-                            text = stringResource(R.string.model_active_checked),
+                            text = stringResource(R.string.model_recommended),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1021,8 +1074,6 @@ private fun ModelCard(
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(4.dp))
 
             // Description
             Text(

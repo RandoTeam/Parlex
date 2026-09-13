@@ -725,9 +725,6 @@ class ScreenTranslateOverlayService : Service() {
         val timeoutMs = if (isLlm) 15_000L else 8_000L
         val timedOut = withTimeoutOrNull(timeoutMs) {
             try {
-                val targetLang = settings.effectiveScreenTargetLanguage
-                val targetCode = targetLang.code
-
                 val rawCandidates: List<CandidateBlock> = withContext(Dispatchers.Default) {
                     if (!directNodes.isNullOrEmpty()) {
                         // Native A11y nodes: direct semantic widgets with exact screen bounds (NO OCR clustering)
@@ -760,12 +757,68 @@ class ScreenTranslateOverlayService : Service() {
                     return@withTimeoutOrNull true
                 }
 
+                // 1. Establish Screen-Level Consensus Language BEFORE per-block filtering
+                val aggregatedSample = candidates
+                    .sortedByDescending { it.rawText.length }
+                    .take(8)
+                    .joinToString(" ") { it.rawText }
+                val detectedScreenLang = if (aggregatedSample.isNotBlank()) {
+                    languageDetectionEngine.detect(aggregatedSample)
+                } else {
+                    Language.ENGLISH
+                }
+
+                // 2. Resolve Effective Source Language
+                val sourceLang = if (settings.isScreenSourceAuto) {
+                    detectedScreenLang
+                } else {
+                    settings.screenSourceLanguage
+                }
+                val sourceCode = sourceLang.code
+                val sourceDisplayCode = if (settings.isScreenSourceAuto) "auto" else sourceCode
+
+                // 3. Resolve Target Language & Smart Inversion Guard
+                var targetLang = settings.effectiveScreenTargetLanguage
+                var targetCode = targetLang.code
+
+                // If screen dominant language matches target language, auto-invert to user's native language or alternate
+                if (sourceCode == targetCode) {
+                    val nativeLang = settings.defaultNativeLanguage
+                    targetLang = if (sourceCode != nativeLang.code) {
+                        nativeLang
+                    } else if (sourceCode != "en") {
+                        Language.ENGLISH
+                    } else {
+                        Language.RUSSIAN
+                    }
+                    targetCode = targetLang.code
+                }
+
+                fun isLatinOnly(s: String): Boolean =
+                    s.any { it in 'A'..'Z' || it in 'a'..'z' } &&
+                    s.none { it in '\u0600'..'\u06FF' || it in '\u0400'..'\u04FF' || it in '\u4E00'..'\u9FFF' || it in '\uAC00'..'\uD7AF' || it in '\u3040'..'\u30FF' }
+
                 val arBoxes: List<ArTranslatedBox> = withContext(Dispatchers.IO) {
-                    // Per-block language detection: filter out text that is already in target language
+                    // Per-block language detection with Screen-Level Script Guard:
                     val candidatesWithLang = candidates.map { cand ->
-                        val detected = languageDetectionEngine.detect(cand.rawText)
+                        val detected = if (settings.isScreenSourceAuto) {
+                            if (cand.rawText.length < 25 && isLatinOnly(cand.rawText) && sourceLang == Language.ENGLISH) {
+                                // Script guard: Isolated short Latin token on English screen cannot be Arabic/Persian/Urdu
+                                Language.ENGLISH
+                            } else {
+                                val d = languageDetectionEngine.detect(cand.rawText)
+                                if (isLatinOnly(cand.rawText) && (d.code == "ar" || d.code == "fa" || d.code == "ur")) {
+                                    sourceLang
+                                } else {
+                                    d
+                                }
+                            }
+                        } else {
+                            sourceLang
+                        }
                         cand to detected
                     }
+
                     val toTranslate = candidatesWithLang.filter { (_, detected) ->
                         detected.code != targetCode
                     }
@@ -776,13 +829,14 @@ class ScreenTranslateOverlayService : Service() {
 
                     // Pre-prepare primary language pair with timeout guard
                     val sampleText = toTranslate.maxByOrNull { it.first.rawText.length }?.first?.rawText ?: ""
-                    val primarySrc = if (sampleText.isNotBlank()) languageDetectionEngine.detect(sampleText).code else "en"
-                    if (primarySrc != targetCode) {
+                    val primarySrc = if (sampleText.isNotBlank()) languageDetectionEngine.detect(sampleText).code else sourceCode
+                    val effectiveSrc = if (primarySrc != targetCode) primarySrc else sourceCode
+                    if (effectiveSrc != targetCode) {
                         if (isLlm && translationEngine.isLoaded) {
                             // LLM engine ready
                         } else {
                             withTimeoutOrNull(15_000L) {
-                                fastTranslateEngine.downloadAndActivate(primarySrc, targetCode)
+                                fastTranslateEngine.downloadAndActivate(effectiveSrc, targetCode)
                             }
                         }
                     }
@@ -804,7 +858,7 @@ class ScreenTranslateOverlayService : Service() {
                             rawText = cand.rawText,
                             translatedText = trans,
                             boundingBox = cand.boundingBox,
-                            sourceLangCode = detected.code,
+                            sourceLangCode = if (settings.isScreenSourceAuto) detected.code else sourceCode,
                             targetLangCode = targetCode
                         )
                     }
@@ -822,7 +876,7 @@ class ScreenTranslateOverlayService : Service() {
                     }
                     return@withTimeoutOrNull true
                 }
-                showArOverlay(arBoxes, bitmap)
+                showArOverlay(arBoxes, bitmap, sourceDisplayCode, targetCode)
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.COMPLETE)
                 true
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -845,7 +899,12 @@ class ScreenTranslateOverlayService : Service() {
         }
     }
 
-    private fun showArOverlay(boxes: List<ArTranslatedBox>, frozenBitmap: Bitmap?) {
+    private fun showArOverlay(
+        boxes: List<ArTranslatedBox>,
+        frozenBitmap: Bitmap?,
+        sourceCode: String = "auto",
+        targetCode: String = "ru"
+    ) {
         dismissArOverlay()
         val wm = windowManager ?: return
 
@@ -876,6 +935,8 @@ class ScreenTranslateOverlayService : Service() {
             overlayStyle = settings.overlayStyle,
             screenWidth = screenWidth,
             screenHeight = screenHeight,
+            initialSourceLang = sourceCode,
+            initialTargetLang = targetCode,
             onDismiss = {
                 dismissArOverlay()
                 dismissLensScanEffect()
@@ -894,6 +955,7 @@ class ScreenTranslateOverlayService : Service() {
             saveScreenshotWithTranslation()
         }
         overlay.onLanguageChanged = { src, tgt ->
+            settings.updateScreenLanguagePair(src, tgt)
             retranslateCurrentScreen(src, tgt)
         }
 
@@ -914,6 +976,7 @@ class ScreenTranslateOverlayService : Service() {
     }
 
     private fun retranslateCurrentScreen(newSourceCode: String, newTargetCode: String) {
+        settings.updateScreenLanguagePair(newSourceCode, newTargetCode)
         val candidates = lastCandidates.takeIf { it.isNotEmpty() }
             ?: lastArBoxes.map { CandidateBlock(it.rawText, it.boundingBox) }
         if (candidates.isEmpty()) return
@@ -943,7 +1006,13 @@ class ScreenTranslateOverlayService : Service() {
                         }
                     } else {
                         val sampleText = toTranslate.maxByOrNull { it.first.rawText.length }?.first?.rawText ?: ""
-                        val primarySrc = if (sampleText.isNotBlank()) languageDetectionEngine.detect(sampleText).code else "en"
+                        val primarySrc = if (newSourceCode != "auto") {
+                            newSourceCode
+                        } else if (sampleText.isNotBlank()) {
+                            languageDetectionEngine.detect(sampleText).code
+                        } else {
+                            "en"
+                        }
                         if (primarySrc != newTargetCode) {
                             withTimeoutOrNull(10_000L) {
                                 fastTranslateEngine.downloadAndActivate(primarySrc, newTargetCode)

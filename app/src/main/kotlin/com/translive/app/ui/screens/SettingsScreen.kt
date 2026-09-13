@@ -40,6 +40,7 @@ import com.translive.app.ui.components.AppBottomNavigation
 import com.translive.app.ui.components.BottomNavDestination
 import com.translive.app.ui.components.SystemPermissionsSettingsCard
 import com.translive.app.ui.viewmodel.SettingsViewModel
+import com.translive.app.engine.hardware.QualcommNpuRegistry
 
 @Composable
 fun SettingsScreen(
@@ -71,6 +72,8 @@ fun SettingsScreen(
     val dialogueStorageStats by viewModel.dialogueStorageStats.collectAsState()
     val screenSyncTargetWithMain by viewModel.screenSyncTargetWithMain.collectAsState()
     val screenTargetLanguage by viewModel.screenTargetLanguage.collectAsState()
+    val screenSourceLanguage by viewModel.screenSourceLanguage.collectAsState()
+    val isScreenSourceAuto by viewModel.isScreenSourceAuto.collectAsState()
     val screenA11yShortcutBehavior by viewModel.screenA11yShortcutBehavior.collectAsState()
     val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
     val systemPermissionsState by viewModel.systemPermissionsState.collectAsState()
@@ -174,6 +177,47 @@ fun SettingsScreen(
                     selected = screenA11yShortcutBehavior == com.translive.app.data.ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE,
                     onClick = { viewModel.setScreenA11yShortcutBehavior(com.translive.app.data.ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE) }
                 )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Text(stringResource(R.string.settings_screen_source_lang_title), style = MaterialTheme.typography.titleSmall)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    stringResource(R.string.settings_screen_source_lang_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = isScreenSourceAuto,
+                        onClick = { viewModel.setIsScreenSourceAuto(true) },
+                        label = { Text(stringResource(R.string.settings_screen_source_auto), style = MaterialTheme.typography.bodySmall) }
+                    )
+                    listOf(
+                        com.translive.app.data.model.Language.ENGLISH,
+                        com.translive.app.data.model.Language.RUSSIAN,
+                        com.translive.app.data.model.Language.CHINESE_SIMPLIFIED,
+                        com.translive.app.data.model.Language.GERMAN,
+                        com.translive.app.data.model.Language.FRENCH,
+                        com.translive.app.data.model.Language.SPANISH,
+                        com.translive.app.data.model.Language.JAPANESE,
+                        com.translive.app.data.model.Language.KOREAN,
+                        com.translive.app.data.model.Language.VIETNAMESE
+                    ).forEach { lang ->
+                        FilterChip(
+                            selected = !isScreenSourceAuto && screenSourceLanguage == lang,
+                            onClick = {
+                                viewModel.setIsScreenSourceAuto(false)
+                                viewModel.setScreenSourceLanguage(lang)
+                            },
+                            label = { Text(lang.displayName, style = MaterialTheme.typography.bodySmall) }
+                        )
+                    }
+                }
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
@@ -373,7 +417,9 @@ fun SettingsScreen(
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                 val cpuSupported = viewModel.activeModelSupportsCpu()
                 val gpuSupported = viewModel.activeModelSupportsGpu()
+                val npuSupported = viewModel.activeModelSupportsNpu()
                 val gpuRequiresOpenClBuild = viewModel.activeModelGpuRequiresOpenClBuild()
+                val npuProfile = remember { QualcommNpuRegistry.getProfile() }
                 Text(stringResource(R.string.settings_compute_backend), style = MaterialTheme.typography.titleSmall)
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
@@ -400,6 +446,16 @@ fun SettingsScreen(
                     enabled = gpuSupported,
                     onClick = { viewModel.setBackend(SettingsRepository.BACKEND_GPU) }
                 )
+                if (npuProfile.isNpuSupported) {
+                    BackendOption(
+                        label = "NPU (${npuProfile.architecture.generationName})",
+                        description = if (npuSupported) "Прямое аппаратное ускорение на Qualcomm Hexagon NPU (${npuProfile.peakTops} TOPS)."
+                        else "Для NPU требуется модель на базе LiteRT-LM (Gemma 4 / E2B).",
+                        selected = backend == SettingsRepository.BACKEND_NPU,
+                        enabled = npuSupported,
+                        onClick = { viewModel.setBackend(SettingsRepository.BACKEND_NPU) }
+                    )
+                }
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     "Возможности выбранной модели: ${viewModel.activeModelBackendLabel()}",

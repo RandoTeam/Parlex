@@ -10,6 +10,7 @@ import com.translive.app.data.model.ModelRuntime
 import com.translive.app.engine.LiteRtTranslationEngine
 import com.translive.app.engine.OcrMnnRuntime
 import com.translive.app.engine.TranslationEngine
+import com.translive.app.engine.hardware.QualcommNpuRegistry
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -62,6 +63,12 @@ class SettingsViewModel @Inject constructor(
 
     private val _screenTargetLanguage = MutableStateFlow(settings.screenTargetLanguage)
     val screenTargetLanguage: StateFlow<com.translive.app.data.model.Language> = _screenTargetLanguage.asStateFlow()
+
+    private val _screenSourceLanguage = MutableStateFlow(settings.screenSourceLanguage)
+    val screenSourceLanguage: StateFlow<com.translive.app.data.model.Language> = _screenSourceLanguage.asStateFlow()
+
+    private val _isScreenSourceAuto = MutableStateFlow(settings.isScreenSourceAuto)
+    val isScreenSourceAuto: StateFlow<Boolean> = _isScreenSourceAuto.asStateFlow()
 
     private val _screenA11yShortcutBehavior = MutableStateFlow(settings.screenA11yShortcutBehavior)
     val screenA11yShortcutBehavior: StateFlow<com.translive.app.data.ScreenA11yShortcutBehavior> = _screenA11yShortcutBehavior.asStateFlow()
@@ -239,6 +246,16 @@ class SettingsViewModel @Inject constructor(
         _screenTargetLanguage.value = language
     }
 
+    fun setScreenSourceLanguage(language: com.translive.app.data.model.Language) {
+        settings.screenSourceLanguage = language
+        _screenSourceLanguage.value = language
+    }
+
+    fun setIsScreenSourceAuto(value: Boolean) {
+        settings.isScreenSourceAuto = value
+        _isScreenSourceAuto.value = value
+    }
+
     fun setScreenA11yShortcutBehavior(behavior: com.translive.app.data.ScreenA11yShortcutBehavior) {
         settings.screenA11yShortcutBehavior = behavior
         _screenA11yShortcutBehavior.value = behavior
@@ -254,6 +271,11 @@ class SettingsViewModel @Inject constructor(
             ModelRuntime.GGUF -> true
             ModelRuntime.OCR -> false
         }
+    }
+
+    fun activeModelSupportsNpu(): Boolean {
+        val variant = modelRepository.getActiveVariant() ?: return false
+        return QualcommNpuRegistry.getProfile().isNpuSupported && variant.runtime == ModelRuntime.LITERT_LM
     }
 
     fun activeModelGpuRequiresOpenClBuild(): Boolean = false

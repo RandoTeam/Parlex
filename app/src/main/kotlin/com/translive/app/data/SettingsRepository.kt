@@ -54,6 +54,7 @@ open class SettingsRepository @Inject constructor(
 
         const val BACKEND_CPU = "cpu"
         const val BACKEND_GPU = "gpu"
+        const val BACKEND_NPU = "npu"
 
         const val SPEECH_MODEL_WHISPER_TINY = "whisper_tiny"
         const val SPEECH_MODEL_QWEN3_ASR_06B = "qwen3_asr_0_6b"
@@ -82,8 +83,9 @@ open class SettingsRepository @Inject constructor(
 
     var backend: String
         get() = when (prefs?.getString(KEY_BACKEND, BACKEND_CPU)) {
+            BACKEND_NPU -> BACKEND_NPU
             BACKEND_GPU -> BACKEND_GPU
-            else -> BACKEND_CPU // Includes migration from the removed NPU setting.
+            else -> BACKEND_CPU
         }
         set(value) = prefs?.edit()?.putString(KEY_BACKEND, value)?.apply() ?: Unit
 
@@ -205,15 +207,15 @@ open class SettingsRepository @Inject constructor(
         set(value) = prefs?.edit()?.putString(KEY_CURRENCY_SYNC_POLICY, value.id)?.apply() ?: Unit
 
     var overlayStyle: String
-        get() = prefs?.getString(KEY_OVERLAY_STYLE, OVERLAY_STYLE_DARK) ?: OVERLAY_STYLE_DARK
+        get() = prefs?.getString(KEY_OVERLAY_STYLE, OVERLAY_STYLE_INPAINTING) ?: OVERLAY_STYLE_INPAINTING
         set(value) { prefs?.edit()?.putString(KEY_OVERLAY_STYLE, value)?.apply() }
 
     open var screenSyncTargetWithMain: Boolean
-        get() = prefs?.getBoolean(KEY_SCREEN_SYNC_TARGET_WITH_MAIN, true) ?: true
+        get() = prefs?.getBoolean(KEY_SCREEN_SYNC_TARGET_WITH_MAIN, false) ?: false
         set(value) = prefs?.edit()?.putBoolean(KEY_SCREEN_SYNC_TARGET_WITH_MAIN, value)?.apply() ?: Unit
 
     open var screenTargetLanguage: Language
-        get() = getLanguage(KEY_SCREEN_TARGET_LANGUAGE, Language.RUSSIAN)
+        get() = getLanguage(KEY_SCREEN_TARGET_LANGUAGE, defaultNativeLanguage)
         set(value) = prefs?.edit()?.putString(KEY_SCREEN_TARGET_LANGUAGE, value.code)?.apply() ?: Unit
 
     open var screenSourceLanguage: Language
@@ -224,8 +226,21 @@ open class SettingsRepository @Inject constructor(
         get() = prefs?.getBoolean(KEY_SCREEN_SOURCE_AUTO, true) ?: true
         set(value) = prefs?.edit()?.putBoolean(KEY_SCREEN_SOURCE_AUTO, value)?.apply() ?: Unit
 
+    val defaultNativeLanguage: Language
+        get() = Language.fromCode(java.util.Locale.getDefault().language) ?: Language.RUSSIAN
+
     val effectiveScreenTargetLanguage: Language
         get() = if (screenSyncTargetWithMain) textTargetLanguage else screenTargetLanguage
+
+    fun updateScreenLanguagePair(sourceCode: String, targetCode: String) {
+        if (sourceCode.lowercase() == "auto") {
+            isScreenSourceAuto = true
+        } else {
+            isScreenSourceAuto = false
+            Language.fromCode(sourceCode)?.let { screenSourceLanguage = it }
+        }
+        Language.fromCode(targetCode)?.let { screenTargetLanguage = it }
+    }
 
     open var screenA11yShortcutBehavior: ScreenA11yShortcutBehavior
         get() = ScreenA11yShortcutBehavior.fromId(prefs?.getString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, null))

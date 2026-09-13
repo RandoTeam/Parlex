@@ -108,7 +108,7 @@
     <string name="model_delete">刪除</string>
     <string name="storage_downloaded">已下載：%1$s</string>
     <string name="storage_free">可用空間：%1$s</string>
-    <string name="model_recommended">⭐ 推薦</string>
+    <string name="model_recommended">推薦</string>
     <string name="model_active_checked">✓ 已啟用</string>
     <string name="model_select">選擇</string>
     <string name="model_active">已啟用</string>
@@ -201,4 +201,7 @@
     <string name="screen_overlay_capture_failed">螢幕畫面擷取失敗</string>
     <string name="screen_overlay_timeout">翻譯超時</string>
     <string name="screen_overlay_cancelled">翻譯已取消</string>
+    <string name="settings_screen_source_lang_title">螢幕識別來源語言</string>
+    <string name="settings_screen_source_lang_desc">設定螢幕文字識別的預設語言，或保持自動偵測。</string>
+    <string name="settings_screen_source_auto">自動偵測</string>
 </resources>

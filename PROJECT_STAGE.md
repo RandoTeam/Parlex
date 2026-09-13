@@ -7,15 +7,15 @@ Snapshot date: 2026-09-14
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
 - Baseline head before this release pass: `c579621`
-- Latest public signed prerelease: `v1.5.1-beta.2`
-- Latest public APK asset: `Parlex-v1.5.1-beta.2-release.apk`
+- Latest public signed prerelease: `v1.5.1-beta.3`
+- Latest public APK asset: `Parlex-v1.5.1-beta.3-release.apk`
 - Public APK SHA-256:
-  `5d08b9132c225ee6b149df716acbf827e7a24619d7a8d6b5900fead617506b77`
+  `8c9eff3ac2c0dd46ba5b37780055a51abeeedd7a9fa7713bcf3cb850543fd685`
 
 ## App Version
 
-- `versionCode`: 15101
-- `versionName`: `1.5.1-beta.2`
+- `versionCode`: 15102
+- `versionName`: `1.5.1-beta.3`
 - `compileSdk`: 36
 - `targetSdk`: 36
 - `minSdk`: 26
@@ -23,6 +23,7 @@ Snapshot date: 2026-09-14
 
 ## Current Functional Stage
 
+- **Qualcomm Snapdragon NPU Hardware Offload & In-Place AR Typography (Phase Y & X.9-11)**: Direct on-device NPU hardware execution using LiteRT Qualcomm NPU delegate (`Backend.NPU(context.applicationInfo.nativeLibraryDir)`), 3-tier fallback ladder (`NPU` -> `GPU` -> `CPU`), and dynamic Qualcomm Hexagon HTP hardware probe (`QualcommNpuProfile.kt`, `QualcommNpuRegistry.kt`) detecting Snapdragon 8 Elite (SM8750 / HTP v79, 45 TOPS) and Snapdragon 8 Gen 3 (SM8650 / HTP v75, 45 TOPS). Architecture documented in `docs/NPU_INTEGRATION_PLAN.md`. In-place AR screen typography overhaul in `ArTranslateOverlayView`: line-height proportional font scaling (`12sp–15sp` clamp for multi-line blocks, 0.74 line height ratio), top-anchored positioning preventing upward paragraph expansion over headlines, 3-pass elastic collision relaxation, balanced line breaking (`BREAK_STRATEGY_BALANCED`, `HYPHENATION_FREQUENCY_NORMAL`), inpainting background sampling (`#0D1117`) eliminating cyan borders, dynamic status bar insets (`WindowInsets`), Unicode code point prefix protection (`TextPrefixProtector.kt`) preventing emoji/bullet stripping in ML Kit, zero-latency technical glossary post-processor (`NmtTechGlossaryPostProcessor.kt`), and Material Design 3 Zero-Emoji card overhaul in Model Manager.
 - **Screen Text Reconstruction, Interactive In-Place AR & Resilience (Phase X)**: Total architectural stabilization of on-device Screen Translation. Replaced OCR dependency and fragile heuristic clusterers with 100% native vector OS node parsing (`NativeScreenTextExtractor`) supporting `TYPE_APPLICATION` filtering, leaf-node priority (eliminating duplicate container text), semantic `contentDescription` icon filtering, and topological reading-order line banding (Y-band + left-to-right). Completely bypassed `ArBoundingBoxClusterer` for native accessibility nodes to preserve exact pixel bounds and eliminate multi-line text "каша". Added selective screen text noise filtering (`ScreenTextNoiseFilter`) automatically eliminating solitary timestamps (`12:45`), battery levels (`98%`), standalone numbers/dates, URLs, file paths, and stray symbols while preserving natural conversational text. Integrated Google Circle to Search / Apple Liquid Glass visual styling with full-frame silent screenshot freeze, edge glow halo frame (`LensScanEffectView`, `ArTranslateOverlayView`), and smooth tap-to-dismiss alpha fade. Implemented an interactive Liquid Glass top bar with Source (`Auto ▼` / language code) and Target (`RU ▼`) chips, quick-swap button `⇄` with 180° rotation animation, instant 0ms candidate re-translation (`retranslateCurrentScreen`) without re-capturing screenshots or A11y tree walking, global `[Translate ⇄ Original]` toggle, and individual pill `Hide` micro-action. Hardened fault tolerance with a lease-based self-healing mutex breaking stale locks (>10s), execution timeouts (8s Fast / 15s LLM), a 10s watchdog handler runnable, busy-bubble tap recovery (`recoverToIdle`), `ACTION_CANCEL` drag reset in `FloatingBubbleView`, and 2.5s auto-reset from `COMPLETE` to `IDLE`.
 - **Zero-Latency Screen Translation & Volume Key Decoupling (Phase W)**: High-speed zero-dialogue screen translation pipeline with direct `AccessibilityNodeInfo` BFS vector text extraction (`extractVisibleTextNodesFast`), 1-pass delimited batch translation (`FastBatchTranslator`), fine-tuned AR bounding box clusterer (`ArBoundingBoxClusterer`), volume shortcut decoupling (`ScreenA11yShortcutBehavior`: `SINGLE_SHOT_NO_BUBBLE` vs `TOGGLE_FLOATING_BUBBLE`), independent screen target language synchronization/selection, and offline travel pack download hardening with automatic Whisper/VAD STT bundling.
 - **Model Manager 5-Step Overhaul & Fast NMT Offline Sync (Phase M)**: 5-step numbered hierarchy structuring all offline assets: Step 1 Primary AI Translator (Hy-MT2 1.8B/7B, Gemma 4 LiteRT, TranslateGemma 4B, HY-MT 1.5, RAM management), Step 2 Fast NMT (expanded 59-language catalog, search filter, batch download, and one-file `.parlex-fast` archive import/export with `ParlexFastManifest`, `FastModelSyncPacker`, `FastModelArchiveValidator`), Step 3 Speech STT (Zipformer, SenseVoice, Whisper Tiny, Qwen3-ASR), Step 4 Vision & OCR (PP-OCRv6 tiny MNN), Step 5 Dictionaries & Data (Travel Packs Hub, built-in RU ↔ EN dictionary). Includes universal Exponential Moving Average (EMA) download speed smoothing, live progress formatting, and strict Material Design 3 zero-emoji compliance.

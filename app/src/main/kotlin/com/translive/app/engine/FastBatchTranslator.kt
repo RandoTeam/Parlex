@@ -37,32 +37,69 @@ class FastBatchTranslator(
         texts: List<String>
     ): List<String> = withContext(Dispatchers.Default) {
         if (texts.isEmpty()) return@withContext emptyList()
+
+        val splits = texts.map { TextPrefixProtector.split(it) }
+
         if (texts.size == 1) {
-            return@withContext listOf(translateFunc(texts.first()))
-        }
-
-        // Chunk into safe sub-batches if total character length is large
-        val chunks = mutableListOf<List<String>>()
-        var currentChunk = mutableListOf<String>()
-        var currentChunkLen = 0
-
-        for (text in texts) {
-            val textLen = text.length
-            if (currentChunkLen + textLen > MAX_BATCH_CHARS && currentChunk.isNotEmpty()) {
-                chunks.add(currentChunk)
-                currentChunk = mutableListOf()
-                currentChunkLen = 0
+            val split = splits.first()
+            if (split.cleanText.isBlank()) {
+                return@withContext listOf(NmtTechGlossaryPostProcessor.postProcess(split.prefix))
             }
-            currentChunk.add(text)
-            currentChunkLen += textLen
+            val raw = translateFunc(split.cleanText)
+            val combined = TextPrefixProtector.recombine(split.prefix, raw)
+            return@withContext listOf(NmtTechGlossaryPostProcessor.postProcess(combined))
         }
-        if (currentChunk.isNotEmpty()) chunks.add(currentChunk)
 
-        val translatedChunks = chunks.map { chunk ->
-            async { processSingleDelimitedBatch(chunk) }
-        }.awaitAll()
+        val nonBlankIndices = mutableListOf<Int>()
+        val queryTexts = mutableListOf<String>()
+        for (i in splits.indices) {
+            if (splits[i].cleanText.isNotBlank()) {
+                nonBlankIndices.add(i)
+                queryTexts.add(splits[i].cleanText)
+            }
+        }
 
-        translatedChunks.flatten()
+        val translatedQueries = if (queryTexts.isNotEmpty()) {
+            // Chunk into safe sub-batches if total character length is large
+            val chunks = mutableListOf<List<String>>()
+            var currentChunk = mutableListOf<String>()
+            var currentChunkLen = 0
+
+            for (text in queryTexts) {
+                val textLen = text.length
+                if (currentChunkLen + textLen > MAX_BATCH_CHARS && currentChunk.isNotEmpty()) {
+                    chunks.add(currentChunk)
+                    currentChunk = mutableListOf()
+                    currentChunkLen = 0
+                }
+                currentChunk.add(text)
+                currentChunkLen += textLen
+            }
+            if (currentChunk.isNotEmpty()) chunks.add(currentChunk)
+
+            val translatedChunks = chunks.map { chunk ->
+                async { processSingleDelimitedBatch(chunk) }
+            }.awaitAll()
+
+            translatedChunks.flatten()
+        } else {
+            emptyList()
+        }
+
+        var queryIdx = 0
+        val finalResults = ArrayList<String>(texts.size)
+        for (i in splits.indices) {
+            val split = splits[i]
+            val translatedBody = if (split.cleanText.isNotBlank()) {
+                translatedQueries.getOrElse(queryIdx++) { split.cleanText }
+            } else {
+                ""
+            }
+            val combined = TextPrefixProtector.recombine(split.prefix, translatedBody)
+            finalResults.add(NmtTechGlossaryPostProcessor.postProcess(combined))
+        }
+
+        finalResults
     }
 
     private suspend fun processSingleDelimitedBatch(chunk: List<String>): List<String> {
