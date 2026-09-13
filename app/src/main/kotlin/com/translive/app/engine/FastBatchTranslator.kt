@@ -29,7 +29,7 @@ class FastBatchTranslator(
 
     companion object {
         const val DELIMITER = "\n\n<<<§>>>\n\n"
-        val DELIMITER_REGEX = Regex("""\s*<<<\s*§\s*>>>\s*|\n\n+""")
+        val DELIMITER_REGEX = Regex("""\s*<<<\s*§\s*>>>\s*""")
         const val MAX_BATCH_CHARS = 1800
     }
 
@@ -77,11 +77,10 @@ class FastBatchTranslator(
 
         val rawTranslatedJoined = translateFunc(joinedPayload)
 
-        // Split by delimiter regex
+        // Split by delimiter regex (do not discard empty strings so count remains aligned)
         val splitResults = rawTranslatedJoined
             .split(DELIMITER_REGEX)
             .map { it.trim() }
-            .filter { it.isNotEmpty() }
 
         // If split results count matches inputs, return immediately
         if (splitResults.size == chunk.size) {

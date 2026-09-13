@@ -202,7 +202,7 @@ class MiniOverlayHudTest {
         stateMachine.dispatch(MiniHudEvent.Show)
 
         val allLanguages = Language.allLanguages
-        assertEquals(38, allLanguages.size)
+        assertEquals(Language.entries.size, allLanguages.size)
 
         for (lang in allLanguages) {
             stateMachine.dispatch(MiniHudEvent.OpenLanguagePicker)

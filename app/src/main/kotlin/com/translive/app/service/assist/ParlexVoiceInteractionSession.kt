@@ -1,4 +1,4 @@
-﻿package com.translive.app.service.assist
+package com.translive.app.service.assist
 
 import android.app.assist.AssistContent
 import android.app.assist.AssistStructure
@@ -20,7 +20,7 @@ class ParlexVoiceInteractionSession(context: Context) : VoiceInteractionSession(
         super.onHandleScreenshot(screenshot)
         Log.i(TAG, "onHandleScreenshot received: ${screenshot?.width}x${screenshot?.height}")
         if (screenshot != null) {
-            ScreenTranslateOverlayService.translateScreenshot(context, screenshot)
+            ScreenTranslateOverlayService.translateScreenshotOneShot(context, screenshot)
         } else {
             ScreenTranslateOverlayService.start(context)
         }

@@ -44,4 +44,18 @@ class ScreenTranslateOverlayTest {
         assertEquals("com.translive.app.action.REQUEST_LIVE_TRANSLATE", ScreenTranslateOverlayService.ACTION_REQUEST_LIVE_TRANSLATE)
         assertEquals("com.translive.app.action.SHOW_SCREEN_TRANSLATION", ScreenTranslateOverlayService.ACTION_SHOW_TRANSLATION)
     }
+
+    @Test
+    fun arTranslatedBox_preservesExactCoordinatesWithoutClusteringDistortion() {
+        val widget1Bounds = Rect().apply { left = 50; top = 100; right = 300; bottom = 150 }
+        val widget2Bounds = Rect().apply { left = 50; top = 160; right = 200; bottom = 200 }
+
+        val box1 = ArTranslatedBox("Header", "Заголовок", widget1Bounds, "en", "ru")
+        val box2 = ArTranslatedBox("Button", "Кнопка", widget2Bounds, "en", "ru")
+
+        assertEquals(100, box1.boundingBox.top)
+        assertEquals(150, box1.boundingBox.bottom)
+        assertEquals(160, box2.boundingBox.top)
+        assertEquals(200, box2.boundingBox.bottom)
+    }
 }

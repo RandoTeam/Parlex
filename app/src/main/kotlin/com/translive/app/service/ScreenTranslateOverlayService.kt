@@ -12,6 +12,7 @@ import android.content.pm.ServiceInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
@@ -161,13 +162,15 @@ class ScreenTranslateOverlayService : Service() {
 
         if (intent?.action == ACTION_TRANSLATE_NODES) {
             val nodes = pendingDirectNodes
+            val bmp = pendingDirectBitmap
             pendingDirectNodes = null
+            pendingDirectBitmap = null
             if (nodes != null && translationMutex.tryLock()) {
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
                 showLensScanEffect()
                 activeTranslationJob = serviceScope.launch {
                     try {
-                        processAndShowArTranslation(bitmap = null, directNodes = nodes)
+                        processAndShowArTranslation(bitmap = bmp, directNodes = nodes)
                     } catch (_: kotlinx.coroutines.CancellationException) {
                         // Cancelled by user
                     } catch (e: Exception) {
@@ -534,23 +537,46 @@ class ScreenTranslateOverlayService : Service() {
 
         val fastNodes = a11y.extractVisibleTextNodesFast()
         if (fastNodes.isNotEmpty()) {
-            activeTranslationJob = serviceScope.launch {
-                try {
-                    floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
-                    processAndShowArTranslation(bitmap = null, directNodes = fastNodes)
-                } catch (_: kotlinx.coroutines.CancellationException) {
-                    // Cancelled by user tap — cleanup handled in cancelActiveTranslation()
-                } catch (e: Exception) {
-                    Log.e(TAG, "Accessibility direct translation error", e)
-                    dismissLensScanEffect()
-                    floatingBubbleView?.setState(FloatingBubbleView.BubbleState.ERROR)
-                } finally {
-                    if (translationMutex.isLocked) {
-                        try { translationMutex.unlock() } catch (_: IllegalStateException) {}
+            a11y.captureSilentScreenshot(
+                onSuccess = { bitmap ->
+                    activeTranslationJob = serviceScope.launch {
+                        try {
+                            floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
+                            processAndShowArTranslation(bitmap = bitmap, directNodes = fastNodes)
+                        } catch (_: kotlinx.coroutines.CancellationException) {
+                            // Cancelled by user tap
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Accessibility direct translation error", e)
+                            dismissLensScanEffect()
+                            floatingBubbleView?.setState(FloatingBubbleView.BubbleState.ERROR)
+                        } finally {
+                            if (translationMutex.isLocked) {
+                                try { translationMutex.unlock() } catch (_: IllegalStateException) {}
+                            }
+                            activeTranslationJob = null
+                        }
                     }
-                    activeTranslationJob = null
+                },
+                onError = { _ ->
+                    activeTranslationJob = serviceScope.launch {
+                        try {
+                            floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
+                            processAndShowArTranslation(bitmap = null, directNodes = fastNodes)
+                        } catch (_: kotlinx.coroutines.CancellationException) {
+                            // Cancelled by user tap
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Accessibility direct translation error", e)
+                            dismissLensScanEffect()
+                            floatingBubbleView?.setState(FloatingBubbleView.BubbleState.ERROR)
+                        } finally {
+                            if (translationMutex.isLocked) {
+                                try { translationMutex.unlock() } catch (_: IllegalStateException) {}
+                            }
+                            activeTranslationJob = null
+                        }
+                    }
                 }
-            }
+            )
             return
         }
 
@@ -670,20 +696,24 @@ class ScreenTranslateOverlayService : Service() {
             val targetCode = targetLang.code
             val isLlm = settings.translationPolicy != TranslationPolicy.FAST
 
-            val clusters = withContext(Dispatchers.Default) {
+            data class Candidate(val rawText: String, val boundingBox: Rect)
+
+            val candidates: List<Candidate> = withContext(Dispatchers.Default) {
                 if (!directNodes.isNullOrEmpty()) {
-                    val lines = directNodes.map { com.translive.app.engine.OcrLine(it.text, it.bounds) }
-                    ArBoundingBoxClusterer.clusterLines(lines)
+                    // Native A11y nodes: direct semantic widgets with exact screen bounds (NO OCR clustering)
+                    directNodes.map { Candidate(it.text, it.bounds) }
                 } else if (bitmap != null) {
+                    // Fallback OCR: PP-OCRv6 + paragraph clustering for raster text
                     val ocrResult = ocrEngine.recognize(bitmap, "auto")
-                    ArBoundingBoxClusterer.cluster(ocrResult)
+                    val clusters = ArBoundingBoxClusterer.cluster(ocrResult)
+                    clusters.map { Candidate(it.consolidatedText, it.boundingBox) }
                 } else {
                     emptyList()
                 }
             }
             coroutineContext.ensureActive()
 
-            if (clusters.isEmpty()) {
+            if (candidates.isEmpty()) {
                 dismissLensScanEffect()
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.IDLE)
                 Toast.makeText(this@ScreenTranslateOverlayService, getString(R.string.screen_overlay_no_text), Toast.LENGTH_SHORT).show()
@@ -694,8 +724,21 @@ class ScreenTranslateOverlayService : Service() {
             }
 
             val arBoxes: List<ArTranslatedBox> = withContext(Dispatchers.IO) {
+                // Per-block language detection: filter out text that is already in target language
+                val candidatesWithLang = candidates.map { cand ->
+                    val detected = languageDetectionEngine.detect(cand.rawText)
+                    cand to detected
+                }
+                val toTranslate = candidatesWithLang.filter { (_, detected) ->
+                    detected.code != targetCode
+                }
+
+                if (toTranslate.isEmpty()) {
+                    return@withContext emptyList<ArTranslatedBox>()
+                }
+
                 // Pre-prepare primary language pair with timeout guard
-                val sampleText = clusters.maxByOrNull { it.consolidatedText.length }?.consolidatedText ?: ""
+                val sampleText = toTranslate.maxByOrNull { it.first.rawText.length }?.first?.rawText ?: ""
                 val primarySrc = if (sampleText.isNotBlank()) languageDetectionEngine.detect(sampleText).code else "en"
                 if (primarySrc != targetCode) {
                     if (isLlm && translationEngine.isLoaded) {
@@ -708,28 +751,23 @@ class ScreenTranslateOverlayService : Service() {
                 }
                 ensureActive()
 
-                val clusterTexts = clusters.map { it.consolidatedText }
+                val textsToTranslate = toTranslate.map { it.first.rawText }
                 val translatedTexts = if (isLlm && translationEngine.isLoaded) {
-                    clusters.map { cluster ->
+                    toTranslate.map { (cand, detected) ->
                         ensureActive()
-                        val detectedLang = languageDetectionEngine.detect(cluster.consolidatedText)
-                        if (detectedLang.code != targetCode) {
-                            translationEngine.translateSafe(cluster.consolidatedText, detectedLang, targetLang)
-                        } else {
-                            cluster.consolidatedText
-                        }
+                        translationEngine.translateSafe(cand.rawText, detected, targetLang)
                     }
                 } else {
-                    fastBatchTranslator.translateBatch(clusterTexts)
+                    fastBatchTranslator.translateBatch(textsToTranslate)
                 }
 
-                clusters.mapIndexed { index, cluster ->
-                    val trans = translatedTexts.getOrElse(index) { cluster.consolidatedText }
+                toTranslate.mapIndexed { index, (cand, detected) ->
+                    val trans = translatedTexts.getOrElse(index) { cand.rawText }
                     ArTranslatedBox(
-                        rawText = cluster.consolidatedText,
+                        rawText = cand.rawText,
                         translatedText = trans,
-                        boundingBox = cluster.boundingBox,
-                        sourceLangCode = primarySrc,
+                        boundingBox = cand.boundingBox,
+                        sourceLangCode = detected.code,
                         targetLangCode = targetCode
                     )
                 }
@@ -739,6 +777,14 @@ class ScreenTranslateOverlayService : Service() {
             lastArBoxes = arBoxes
 
             dismissLensScanEffect()
+            if (arBoxes.isEmpty()) {
+                floatingBubbleView?.setState(FloatingBubbleView.BubbleState.IDLE)
+                Toast.makeText(this@ScreenTranslateOverlayService, getString(R.string.screen_overlay_no_text), Toast.LENGTH_SHORT).show()
+                if (isOneShotSession && floatingBubbleView == null) {
+                    stopSelf()
+                }
+                return
+            }
             showArOverlay(arBoxes, bitmap)
             floatingBubbleView?.setState(FloatingBubbleView.BubbleState.COMPLETE)
         } catch (e: Exception) {
@@ -992,8 +1038,13 @@ class ScreenTranslateOverlayService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
-        fun translateNodes(context: Context, nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>) {
+        fun translateNodes(
+            context: Context,
+            nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>,
+            bitmap: Bitmap? = null
+        ) {
             pendingDirectNodes = nodes
+            pendingDirectBitmap = bitmap
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_NODES
                 putExtra(EXTRA_ONE_SHOT_MODE, false)
@@ -1001,8 +1052,13 @@ class ScreenTranslateOverlayService : Service() {
             ContextCompat.startForegroundService(context, intent)
         }
 
-        fun translateNodesOneShot(context: Context, nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>) {
+        fun translateNodesOneShot(
+            context: Context,
+            nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>,
+            bitmap: Bitmap? = null
+        ) {
             pendingDirectNodes = nodes
+            pendingDirectBitmap = bitmap
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_NODES
                 putExtra(EXTRA_ONE_SHOT_MODE, true)

@@ -85,7 +85,14 @@ class ScreenAccessibilityService : AccessibilityService() {
                         val nodes = extractVisibleTextNodesFast()
                         if (nodes.isNotEmpty()) {
                             Log.i(TAG, "Extracted ${nodes.size} vector text nodes from A11y tree in 0ms (Single-shot)")
-                            ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes)
+                            captureSilentScreenshot(
+                                onSuccess = { bitmap ->
+                                    ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, bitmap)
+                                },
+                                onError = { _ ->
+                                    ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, null)
+                                }
+                            )
                         } else {
                             // 2. Fallback to silent screenshot OCR for canvas/games
                             Log.i(TAG, "0 text nodes in A11y tree — falling back to silent screenshot capture")
@@ -169,97 +176,20 @@ class ScreenAccessibilityService : AccessibilityService() {
      * directly with exact screen coordinates in 1-3ms without OCR.
      */
     fun extractVisibleTextNodesFast(maxNodes: Int = 600): List<AccessibilityTextNode> {
-        val results = mutableListOf<AccessibilityTextNode>()
-        val screenBounds = Rect().apply {
-            val dm = resources.displayMetrics
-            left = 0
-            top = 0
-            right = dm.widthPixels
-            bottom = dm.heightPixels
-        }
+        val dm = resources.displayMetrics
+        val screenBounds = Rect(0, 0, dm.widthPixels, dm.heightPixels)
+        val wins = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) windows else null
+        val root = rootInActiveWindow
 
-        val roots = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            val wins = windows
-            if (wins.isNotEmpty()) {
-                wins.filter {
-                    it.type == AccessibilityWindowInfo.TYPE_APPLICATION ||
-                    it.type == AccessibilityWindowInfo.TYPE_SYSTEM
-                }.mapNotNull { it.root }
-            } else {
-                listOfNotNull(rootInActiveWindow)
-            }
-        } else {
-            listOfNotNull(rootInActiveWindow)
-        }
+        val extracted = NativeScreenTextExtractor.extract(
+            windows = wins,
+            rootInActiveWindow = root,
+            currentPackageName = packageName,
+            screenBounds = screenBounds,
+            maxNodes = maxNodes
+        )
 
-        if (roots.isEmpty()) return results
-
-        val queue = ArrayDeque<AccessibilityNodeInfo>()
-        val tempRect = Rect()
-
-        for (root in roots) {
-            queue.add(root)
-            var visited = 0
-
-            while (queue.isNotEmpty() && visited < maxNodes) {
-                val node = queue.removeFirst()
-                visited++
-
-                if (!node.isVisibleToUser) continue
-                if (node.isPassword) continue
-                if (node.packageName == packageName) continue
-
-                val text = node.text?.toString()?.trim()
-                val desc = node.contentDescription?.toString()?.trim()
-                val rawContent = if (!text.isNullOrBlank()) text else desc
-
-                node.getBoundsInScreen(tempRect)
-
-                val width = tempRect.right - tempRect.left
-                val height = tempRect.bottom - tempRect.top
-                val isValidGeometry = width > 8 && height > 8 && Rect.intersects(tempRect, screenBounds)
-                val hasMeaningfulText = !rawContent.isNullOrBlank() && rawContent.any { it.isLetterOrDigit() }
-
-                if (isValidGeometry && hasMeaningfulText) {
-                    val nodeRect = Rect().apply {
-                        left = tempRect.left
-                        top = tempRect.top
-                        right = tempRect.right
-                        bottom = tempRect.bottom
-                    }
-                    results.add(AccessibilityTextNode(text = rawContent!!, bounds = nodeRect))
-                }
-
-                val childCount = node.childCount
-                for (i in 0 until childCount) {
-                    node.getChild(i)?.let { child ->
-                        queue.add(child)
-                    }
-                }
-            }
-        }
-        return deduplicateNestedNodes(results)
-    }
-
-    private fun deduplicateNestedNodes(nodes: List<AccessibilityTextNode>): List<AccessibilityTextNode> {
-        if (nodes.size <= 1) return nodes
-        val sorted = nodes.sortedBy { (it.bounds.right - it.bounds.left) * (it.bounds.bottom - it.bounds.top) }
-        val preserved = mutableListOf<AccessibilityTextNode>()
-
-        for (candidate in sorted) {
-            val isDuplicateContainer = preserved.any { existing ->
-                existing.bounds != candidate.bounds &&
-                candidate.bounds.left <= existing.bounds.left &&
-                candidate.bounds.top <= existing.bounds.top &&
-                candidate.bounds.right >= existing.bounds.right &&
-                candidate.bounds.bottom >= existing.bounds.bottom &&
-                candidate.text.contains(existing.text)
-            }
-            if (!isDuplicateContainer) {
-                preserved.add(candidate)
-            }
-        }
-        return preserved
+        return extracted.map { AccessibilityTextNode(it.text, it.bounds) }
     }
 
     /**

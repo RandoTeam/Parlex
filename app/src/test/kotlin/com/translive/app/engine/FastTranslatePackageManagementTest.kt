@@ -54,7 +54,10 @@ class FastTranslatePackageManagementTest {
         val ML_KIT_SUPPORTED_CODES = setOf(
             "en", "zh", "ja", "ko", "fr", "de", "es", "pt", "it", "nl",
             "pl", "cs", "tr", "uk", "ru", "hi", "bn", "gu", "mr", "ta",
-            "te", "ur", "fa", "he", "ar", "th", "vi", "id", "ms", "tl"
+            "te", "ur", "fa", "he", "ar", "th", "vi", "id", "ms", "tl",
+            "af", "sq", "be", "bg", "ca", "hr", "da", "eo", "et", "fi",
+            "gl", "ka", "el", "ht", "hu", "is", "ga", "kn", "lv", "lt",
+            "mk", "mt", "no", "ro", "sk", "sl", "sw", "sv", "cy"
         )
 
         /** Languages not available in ML Kit NMT that require local LLM fallback */
@@ -95,41 +98,14 @@ class FastTranslatePackageManagementTest {
 
         /** Maps Parlex Language enum code to ML Kit model code or null for LLM fallback */
         fun toMlKitLang(code: String): String? {
-            return when (code) {
-                "en" -> "en"
-                "zh", "zh-Hant" -> "zh"
-                "ja" -> "ja"
-                "ko" -> "ko"
-                "fr" -> "fr"
-                "de" -> "de"
-                "es" -> "es"
-                "pt" -> "pt"
-                "it" -> "it"
-                "nl" -> "nl"
-                "pl" -> "pl"
-                "cs" -> "cs"
-                "tr" -> "tr"
-                "uk" -> "uk"
-                "ru" -> "ru"
-                "hi" -> "hi"
-                "bn" -> "bn"
-                "gu" -> "gu"
-                "mr" -> "mr"
-                "ta" -> "ta"
-                "te" -> "te"
-                "ur" -> "ur"
-                "fa" -> "fa"
-                "he" -> "he"
-                "ar" -> "ar"
-                "th" -> "th"
-                "vi" -> "vi"
-                "id" -> "id"
-                "ms" -> "ms"
+            val normalized = when (code) {
                 "fil" -> "tl"
-                // Dialects mapped to base Chinese model
-                "yue", "nan" -> "zh"
-                // Not in ML Kit NMT
-                "my", "km", "mn", "bo", "ug" -> null
+                else -> code
+            }
+            return when {
+                normalized in setOf("zh", "zh-Hant", "yue", "nan") -> "zh"
+                normalized in ML_KIT_SUPPORTED_CODES -> normalized
+                normalized in LLM_FALLBACK_CODES -> null
                 else -> null
             }
         }
@@ -268,7 +244,7 @@ class FastTranslatePackageManagementTest {
     @Test
     fun testPackageCatalog_allSupportedLanguagesMapToMlKitOrFallback() {
         val allLanguages = Language.allLanguages
-        assertEquals(38, allLanguages.size) // 33 primary + 5 dialects
+        assertEquals(67, allLanguages.size) // 62 primary + 5 dialects
 
         for (language in allLanguages) {
             val mlKitCode = manager.toMlKitLang(language.code)
@@ -313,7 +289,7 @@ class FastTranslatePackageManagementTest {
         val supportedPackages = packages.filter { it.fastSupported }
         val fallbackPackages = packages.filter { !it.fastSupported }
 
-        val expectedSupportedCount = 30 // 30 distinct ML Kit model packages
+        val expectedSupportedCount = 59 // 59 distinct ML Kit model packages
         assertEquals(expectedSupportedCount, supportedPackages.size)
         assertEquals(5, fallbackPackages.size)  // 5 LLM fallback languages
 
@@ -413,7 +389,7 @@ class FastTranslatePackageManagementTest {
         val success = manager.downloadLanguagePackages(supportedCodes)
 
         assertTrue(success)
-        assertEquals(30, manager.downloadedCodes.value.size)
+        assertEquals(59, manager.downloadedCodes.value.size)
         assertEquals(manager.getTotalCatalogSizeBytes(), manager.getInstalledSizeBytes())
         assertEquals(0L, manager.getMissingSizeBytes())
 

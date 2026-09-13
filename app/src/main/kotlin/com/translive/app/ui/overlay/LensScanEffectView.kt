@@ -98,6 +98,18 @@ class LensScanEffectView @JvmOverloads constructor(
         color = Color.parseColor("#607C4DFF")
     }
 
+    private val perimeterEdgeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f * density
+        color = Color.parseColor("#CC00E5FF")
+    }
+
+    private val perimeterEdgeHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 14f * density
+        color = Color.parseColor("#4D7C4DFF")
+    }
+
     private val cornerBracketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = cornerBracketWidth
@@ -186,6 +198,15 @@ class LensScanEffectView @JvmOverloads constructor(
         }
         vignettePaint.alpha = (globalAlpha * 255).toInt()
         canvas.drawRect(0f, 0f, viewWidth, viewHeight, vignettePaint)
+
+        // Perimeter Screen Edge Glow (Google & Apple Glass edge aura)
+        val edgeInset = 2f * density
+        val edgeCornerRadius = 24f * density
+        tempRectF.set(edgeInset, edgeInset, viewWidth - edgeInset, viewHeight - edgeInset)
+        perimeterEdgeHaloPaint.alpha = (globalAlpha * 180).toInt()
+        perimeterEdgeGlowPaint.alpha = (globalAlpha * 240).toInt()
+        canvas.drawRoundRect(tempRectF, edgeCornerRadius, edgeCornerRadius, perimeterEdgeHaloPaint)
+        canvas.drawRoundRect(tempRectF, edgeCornerRadius, edgeCornerRadius, perimeterEdgeGlowPaint)
 
         if (currentState == ScanEffectState.SCANNING || currentState == ScanEffectState.REVEALING) {
             val beamAlphaMultiplier = if (currentState == ScanEffectState.REVEALING) {

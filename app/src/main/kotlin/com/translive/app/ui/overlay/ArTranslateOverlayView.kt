@@ -54,8 +54,8 @@ internal data class ArRenderBox(
     val pillRect: RectF,
     val touchRect: RectF,
     val staticLayout: StaticLayout,
-    val textOffsetX: Float,
-    val textOffsetY: Float,
+    var textOffsetX: Float,
+    var textOffsetY: Float,
     val backgroundColor: Int,
     val textColor: Int,
     var isShowingOriginal: Boolean = false
@@ -183,6 +183,18 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         color = Color.parseColor("#FF00E5FF") // High-contrast selected border
         style = Paint.Style.STROKE
         strokeWidth = 2.4f * density
+    }
+
+    private val perimeterGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2.5f * density
+        color = Color.parseColor("#9900E5FF")
+    }
+
+    private val perimeterHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 10f * density
+        color = Color.parseColor("#337C4DFF")
     }
 
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -326,8 +338,9 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                     val overlap = upper.bottom - lower.top + gapPx
                     if (overlap > 0 && lower.bottom + overlap < maxScreenH) {
                         lower.offset(0f, overlap)
-                        // Also update touch rect and text offset
+                        // Also update touch rect and text offset synchronously
                         sorted[j].touchRect.offset(0f, overlap)
+                        sorted[j].textOffsetY += overlap
                     }
                 }
             }
@@ -508,6 +521,18 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             item.staticLayout.draw(canvas)
             canvas.restore()
         }
+
+        // 3. Perimeter Liquid Glass Glow Frame (Google/Apple Glass Edge Border)
+        val edgeInset = 2f * density
+        val edgeRect = RectF(
+            edgeInset,
+            edgeInset,
+            width.toFloat() - edgeInset,
+            height.toFloat() - edgeInset
+        )
+        val edgeCornerRadius = 24f * density
+        canvas.drawRoundRect(edgeRect, edgeCornerRadius, edgeCornerRadius, perimeterHaloPaint)
+        canvas.drawRoundRect(edgeRect, edgeCornerRadius, edgeCornerRadius, perimeterGlowPaint)
     }
 
     // --- Resilient Touch & Gesture Handling ---
@@ -554,11 +579,14 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                     return true
                 }
 
-                // 2. Ambient tap on empty space -> Dismiss toolbar / deselect box ONLY.
+                // 2. Ambient tap on empty space -> Dismiss toolbar / deselect box if active, otherwise dismiss overlay
                 if (activeMicroToolbar != null || selectedRenderBox != null) {
                     dismissMicroToolbar()
                     selectedRenderBox = null
                     invalidate()
+                    return true
+                } else {
+                    dismissOverlay()
                     return true
                 }
             }
@@ -744,8 +772,14 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     fun dismissOverlay() {
         if (isDismissing) return
         isDismissing = true
-        cleanup()
-        onDismiss()
+        animate()
+            .alpha(0f)
+            .setDuration(160L)
+            .withEndAction {
+                cleanup()
+                onDismiss()
+            }
+            .start()
     }
 
 
