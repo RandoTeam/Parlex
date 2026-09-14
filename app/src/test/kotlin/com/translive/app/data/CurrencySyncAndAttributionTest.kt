@@ -61,7 +61,7 @@ class CurrencySyncAndAttributionTest {
     private class FakeSettingsRepository : SettingsRepository() {
         override var enableCurrencyConversion: Boolean = true
         override var homeCurrencyCode: String = "USD"
-        override var currencySyncPolicy: CurrencySyncPolicy = CurrencySyncPolicy.DAILY
+        override var currencySyncPolicy: CurrencySyncPolicy = CurrencySyncPolicy.MANUAL
     }
 
     private lateinit var fakeDao: FakeExchangeRateDao

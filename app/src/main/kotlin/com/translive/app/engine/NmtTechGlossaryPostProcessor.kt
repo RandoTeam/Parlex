@@ -33,7 +33,11 @@ object NmtTechGlossaryPostProcessor {
         Regex("""(?i)${B_START}открыт(?:ый|ого)\s+источник(?:а)?$B_END""") to "открытый исходный код",
 
         // Clean up duplicate "FREE бесплатно"
-        Regex("""(?i)${B_START}FREE\s+бесплатно$B_END""") to "Бесплатно"
+        Regex("""(?i)${B_START}FREE\s+бесплатно$B_END""") to "Бесплатно",
+
+        // "Android" / "Android Police" -> "Человекоподобный робот"
+        Regex("""(?i)${B_START}человекоподобн(?:ый|ого|ому|ым|ом)\s+робот(?:а|у|ом|е)?\s+полици(?:я|и|ю|ей)$B_END""") to "Android Police",
+        Regex("""(?i)${B_START}человекоподобн(?:ый|ого|ому|ым|ом)\s+робот(?:а|у|ом|е)?$B_END""") to "Android"
     )
 
     fun postProcess(text: String): String {

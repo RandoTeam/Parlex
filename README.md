@@ -8,7 +8,7 @@
 
 *100% Local Neural Inference • Zero Network Calls • Zero Telemetry • Complete Privacy*
 
-[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.3-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.3)
+[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.5-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.5)
 [![Android](https://img.shields.io/badge/Android-8.0%20%E2%80%94%2016%20(API%2026--36)-34A853?logo=android&logoColor=white&style=flat-square)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Arch-arm64--v8a-blue?style=flat-square)](https://developer.android.com/ndk/guides/abis)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)

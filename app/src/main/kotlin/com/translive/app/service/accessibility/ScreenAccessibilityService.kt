@@ -81,30 +81,17 @@ class ScreenAccessibilityService : AccessibilityService() {
 
                 when (behavior) {
                     ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE -> {
-                        // 1. First try instant 0ms vector text extraction
                         val nodes = extractVisibleTextNodesFast()
-                        if (nodes.isNotEmpty()) {
-                            Log.i(TAG, "Extracted ${nodes.size} vector text nodes from A11y tree in 0ms (Single-shot)")
-                            captureSilentScreenshot(
-                                onSuccess = { bitmap ->
-                                    ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, bitmap)
-                                },
-                                onError = { _ ->
-                                    ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, null)
-                                }
-                            )
-                        } else {
-                            // 2. Fallback to silent screenshot OCR for canvas/games
-                            Log.i(TAG, "0 text nodes in A11y tree — falling back to silent screenshot capture")
-                            captureSilentScreenshot(
-                                onSuccess = { bitmap ->
-                                    ScreenTranslateOverlayService.translateScreenshotOneShot(this@ScreenAccessibilityService, bitmap)
-                                },
-                                onError = { err ->
-                                    Log.e(TAG, "Accessibility shortcut screenshot fallback failed: $err")
-                                }
-                            )
-                        }
+                        Log.i(TAG, "Extracted ${nodes.size} vector text nodes from A11y tree in 0ms (Single-shot)")
+                        captureSilentScreenshot(
+                            onSuccess = { bitmap ->
+                                ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, bitmap)
+                            },
+                            onError = { err ->
+                                Log.e(TAG, "Silent screenshot failed: $err")
+                                ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, null)
+                            }
+                        )
                     }
                     ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE -> {
                         if (ScreenTranslateOverlayService.isServiceRunning.value) {

@@ -42,6 +42,7 @@ app/src/main/cpp/MNN/
 
 # Local planning, research and release scratch
 /.research/
+/.superpowers/
 /plans/
 /scratch/
 /tmp/

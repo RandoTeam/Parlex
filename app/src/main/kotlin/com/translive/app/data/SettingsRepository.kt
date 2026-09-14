@@ -48,6 +48,7 @@ open class SettingsRepository @Inject constructor(
         private const val KEY_ENABLE_CURRENCY_CONVERSION = "enable_currency_conversion"
         private const val KEY_CURRENCY_SYNC_POLICY = "currency_sync_policy"
         private const val KEY_OVERLAY_STYLE = "camera_overlay_style"
+        private const val KEY_OCR_MODE = "ocr_mode"
 
         const val OVERLAY_STYLE_DARK = "dark_blocks"
         const val OVERLAY_STYLE_INPAINTING = "inpainting"
@@ -246,6 +247,10 @@ open class SettingsRepository @Inject constructor(
         get() = ScreenA11yShortcutBehavior.fromId(prefs?.getString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, null))
         set(value) = prefs?.edit()?.putString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, value.id)?.apply() ?: Unit
 
+    open var ocrMode: OcrMode
+        get() = OcrMode.fromString(prefs?.getString(KEY_OCR_MODE, null))
+        set(value) = prefs?.edit()?.putString(KEY_OCR_MODE, value.name)?.apply() ?: Unit
+
     private fun getLanguage(key: String, default: Language): Language {
         val code = prefs?.getString(key, null) ?: return default
         return Language.entries.find { it.code == code } ?: default
@@ -261,6 +266,16 @@ enum class ScreenA11yShortcutBehavior(val id: String) {
     companion object {
         fun fromId(id: String?): ScreenA11yShortcutBehavior =
             entries.find { it.id == id } ?: SINGLE_SHOT_NO_BUBBLE
+    }
+}
+
+enum class OcrMode {
+    FAST_ONLY,
+    FULL_SCAN;
+
+    companion object {
+        fun fromString(value: String?): OcrMode =
+            entries.find { it.name.equals(value, ignoreCase = true) } ?: FULL_SCAN
     }
 }
 

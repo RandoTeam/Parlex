@@ -30,9 +30,9 @@ object ScreenTextNoiseFilter {
         """^[$€£¥₽₹₩₫฿]?\s*\d+(?:[\.,]\d+)*\s*[$€£¥₽₹₩₫฿]?$"""
     )
 
-    // 5. Standalone URLs, Domains, Emails, & Filesystem Paths
+    // 5. Standalone URLs, Domains, Emails, Filesystem Paths & Breadcrumbs (e.g. "https://www.youtube.com › @AndroidPolice")
     private val URL_OR_PATH_REGEX = Regex(
-        """^(?:(?:https?://|www\.)\S+|\S+\.(?:com|org|net|io|ai|app|dev|edu|gov|ru|vn|cn|de|uk|jp)(?:/\S*)?|[\w\.-]+@[\w\.-]+\.\w+|[A-Za-z]:\\[^\n\r]+|/(?:storage|sdcard|data|system)/[^\n\r]+)$""",
+        """^(?:(?:https?://|www\.)\S+(?:\s*[›>]\s*\S+)*|\S+\.(?:com|org|net|io|ai|app|dev|edu|gov|ru|vn|cn|de|uk|jp)(?:/\S*)?(?:\s*[›>]\s*\S+)*|[\w\.-]+@[\w\.-]+\.\w+|[A-Za-z]:\\[^\n\r]+|/(?:storage|sdcard|data|system)/[^\n\r]+)$""",
         RegexOption.IGNORE_CASE
     )
 
@@ -83,12 +83,25 @@ object ScreenTextNoiseFilter {
 
         // Optional geometric filter: discard status bar top chrome (top 28dp) if it looks like clock/battery
         if (bounds != null && screenBounds != null) {
-            val topChromeLimit = screenBounds.top + (32f * (screenBounds.height() / 800f))
-            if (bounds.top < topChromeLimit) {
-                val trimmed = text.trim()
-                if (TIMESTAMP_REGEX.containsMatchIn(trimmed) || PERCENTAGE_REGEX.containsMatchIn(trimmed)) {
-                    return false
+            val sHeight = (screenBounds.bottom - screenBounds.top).toFloat()
+            val sWidth = (screenBounds.right - screenBounds.left).toFloat()
+            val bHeight = (bounds.bottom - bounds.top).toFloat()
+            val bWidth = (bounds.right - bounds.left).toFloat()
+
+            if (sHeight > 0f) {
+                val topChromeLimit = screenBounds.top + (32f * (sHeight / 800f))
+                if (bounds.top < topChromeLimit) {
+                    val trimmed = text.trim()
+                    if (TIMESTAMP_REGEX.containsMatchIn(trimmed) || PERCENTAGE_REGEX.containsMatchIn(trimmed)) {
+                        return false
+                    }
                 }
+            }
+
+            // Guard against massive root document / webpage containers:
+            // An individual AR translation block must never span > 40% of screen height and > 85% of screen width
+            if (sWidth > 0f && sHeight > 0f && bWidth >= sWidth * 0.85f && bHeight >= sHeight * 0.40f) {
+                return false
             }
         }
 

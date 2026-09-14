@@ -190,8 +190,8 @@ class FloatingBubbleView @JvmOverloads constructor(
     private var lastClickTimestamp = 0L
     private val clickDebounceThresholdMs = 400L
 
-    private val errorResetRunnable = Runnable {
-        if (bubbleState == BubbleState.ERROR) {
+    private val autoResetRunnable = Runnable {
+        if (bubbleState == BubbleState.ERROR || bubbleState == BubbleState.COMPLETE) {
             setState(BubbleState.IDLE)
         }
     }
@@ -337,7 +337,7 @@ class FloatingBubbleView @JvmOverloads constructor(
         val oldState = bubbleState
         bubbleState = newState
 
-        mainHandler.removeCallbacks(errorResetRunnable)
+        mainHandler.removeCallbacks(autoResetRunnable)
 
         currentGlyph = when (newState) {
             BubbleState.IDLE -> "T"
@@ -363,12 +363,12 @@ class FloatingBubbleView @JvmOverloads constructor(
                 stopScanRotation()
                 stopPulseAnimation()
                 performMicroHaptic(HapticFeedbackType.WARNING)
-                mainHandler.postDelayed(errorResetRunnable, 2000L)
+                mainHandler.postDelayed(autoResetRunnable, 2000L)
             }
             BubbleState.COMPLETE -> {
                 stopScanRotation()
                 stopPulseAnimation()
-                mainHandler.postDelayed(errorResetRunnable, 2500L)
+                mainHandler.postDelayed(autoResetRunnable, 2500L)
             }
             BubbleState.IDLE, BubbleState.DISABLED -> {
                 stopScanRotation()
@@ -539,6 +539,11 @@ class FloatingBubbleView @JvmOverloads constructor(
             return
         }
         lastClickTimestamp = now
+
+        if (bubbleState == BubbleState.COMPLETE || bubbleState == BubbleState.ERROR) {
+            mainHandler.removeCallbacks(autoResetRunnable)
+            setState(BubbleState.IDLE)
+        }
 
         if (bubbleState == BubbleState.SCANNING || bubbleState == BubbleState.TRANSLATING) {
             performMicroHaptic(HapticFeedbackType.WARNING)
