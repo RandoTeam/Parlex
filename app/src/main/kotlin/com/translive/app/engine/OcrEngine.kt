@@ -318,14 +318,38 @@ class OcrEngine @Inject constructor(
             return OcrResult(emptyList(), 0, 0)
         }
 
+        // CameraX with a ViewPort returns a cropped analysis frame. ML Kit has no
+        // cropRect concept, so the bitmap path must be used whenever the frame is
+        // cropped; otherwise OCR boxes refer to the full sensor image while the
+        // preview shows the viewport crop.
+        val crop = imageProxy.cropRect
+        val fullFrame = Rect(0, 0, mediaImage.width, mediaImage.height)
+        if (crop != fullFrame) {
+            val bitmap = try {
+                imageProxyToUprightBitmap(imageProxy)
+            } finally {
+                imageProxy.close()
+            }
+            return if (bitmap != null) {
+                recognize(bitmap, sourceLanguageCode)
+            } else {
+                OcrResult(emptyList(), 0, 0)
+            }
+        }
+
         val image = InputImage.fromMediaImage(
             mediaImage,
             imageProxy.imageInfo.rotationDegrees
         )
+        val rotation = imageProxy.imageInfo.rotationDegrees
+        val uprightWidth = if (rotation % 180 == 0) mediaImage.width else mediaImage.height
+        val uprightHeight = if (rotation % 180 == 0) mediaImage.height else mediaImage.width
         val recognitionStartedAt = SystemClock.elapsedRealtime()
         return recognizeWithMlKit(
             image = image,
             recognizer = recognizer,
+            imageWidth = uprightWidth,
+            imageHeight = uprightHeight,
             onComplete = imageProxy::close
         ).copy(
             diagnostics = OcrDiagnostics(

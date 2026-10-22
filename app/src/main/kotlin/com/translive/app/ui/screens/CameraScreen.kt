@@ -26,6 +26,9 @@ import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.core.UseCaseGroup
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -1427,6 +1430,19 @@ private fun LiveCameraView(
                         .build()
                     val imageAnalysis = ImageAnalysis.Builder()
                         .setTargetRotation(rotation)
+                        // OCR needs enough pixels for small UI/menu text. Without an
+                        // explicit resolution CameraX may pick 640x480.
+                        .setResolutionSelector(
+                            ResolutionSelector.Builder()
+                                .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                                .setResolutionStrategy(
+                                    ResolutionStrategy(
+                                        android.util.Size(1280, 720),
+                                        ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                                    )
+                                )
+                                .build()
+                        )
                         // Do not queue camera frames while OCR/NMT is busy.
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
@@ -1554,25 +1570,29 @@ private fun TranslationOverlay(
 
             if (block.translatedText.isNotBlank()) {
                 drawRoundRect(
-                    color = Color.Black.copy(alpha = 0.64f),
+                    color = Color.Black.copy(alpha = 0.42f),
                     topLeft = Offset(expandedLeft, expandedTop),
                     size = Size(expandedWidth, expandedHeight),
-                    cornerRadius = CornerRadius(6f)
+                    cornerRadius = CornerRadius(8f)
                 )
 
                 drawIntoCanvas { canvas ->
                     val nativeCanvas = canvas.nativeCanvas
                     val textPaint = TextPaint().apply {
                         isAntiAlias = true
-                        color = android.graphics.Color.rgb(250, 250, 250)
-                        textSize = (h * 0.58f).coerceIn(11f, 30f)
-                        isFakeBoldText = true
-                        setShadowLayer(2f, 0f, 1f, android.graphics.Color.BLACK)
+                        color = android.graphics.Color.rgb(255, 255, 255)
+                        textSize = (h * 0.56f).coerceIn(10f, 28f)
+                        isFakeBoldText = false
+                        setShadowLayer(2.5f, 0f, 1f, android.graphics.Color.BLACK)
                     }
-                    val padding = (h * 0.12f).coerceIn(3f, 8f)
+                    val padding = (h * 0.14f).coerceIn(3f, 8f)
                     val textWidth = (expandedWidth - padding * 2f).toInt().coerceAtLeast(1)
                     val textHeight = expandedHeight - padding * 2f
-                    val maxLines = if (textHeight > textPaint.textSize * 1.9f) 2 else 1
+                    val maxLines = when {
+                        textHeight > textPaint.textSize * 2.9f -> 3
+                        textHeight > textPaint.textSize * 1.9f -> 2
+                        else -> 1
+                    }
                     val layout = buildOverlayTextLayout(
                         text = block.translatedText,
                         paint = textPaint,

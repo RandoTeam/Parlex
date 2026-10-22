@@ -20,9 +20,11 @@ import com.translive.app.data.SettingsRepository
 import com.translive.app.data.TranslationPolicy
 import com.translive.app.data.model.DictionaryEntry
 import com.translive.app.data.model.Language
+import com.translive.app.data.model.ModelRuntime
 import com.translive.app.engine.CurrencyAugmentor
 import com.translive.app.engine.FastTranslateEngine
 import com.translive.app.engine.LanguageDetectionEngine
+import com.translive.app.engine.LiteRtTranslationEngine
 import com.translive.app.engine.OcrLine
 import com.translive.app.engine.OcrResult
 import com.translive.app.engine.OcrEngine
@@ -222,6 +224,7 @@ class CameraViewModel @Inject constructor(
     private val ocrEngine: OcrEngine,
     private val languageDetectionEngine: LanguageDetectionEngine,
     private val translationEngine: TranslationEngine,
+    private val liteRtEngine: LiteRtTranslationEngine,
     private val fastTranslateEngine: FastTranslateEngine,
     private val dictionaryRepository: DictionaryRepository,
     private val currencyAugmentor: CurrencyAugmentor,
@@ -515,17 +518,42 @@ class CameraViewModel @Inject constructor(
         return engineReady && fastTranslateEngine.isReadyFor(source.code, state.targetLanguage.code)
     }
 
+    private fun isMainModelLoaded(): Boolean =
+        if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+            liteRtEngine.isLoaded
+        } else {
+            translationEngine.isLoaded
+        }
+
+    private suspend fun translateMain(
+        text: String,
+        source: Language,
+        target: Language,
+        maxTokens: Int = 512
+    ): String =
+        if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+            liteRtEngine.translateSafe(text, source, target)
+        } else {
+            translationEngine.translateSafe(text, source, target, maxTokens)
+        }
+
     private suspend fun ensureLlmModelLoaded(): Boolean {
-        if (translationEngine.isLoaded) return true
+        if (isMainModelLoaded()) return true
         val modelPath = modelRepository.getActiveModelPath() ?: return false
         val modelFile = File(modelPath)
         if (!modelFile.exists() || modelFile.length() == 0L) return false
         return try {
-            translationEngine.loadModel(
-                modelPath = modelPath,
-                nThreads = settings.threads,
-                backend = settings.backend
-            )
+            if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) {
+                translationEngine.unloadModel()
+                liteRtEngine.loadModel(modelPath, settings.backend, settings.threads)
+            } else {
+                liteRtEngine.unloadModel()
+                translationEngine.loadModel(
+                    modelPath = modelPath,
+                    nThreads = settings.threads,
+                    backend = settings.backend
+                )
+            }
         } catch (e: Exception) {
             Log.e("CameraVM", "Failed to load LLM model on demand: ${e.message}", e)
             false
@@ -716,18 +744,18 @@ class CameraViewModel @Inject constructor(
 
                 if (_uiState.value.mode != CameraMode.LIVE || isCaptureStarting) return@launch
 
-                // Update Spatio-Temporal Subtitle Tracker if subtitle mode is active
+                // Update Spatio-Temporal Subtitle Tracker if subtitle mode is active.
+                // Reuse the translations already produced for this frame instead of
+                // blocking an IO thread with runBlocking.
+                val translationsByText = smoothedLines.zip(translatedBlocks)
+                    .associate { (line, block) -> line.text to block.translatedText }
                 val updatedSubtitleState = if (state.subtitleState.isSubtitleModeActive && !state.subtitleState.isPaused) {
                     val subtitleLines = subtitleTracker.update(
                         detectedLines = rawLines,
                         sourceLang = liveOcr.sourceLanguage,
                         targetLang = state.targetLanguage
                     ) { texts ->
-                        runCatching {
-                            if (fastTranslateEngine.isReadyFor(liveOcr.sourceLanguage.code, state.targetLanguage.code)) {
-                                kotlinx.coroutines.runBlocking { fastTranslateEngine.translateLines(texts) }
-                            } else texts
-                        }.getOrDefault(texts)
+                        texts.map { translationsByText[it] ?: it }
                     }
                     state.subtitleState.copy(
                         subtitles = subtitleLines,
@@ -787,16 +815,22 @@ class CameraViewModel @Inject constructor(
 
     private suspend fun recognizeAutoLiveBitmap(bitmap: Bitmap): LiveOcrPass {
         val preferred = lastAutoLiveSourceLanguage
-        val candidates = autoCaptureOcrCandidates()
-            .let { available ->
-                if (preferred != null) listOf(preferred) + available.filter { it != preferred }
-                else available
-            }
-            // Live mode is latency-sensitive. One pass per recognizer family
-            // is enough; still-photo mode keeps the complete candidate list.
-            .distinctBy(::autoOcrBackendKey)
-            .take(3)
-            .ifEmpty { listOf(preferred ?: Language.ENGLISH) }
+        // Live mode is latency-sensitive. Probe the full script set only on the
+        // first frame and then every AUTO_LIVE_PROBE_EVERY_FRAMES frames; every
+        // other frame uses the last detected language and performs one OCR pass.
+        val shouldProbe = preferred == null || frameCounter % AUTO_LIVE_PROBE_EVERY_FRAMES == 0
+        val candidates = if (shouldProbe) {
+            autoCaptureOcrCandidates()
+                .let { available ->
+                    if (preferred != null) listOf(preferred) + available.filter { it != preferred }
+                    else available
+                }
+                .distinctBy(::autoOcrBackendKey)
+                .take(3)
+                .ifEmpty { listOf(preferred ?: Language.ENGLISH) }
+        } else {
+            listOf(preferred!!)
+        }
         val attempts = candidates.map { recognizeCaptureAttempt(bitmap, it) }
 
         val selectedAttempt = selectAutoOcrAttempt(attempts)
@@ -928,7 +962,7 @@ class CameraViewModel @Inject constructor(
     ): Boolean {
         if (sourceLanguage.code == targetLanguage.code) return true
         return if (_uiState.value.translationMode == CameraTranslationMode.QUALITY) {
-            translationEngine.isLoaded
+            isMainModelLoaded()
         } else {
             canCameraTranslateAll(lines, sourceLanguage, targetLanguage)
         }
@@ -951,15 +985,15 @@ class CameraViewModel @Inject constructor(
             // already loaded local translation model. Keep this fallback
             // explicit so a missing fast package never turns into an empty
             // overlay or a network request from a camera frame.
-            if (!translationEngine.isLoaded) {
+            if (!isMainModelLoaded()) {
                 return lines.map { line ->
                     TranslatedBlock(line.text, "", line.boundingBox)
                 }
             }
             return lines.map { line ->
                 val translated = runCatching {
-                    translationEngine.translateSafe(
-                        sourceText = line.text,
+                    translateMain(
+                        text = line.text,
                         source = sourceLanguage,
                         target = targetLanguage,
                         maxTokens = 256
@@ -987,7 +1021,11 @@ class CameraViewModel @Inject constructor(
         }
 
         if (missingTexts.isNotEmpty()) {
-            val freshTranslations = fastTranslateEngine.translateLines(missingTexts)
+            val freshTranslations = fastTranslateEngine.translateLinesFor(
+                missingTexts,
+                sourceLanguage.code,
+                targetLanguage.code
+            )
             missingKeys.forEachIndexed { index, key ->
                 val translated = freshTranslations.getOrElse(index) { missingTexts[index] }
                 liveTranslationCache[key] = translated
@@ -1550,7 +1588,7 @@ class CameraViewModel @Inject constructor(
         }.toSet()
         // If the local main model is loaded, languages without an ML Kit
         // package are valid camera sources through the quality fallback.
-        if (translationEngine.isLoaded) return detected.takeIf { it in Language.allLanguages } ?: fallback
+        if (isMainModelLoaded()) return detected.takeIf { it in Language.allLanguages } ?: fallback
         return when {
             fastTranslateEngine.toMlKitLang(detected.code) in allowedModelCodes -> detected
             fastTranslateEngine.toMlKitLang(fallback.code) in allowedModelCodes -> fallback
@@ -2157,10 +2195,10 @@ class CameraViewModel @Inject constructor(
         if (sourceText.isBlank()) return ""
         if (sourceLanguage.code == targetLanguage.code) return sourceText
 
-        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && translationEngine.isLoaded) {
+        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && isMainModelLoaded()) {
             runCatching {
                 val maxTokens = CameraLlmTokenBudget.estimateTokenBudget(sourceText.length)
-                translationEngine.translateSafe(sourceText, sourceLanguage, targetLanguage, maxTokens)
+                translateMain(sourceText, sourceLanguage, targetLanguage, maxTokens)
             }.onSuccess { translated ->
                 val normalized = sanitizeDocumentTranslation(translated)
                 if (normalized.isNotBlank()) return normalized
@@ -2257,7 +2295,7 @@ class CameraViewModel @Inject constructor(
         val originalTexts = block.lines.map { it.text }
         if (sourceLanguage.code == targetLanguage.code) return originalTexts
 
-        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && !translationEngine.isLoaded) {
+        if (_uiState.value.translationMode == CameraTranslationMode.QUALITY && !isMainModelLoaded()) {
             val loaded = ensureLlmModelLoaded()
             if (!loaded) {
                 error(this@CameraViewModel.texts.text(R.string.camera_llm_model_missing_error))
@@ -2307,7 +2345,7 @@ class CameraViewModel @Inject constructor(
 
         prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
         return if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
-            fastTranslateEngine.translateLines(texts)
+            fastTranslateEngine.translateLinesFor(texts, sourceLanguage.code, targetLanguage.code)
         } else {
             texts
         }
@@ -2319,6 +2357,9 @@ class CameraViewModel @Inject constructor(
         targetLanguage: Language
     ): List<String>? {
         if (block.lines.size < 2) return null
+        // Structured line markers are a llama.cpp prompt feature. LiteRT models
+        // use the line-by-line fallback so they never receive an unsupported prompt.
+        if (modelRepository.getActiveRuntime() == ModelRuntime.LITERT_LM) return null
 
         val ids = block.lines.mapIndexed { index, _ -> "L${index + 1}" }
         val sourceText = block.lines.mapIndexed { index, line ->
@@ -2355,7 +2396,7 @@ class CameraViewModel @Inject constructor(
     ): List<String> {
         val translatedLines = mutableListOf<String>()
         for (line in lines) {
-            val translated = translationEngine.translateSafe(line.text, sourceLanguage, targetLanguage)
+            val translated = translateMain(line.text, sourceLanguage, targetLanguage)
             translatedLines.add(translated.trim().ifBlank { line.text })
         }
         return translatedLines
@@ -2698,63 +2739,66 @@ class CameraViewModel @Inject constructor(
 
         val result = original.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(result)
-        val allLines = regions.flatMap { it.lines }
-        val pageBox = unionPaintLineBox(allLines)
-            ?.let { expandedDocumentPageBox(it, result.width, result.height) }
-            ?: return result
 
-        val pageColor = sampleDocumentPaperColor(original, pageBox)
-        val bgPaint = Paint().apply {
-            style = Paint.Style.FILL
-            color = Color.argb(
-                248,
-                Color.red(pageColor),
-                Color.green(pageColor),
-                Color.blue(pageColor)
+        regions.forEachIndexed { index, region ->
+            val regionBox = unionPaintLineBox(region.lines) ?: return@forEachIndexed
+            val translated = translations.getOrNull(index).orEmpty().trim()
+            if (translated.isBlank()) return@forEachIndexed
+
+            val box = Rect(
+                (regionBox.left - 4).coerceAtLeast(0),
+                (regionBox.top - 4).coerceAtLeast(0),
+                (regionBox.right + 4).coerceAtMost(result.width),
+                (regionBox.bottom + 4).coerceAtMost(result.height)
             )
+            if (box.width() <= 0 || box.height() <= 0) return@forEachIndexed
+
+            val bgColor = sampleBackgroundColor(original, box)
+            val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                style = Paint.Style.FILL
+                color = Color.argb(
+                    238,
+                    Color.red(bgColor),
+                    Color.green(bgColor),
+                    Color.blue(bgColor)
+                )
+            }
+            val radius = (box.height() * 0.03f).coerceIn(3f, 10f)
+            canvas.drawRoundRect(RectF(box), radius, radius, bgPaint)
+
+            val medianLineHeight = medianPaintLineHeight(region.lines, result.width, result.height)
+            val padding = (medianLineHeight * 0.18f).coerceIn(3f, 10f)
+            val maxWidth = (box.width() - padding * 2f).toInt().coerceAtLeast(1)
+            val maxHeight = (box.height() - padding * 2f).coerceAtLeast(1f)
+            val textPaint = TextPaint().apply {
+                isAntiAlias = true
+                color = contrastColor(bgColor)
+                textSize = (medianLineHeight * 0.72f).coerceIn(9f, 28f)
+            }
+            val maxLines = max(1, (maxHeight / textPaint.fontSpacing.coerceAtLeast(1f)).toInt())
+            val layout = buildBitmapTextLayout(
+                text = translated.replace(Regex("\\s+"), " "),
+                paint = textPaint,
+                width = maxWidth,
+                maxHeight = maxHeight,
+                maxLines = maxLines,
+                minTextSize = 9f
+            )
+
+            val textLeft = box.left + padding
+            val textTop = box.top + padding +
+                ((maxHeight - layout.height).coerceAtLeast(0f) / 2f)
+            canvas.save()
+            canvas.clipRect(
+                textLeft,
+                box.top + padding,
+                textLeft + maxWidth,
+                box.bottom - padding
+            )
+            canvas.translate(textLeft, textTop)
+            layout.draw(canvas)
+            canvas.restore()
         }
-        canvas.drawRect(pageBox, bgPaint)
-
-        val pageText = translations
-            .map { it.replace(Regex("\\s+"), " ").trim() }
-            .filter { it.isNotBlank() }
-            .joinToString("\n\n")
-        if (pageText.isBlank()) return result
-
-        val medianLineHeight = medianPaintLineHeight(allLines, result.width, result.height)
-        val paddingX = (medianLineHeight * 0.42f).coerceIn(10f, 24f)
-        val paddingY = (medianLineHeight * 0.28f).coerceIn(8f, 20f)
-        val maxTextWidth = (pageBox.width() - paddingX * 2f).toInt().coerceAtLeast(1)
-        val maxTextHeight = (pageBox.height() - paddingY * 2f).coerceAtLeast(1f)
-        val textPaint = TextPaint().apply {
-            isAntiAlias = true
-            isFakeBoldText = false
-            color = contrastColor(pageColor)
-            textSize = (medianLineHeight * DOCUMENT_PAGE_TEXT_HEIGHT_FACTOR)
-                .coerceIn(DOCUMENT_PAGE_MIN_TEXT_SIZE, DOCUMENT_PAGE_MAX_TEXT_SIZE)
-        }
-        val layout = buildDocumentPageTextLayout(
-            text = pageText,
-            paint = textPaint,
-            width = maxTextWidth,
-            maxHeight = maxTextHeight,
-            minTextSize = DOCUMENT_PAGE_MIN_TEXT_SIZE,
-            maxTextSize = (medianLineHeight * DOCUMENT_PAGE_MAX_HEIGHT_FACTOR)
-                .coerceIn(DOCUMENT_PAGE_MIN_TEXT_SIZE, DOCUMENT_PAGE_MAX_TEXT_SIZE)
-        )
-
-        val textLeft = pageBox.left.toFloat() + paddingX
-        val textTop = pageBox.top.toFloat() + paddingY
-        canvas.save()
-        canvas.clipRect(
-            textLeft,
-            textTop,
-            textLeft + maxTextWidth,
-            pageBox.bottom.toFloat() - paddingY
-        )
-        canvas.translate(textLeft, textTop)
-        layout.draw(canvas)
-        canvas.restore()
 
         return result
     }
@@ -3077,7 +3121,9 @@ class CameraViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        fastTranslateEngine.release()
+        // Do NOT release the shared FastTranslateEngine here: it is a singleton
+        // used by screen translation and voice dialogue. Releasing it from a
+        // ViewModel used to break translation on every other surface.
     }
 }
 
@@ -3110,6 +3156,7 @@ private const val GALLERY_DECODE_MAX_SIZE = 3072
 private const val LIVE_TRACK_TTL_FRAMES = 5
 private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 200L
+private const val AUTO_LIVE_PROBE_EVERY_FRAMES = 30
 
 private val AUTO_CAPTURE_FALLBACK_LANGUAGES = listOf(
     Language.ENGLISH,
