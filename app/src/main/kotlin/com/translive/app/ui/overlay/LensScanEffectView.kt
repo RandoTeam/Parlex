@@ -49,8 +49,8 @@ class LensScanEffectView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    var scanDurationMs: Long = 1400L
-    var revealDurationMs: Long = 300L
+    var scanDurationMs: Long = 1200L
+    var revealDurationMs: Long = 260L
     var isContinuousLoop: Boolean = false
     var onBoxClickListener: ((ArScanBox) -> Unit)? = null
     var onScanCompletedListener: (() -> Unit)? = null
@@ -62,9 +62,9 @@ class LensScanEffectView @JvmOverloads constructor(
     private var revealAnimator: ValueAnimator? = null
 
     private val density: Float = context.resources.displayMetrics.density
-    private val beamHeight: Float = 140f * density
-    private val razorCoreHeight: Float = 2.5f * density
-    private val haloHeight: Float = 7f * density
+    private val beamHeight: Float = 120f * density
+    private val razorCoreHeight: Float = 1.8f * density
+    private val haloHeight: Float = 8f * density
     private val cornerRadius: Float = 8f * density
     private val cornerBracketLength: Float = 12f * density
     private val cornerBracketWidth: Float = 2f * density
@@ -84,37 +84,37 @@ class LensScanEffectView @JvmOverloads constructor(
 
     private val razorHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#9900F0FF")
+        color = Color.parseColor("#668AB4F8")
     }
 
     private val boxBackgroundPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = Color.parseColor("#EE12121E")
+        color = Color.parseColor("#B31A1C22")
     }
 
     private val boxBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 1.2f * density
-        color = Color.parseColor("#607C4DFF")
+        color = Color.parseColor("#668AB4F8")
     }
 
     private val perimeterEdgeGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 3f * density
-        color = Color.parseColor("#CC00E5FF")
+        strokeWidth = 2f * density
+        color = Color.parseColor("#CCFFFFFF")
     }
 
     private val perimeterEdgeHaloPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
-        strokeWidth = 14f * density
-        color = Color.parseColor("#4D7C4DFF")
+        strokeWidth = 12f * density
+        color = Color.parseColor("#338AB4F8")
     }
 
     private val cornerBracketPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = cornerBracketWidth
         strokeCap = Paint.Cap.ROUND
-        color = Color.parseColor("#FF00F0FF")
+        color = Color.parseColor("#E6FFFFFF")
     }
 
     private val primaryTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -149,12 +149,12 @@ class LensScanEffectView @JvmOverloads constructor(
         if (w <= 0 || h <= 0) return
 
         val beamColors = intArrayOf(
-            Color.parseColor("#00000000"),
-            Color.parseColor("#337C4DFF"),
-            Color.parseColor("#8000E5FF"),
-            Color.parseColor("#DD00F0FF")
+            Color.parseColor("#00FFFFFF"),
+            Color.parseColor("#1FFFFFFF"),
+            Color.parseColor("#66FFFFFF"),
+            Color.parseColor("#CCFFFFFF")
         )
-        val beamStops = floatArrayOf(0f, 0.45f, 0.85f, 1f)
+        val beamStops = floatArrayOf(0f, 0.55f, 0.88f, 1f)
 
         beamLinearGradient = LinearGradient(
             0f, 0f,
@@ -169,11 +169,11 @@ class LensScanEffectView @JvmOverloads constructor(
         val centerY = h * 0.5f
         val radius = max(w, h) * 0.85f
         val vignetteColors = intArrayOf(
-            Color.parseColor("#20000000"),
-            Color.parseColor("#600A0A14"),
-            Color.parseColor("#9005050A")
+            Color.parseColor("#00000000"),
+            Color.parseColor("#14000000"),
+            Color.parseColor("#420A0F16")
         )
-        val vignetteStops = floatArrayOf(0f, 0.6f, 1f)
+        val vignetteStops = floatArrayOf(0f, 0.65f, 1f)
 
         vignetteRadialGradient = RadialGradient(
             centerX, centerY, radius,

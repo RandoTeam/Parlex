@@ -9,7 +9,9 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.RadialGradient
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Handler
@@ -74,28 +76,28 @@ class FloatingBubbleView @JvmOverloads constructor(
     private val coreRadiusPx: Float = coreRadiusDp * density
     private val strokeWidthPx: Float = strokeWidthDp * density
 
-    // State Color Palette
-    private val colorIdleCore = Color.parseColor("#004D40")       // Deep Primary Teal
-    private val colorIdleStroke = Color.parseColor("#80CBC4")     // Light Teal Stroke
-    private val colorIdleAura = Color.parseColor("#26A69A")
+    // Material 3 Expressive / Pixel-like tonal glass palette.
+    private val colorIdleCore = Color.parseColor("#101820")       // Ink glass
+    private val colorIdleStroke = Color.parseColor("#8AB4F8")     // Pixel blue rim
+    private val colorIdleAura = Color.parseColor("#A8C7FA")
 
-    private val colorScanCore = Color.parseColor("#B45309")       // Amber
-    private val colorScanStroke = Color.parseColor("#F59E0B")
-    private val colorScanAura = Color.parseColor("#FBBF24")
+    private val colorScanCore = Color.parseColor("#3B2A12")       // Warm glass
+    private val colorScanStroke = Color.parseColor("#FFD08A")
+    private val colorScanAura = Color.parseColor("#FFB95C")
 
-    private val colorTransCore = Color.parseColor("#3730A3")      // Deep Indigo
-    private val colorTransStroke = Color.parseColor("#818CF8")
-    private val colorTransAura = Color.parseColor("#6366F1")
+    private val colorTransCore = Color.parseColor("#0B2A4A")      // Deep blue glass
+    private val colorTransStroke = Color.parseColor("#A8C7FA")
+    private val colorTransAura = Color.parseColor("#8AB4F8")
 
-    private val colorCompleteCore = Color.parseColor("#047857")   // Emerald
-    private val colorCompleteStroke = Color.parseColor("#34D399")
-    private val colorCompleteAura = Color.parseColor("#10B981")
+    private val colorCompleteCore = Color.parseColor("#0E2B20")   // Deep green glass
+    private val colorCompleteStroke = Color.parseColor("#7DD3A8")
+    private val colorCompleteAura = Color.parseColor("#34A853")
 
-    private val colorErrorCore = Color.parseColor("#991B1B")      // Error Red
-    private val colorErrorStroke = Color.parseColor("#FECACA")
-    private val colorErrorAura = Color.parseColor("#EF4444")
+    private val colorErrorCore = Color.parseColor("#3B1212")      // Deep red glass
+    private val colorErrorStroke = Color.parseColor("#FFB4AB")
+    private val colorErrorAura = Color.parseColor("#FF897D")
 
-    private val colorShadow = Color.argb(90, 0, 0, 0)
+    private val colorShadow = Color.argb(64, 0, 0, 0)
     private val argbEvaluator = ArgbEvaluator()
 
     private var currentCoreColor = colorIdleCore
@@ -146,6 +148,21 @@ class FloatingBubbleView @JvmOverloads constructor(
         style = Paint.Style.STROKE
         strokeWidth = 1.5f * density
         color = Color.parseColor("#4DFFFFFF")
+    }
+
+    private val glassRimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 1.1f * density
+        color = Color.parseColor("#66FFFFFF")
+    }
+
+    private val specularPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    private val innerGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = Color.parseColor("#1FFFFFFF")
     }
 
     private val vectorIconPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -227,6 +244,28 @@ class FloatingBubbleView @JvmOverloads constructor(
         this.windowParams = params
     }
 
+    /**
+     * Called when the overlay window is shown/hidden or the bubble is reattached.
+     * Without this reset a cancelled drag (the AR overlay taking touch focus) can
+     * leave the bubble stuck in `isDragging` and make it impossible to move.
+     */
+    fun resetInteractionState() {
+        mainHandler.removeCallbacks(longPressRunnable)
+        mainHandler.removeCallbacks(autoResetRunnable)
+        isDragging = false
+        isLongPressTriggered = false
+        dockAnimator?.cancel()
+        dockAnimator = null
+        recycleVelocityTracker()
+        if (bubbleState == BubbleState.COMPLETE || bubbleState == BubbleState.ERROR) {
+            setState(BubbleState.IDLE)
+        }
+        alpha = if (bubbleState == BubbleState.DISABLED) 0.4f else 1f
+        scaleX = 1f
+        scaleY = 1f
+        invalidate()
+    }
+
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         setMeasuredDimension(totalViewSizePx, totalViewSizePx)
     }
@@ -248,6 +287,21 @@ class FloatingBubbleView @JvmOverloads constructor(
             coreBounds.right + ringPadding,
             coreBounds.bottom + ringPadding
         )
+
+        // Fixed specular highlight baked into a shader; the bubble itself stays
+        // cheap to redraw while the state ring/pulse animates.
+        specularPaint.shader = RadialGradient(
+            centerX - coreRadiusPx * 0.32f,
+            centerY - coreRadiusPx * 0.38f,
+            coreRadiusPx * 1.28f,
+            intArrayOf(
+                Color.parseColor("#66FFFFFF"),
+                Color.parseColor("#1FFFFFFF"),
+                Color.TRANSPARENT
+            ),
+            floatArrayOf(0f, 0.48f, 1f),
+            Shader.TileMode.CLAMP
+        )
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -260,21 +314,42 @@ class FloatingBubbleView @JvmOverloads constructor(
             BubbleState.IDLE, BubbleState.ERROR, BubbleState.DISABLED -> {}
         }
 
-        canvas.drawCircle(centerX, centerY + (2.5f * density), coreRadiusPx, shadowPaint)
+        shadowPaint.color = colorShadow
+        canvas.drawCircle(centerX, centerY + (3.0f * density), coreRadiusPx + (3f * density), shadowPaint)
+        shadowPaint.alpha = 38
+        canvas.drawCircle(centerX, centerY + (1.5f * density), coreRadiusPx, shadowPaint)
+
+        // A very soft tonal aura keeps the bubble legible on both light and dark
+        // wallpapers without the old neon ring.
+        auraPaint1.color = (currentAuraColor and 0x00FFFFFF) or (30 shl 24)
+        auraPaint1.strokeWidth = 9f * density
+        canvas.drawCircle(centerX, centerY, coreRadiusPx + (3f * density), auraPaint1)
 
         coreFillPaint.color = currentCoreColor
+        coreFillPaint.alpha = 238
         coreStrokePaint.color = currentStrokeColor
         canvas.drawCircle(centerX, centerY, coreRadiusPx, coreFillPaint)
+
+        // Glass body: specular highlight, inner tint, rim and a thin refraction
+        // arc. No blur layer, so the control remains crisp at 120 Hz.
+        canvas.drawCircle(centerX, centerY, coreRadiusPx - (0.5f * density), specularPaint)
+        innerGlowPaint.alpha = 20
+        canvas.drawCircle(centerX, centerY, coreRadiusPx - (5f * density), innerGlowPaint)
         canvas.drawCircle(centerX, centerY, coreRadiusPx - (strokeWidthPx / 2f), coreStrokePaint)
+        glassRimPaint.alpha = 120
+        canvas.drawCircle(centerX, centerY, coreRadiusPx - (1.2f * density), glassRimPaint)
 
         // Liquid Glass Specular Reflection Highlight
         val highlightBounds = RectF(
-            centerX - coreRadiusPx + (2f * density),
-            centerY - coreRadiusPx + (2f * density),
-            centerX + coreRadiusPx - (2f * density),
-            centerY + coreRadiusPx - (2f * density)
+            centerX - coreRadiusPx + (3f * density),
+            centerY - coreRadiusPx + (3f * density),
+            centerX + coreRadiusPx - (3f * density),
+            centerY + coreRadiusPx - (3f * density)
         )
-        canvas.drawArc(highlightBounds, 205f, 130f, false, glassHighlightPaint)
+        glassHighlightPaint.alpha = 150
+        canvas.drawArc(highlightBounds, 205f, 125f, false, glassHighlightPaint)
+        glassHighlightPaint.alpha = 48
+        canvas.drawArc(highlightBounds, 25f, 80f, false, glassHighlightPaint)
 
         if (bubbleState == BubbleState.IDLE || bubbleState == BubbleState.DISABLED) {
             drawTranslationVectorGlyph(canvas)
@@ -467,6 +542,7 @@ class FloatingBubbleView @JvmOverloads constructor(
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dockAnimator?.cancel()
+                animatePress(true)
                 initialTouchRawX = event.rawX
                 initialTouchRawY = event.rawY
                 initialParamX = params.x
@@ -517,11 +593,13 @@ class FloatingBubbleView @JvmOverloads constructor(
                 }
 
                 recycleVelocityTracker()
+                animatePress(false)
                 return true
             }
 
             MotionEvent.ACTION_CANCEL -> {
                 mainHandler.removeCallbacks(longPressRunnable)
+                animatePress(false)
                 if (isDragging) {
                     isDragging = false
                     val isDismissed = listener?.onDragRelease() ?: false
@@ -556,6 +634,15 @@ class FloatingBubbleView @JvmOverloads constructor(
 
         performMicroHaptic(HapticFeedbackType.TAP)
         listener?.onBubbleClick()
+    }
+
+    private fun animatePress(pressed: Boolean) {
+        animate()
+            .scaleX(if (pressed) 0.92f else 1f)
+            .scaleY(if (pressed) 0.92f else 1f)
+            .setDuration(if (pressed) 90L else 160L)
+            .setInterpolator(if (pressed) AccelerateDecelerateInterpolator() else OvershootInterpolator(0.9f))
+            .start()
     }
 
     private fun recycleVelocityTracker() {

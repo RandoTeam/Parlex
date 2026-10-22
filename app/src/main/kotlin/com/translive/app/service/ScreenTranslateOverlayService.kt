@@ -171,13 +171,11 @@ class ScreenTranslateOverlayService : Service() {
         }
 
         val isOneShot = intent?.getBooleanExtra(EXTRA_ONE_SHOT_MODE, false) ?: false
-        if (isOneShot) {
-            isOneShotSession = true
-        }
+        isOneShotSession = isOneShot
 
         if (intent?.action == ACTION_SHOW_TRANSLATION) {
             val uri = intent.data
-            if (uri != null && acquireTranslationLock()) {
+            if (uri != null && acquireTranslationLockOrRecover()) {
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.SCANNING)
                 setBubbleVisible(false)
                 activeTranslationJob = serviceScope.launch {
@@ -221,7 +219,7 @@ class ScreenTranslateOverlayService : Service() {
                 pendingDirectNodes = null
                 pendingDirectBitmap = null
             }
-            if (nodes != null && acquireTranslationLock()) {
+            if (nodes != null && acquireTranslationLockOrRecover()) {
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
                 showLensScanEffect()
                 activeTranslationJob = serviceScope.launch {
@@ -247,7 +245,7 @@ class ScreenTranslateOverlayService : Service() {
                 bmp = pendingDirectBitmap
                 pendingDirectBitmap = null
             }
-            if (bmp != null && acquireTranslationLock()) {
+            if (bmp != null && acquireTranslationLockOrRecover()) {
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
                 showLensScanEffect()
                 activeTranslationJob = serviceScope.launch {
@@ -588,6 +586,20 @@ class ScreenTranslateOverlayService : Service() {
         return acquired
     }
 
+    /**
+     * A dropped screenshot callback can leave the mutex held without an active
+     * job. Recover that stale state before rejecting a new shortcut press.
+     */
+    private fun acquireTranslationLockOrRecover(): Boolean {
+        if (acquireTranslationLock()) return true
+        if (activeTranslationJob?.isActive != true) {
+            Log.w(TAG, "Translation lock was held without an active job; recovering")
+            releaseTranslationLock()
+            return acquireTranslationLock()
+        }
+        return false
+    }
+
     private fun releaseTranslationLock() {
         mainHandler.removeCallbacks(watchdogRunnable)
         if (translationMutex.isLocked) {
@@ -636,7 +648,7 @@ class ScreenTranslateOverlayService : Service() {
     }
 
     private fun captureViaAccessibility(a11y: ScreenAccessibilityService) {
-        if (!acquireTranslationLock()) {
+        if (!acquireTranslationLockOrRecover()) {
             Log.d(TAG, "Translation request dropped: Pipeline already active")
             return
         }
@@ -704,7 +716,7 @@ class ScreenTranslateOverlayService : Service() {
     }
 
     private fun captureViaMediaProjection() {
-        if (!acquireTranslationLock()) {
+        if (!acquireTranslationLockOrRecover()) {
             Log.d(TAG, "Translation request dropped: Pipeline already active")
             return
         }
@@ -805,7 +817,10 @@ class ScreenTranslateOverlayService : Service() {
                         emptyList()
                     }
 
-                    val ocrNodes = if (bitmap != null && (directNodes.isNullOrEmpty() || settings.ocrMode == com.translive.app.data.OcrMode.FULL_SCAN)) {
+                    val ocrNodes = if (bitmap != null &&
+                        (isOneShotSession ||
+                            directNodes.isNullOrEmpty() ||
+                            settings.ocrMode == com.translive.app.data.OcrMode.FULL_SCAN)) {
                         val ocrResult = ocrEngine.recognize(bitmap, "auto")
                         val clusters = ArBoundingBoxClusterer.cluster(ocrResult)
                         clusters.map { CandidateBlock(it.consolidatedText, it.boundingBox) }
@@ -815,6 +830,7 @@ class ScreenTranslateOverlayService : Service() {
 
                     com.translive.app.engine.CandidateMerger.merge(nativeNodes, ocrNodes)
                 }
+                Log.i(TAG, "Screen candidates: direct=${directNodes?.size ?: 0}, merged=${rawCandidates.size}")
                 coroutineContext.ensureActive()
 
                 val (screenWidth, screenHeight) = currentDisplaySize()
@@ -1015,7 +1031,7 @@ class ScreenTranslateOverlayService : Service() {
                     if (activated) {
                         // Use the explicit pair instead of the global "current"
                         // translator so concurrent surfaces cannot flip it.
-                        fastTranslateEngine.translateLinesFor(texts, sourceCode, targetLanguage.code)
+                        fastTranslateEngine.translateBatchFor(texts, sourceCode, targetLanguage.code)
                     } else if (isLlm && isLlmLoaded()) {
                         texts.map { text ->
                             ensureActive()
@@ -1075,7 +1091,8 @@ class ScreenTranslateOverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
@@ -1102,9 +1119,8 @@ class ScreenTranslateOverlayService : Service() {
                 }
             }
         ).apply {
-            isFocusable = true
-            isFocusableInTouchMode = true
-            requestFocus()
+            isFocusable = false
+            isFocusableInTouchMode = false
         }
         overlay.onSaveScreenshot = {
             saveScreenshotWithTranslation()
@@ -1130,13 +1146,11 @@ class ScreenTranslateOverlayService : Service() {
                 .start()
             overlay.performHapticFeedback(android.view.HapticFeedbackConstants.CONTEXT_CLICK)
 
-            // Re-elevate floating bubble above AR overlay so user can tap it to dismiss
-            floatingBubbleView?.let { bubble ->
-                bubbleLayoutParams?.let { bp ->
-                    runCatching { wm.removeView(bubble) }
-                    wm.addView(bubble, bp)
-                }
-            }
+            // The full-screen overlay must be the only interactive layer while it
+            // is visible. Keeping the bubble above it makes the bubble's window
+            // steal touches and can leave it stuck in a drag gesture on OEMs.
+            setBubbleVisible(false)
+            floatingBubbleView?.resetInteractionState()
         } catch (e: Exception) {
             Log.e(TAG, "Failed adding ArTranslateOverlayView", e)
         }
@@ -1211,7 +1225,7 @@ class ScreenTranslateOverlayService : Service() {
             return
         }
 
-        if (!acquireTranslationLock()) return
+        if (!acquireTranslationLockOrRecover()) return
         floatingBubbleView?.setState(FloatingBubbleView.BubbleState.SCANNING)
         showLensScanEffect()
 
@@ -1249,12 +1263,17 @@ class ScreenTranslateOverlayService : Service() {
     private fun dismissArOverlay() {
         retranslateJob?.cancel()
         retranslateJob = null
-        val overlay = arOverlayView ?: return
-        arOverlayView = null
-        overlay.dismissOverlay(immediate = true)
-        runCatching { windowManager?.removeView(overlay) }
-        dismissLensScanEffect()
-        floatingBubbleView?.setState(FloatingBubbleView.BubbleState.IDLE)
+        val overlay = arOverlayView
+        if (overlay != null) {
+            arOverlayView = null
+            overlay.dismissOverlay(immediate = true)
+            runCatching { windowManager?.removeView(overlay) }
+            dismissLensScanEffect()
+        }
+        // The overlay owns all touches while visible; restore a clean, movable
+        // bubble only after it is gone.
+        setBubbleVisible(true)
+        floatingBubbleView?.resetInteractionState()
     }
 
     private fun triggerScreenCapturePermission() {
@@ -1351,6 +1370,19 @@ class ScreenTranslateOverlayService : Service() {
         private var pendingDirectNodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>? = null
         private val pendingLock = Any()
         private var instanceRef: java.lang.ref.WeakReference<ScreenTranslateOverlayService>? = null
+
+        fun prepareForRetrigger() {
+            val service = instanceRef?.get() ?: return
+            service.mainHandler.post {
+                // The accessibility shortcut can fire while our own overlay is the
+                // active window. Hiding it lets the next accessibility tree belong
+                // to the app underneath instead of to Parlex.
+                if (service.arOverlayView != null) {
+                    service.dismissArOverlay()
+                    service.floatingBubbleView?.setState(FloatingBubbleView.BubbleState.IDLE)
+                }
+            }
+        }
 
         fun onWindowStateChanged() {
             val service = instanceRef?.get() ?: return

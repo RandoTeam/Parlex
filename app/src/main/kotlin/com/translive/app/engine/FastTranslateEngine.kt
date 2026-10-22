@@ -479,6 +479,22 @@ class FastTranslateEngine @Inject constructor() {
         }
     }
 
+    /**
+     * Translate a screen batch in one delimited inference pass. The batch context
+     * is important for short UI fragments (menus, cards, labels), which otherwise
+     * turn into disconnected word salad when each fragment is translated alone.
+     */
+    suspend fun translateBatchFor(
+        lines: List<String>,
+        sourceCode: String,
+        targetCode: String
+    ): List<String> {
+        if (lines.isEmpty()) return lines
+        val translator = ensureTranslator(sourceCode, targetCode) ?: return lines
+        val batch = FastBatchTranslator { text -> translateWith(translator, text) }
+        return batch.translateBatch(lines)
+    }
+
     fun isReadyFor(sourceCode: String, targetCode: String): Boolean =
         sourceCode == currentSourceLang &&
             targetCode == currentTargetLang &&

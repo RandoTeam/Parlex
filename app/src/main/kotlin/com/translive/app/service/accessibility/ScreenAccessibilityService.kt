@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.Display
@@ -88,6 +90,7 @@ class ScreenAccessibilityService : AccessibilityService() {
         }
 
     private var lastTriggerAtMs = 0L
+    private val shortcutHandler = Handler(Looper.getMainLooper())
 
     fun triggerTranslation(source: String) {
         val now = SystemClock.elapsedRealtime()
@@ -99,24 +102,11 @@ class ScreenAccessibilityService : AccessibilityService() {
         val behavior = safeSettings.screenA11yShortcutBehavior
         when (behavior) {
             ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE -> {
-                val nodes = extractVisibleTextNodesFast()
-                captureSilentScreenshot(
-                    onSuccess = { bitmap ->
-                        ScreenTranslateOverlayService.translateNodesOneShot(
-                            this@ScreenAccessibilityService,
-                            nodes,
-                            bitmap
-                        )
-                    },
-                    onError = { err ->
-                        Log.e(TAG, "Silent screenshot failed: $err")
-                        ScreenTranslateOverlayService.translateNodesOneShot(
-                            this@ScreenAccessibilityService,
-                            nodes,
-                            null
-                        )
-                    }
-                )
+                // A previous one-shot overlay may still be the focused window.
+                // Dismiss it first, then let the underlying app become active
+                // before reading the accessibility tree.
+                ScreenTranslateOverlayService.prepareForRetrigger()
+                shortcutHandler.postDelayed({ captureShortcutTranslation() }, 180L)
             }
             ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE -> {
                 if (ScreenTranslateOverlayService.isServiceRunning.value) {
@@ -128,6 +118,28 @@ class ScreenAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun captureShortcutTranslation() {
+        val nodes = extractVisibleTextNodesFast()
+        Log.i(TAG, "Shortcut capture: nodes=${nodes.size}")
+        captureSilentScreenshot(
+            onSuccess = { bitmap ->
+                ScreenTranslateOverlayService.translateNodesOneShot(
+                    this@ScreenAccessibilityService,
+                    nodes,
+                    bitmap
+                )
+            },
+            onError = { err ->
+                Log.e(TAG, "Silent screenshot failed: $err")
+                ScreenTranslateOverlayService.translateNodesOneShot(
+                    this@ScreenAccessibilityService,
+                    nodes,
+                    null
+                )
+            }
+        )
+    }
+
     /**
      * Captures a silent screenshot using takeScreenshot API (Android 11 / API 30+).
      * No MediaProjection permission prompt is shown to the user.
@@ -135,7 +147,8 @@ class ScreenAccessibilityService : AccessibilityService() {
     fun captureSilentScreenshot(
         displayId: Int = Display.DEFAULT_DISPLAY,
         onSuccess: (Bitmap) -> Unit,
-        onError: (String) -> Unit
+        onError: (String) -> Unit,
+        retryCount: Int = 0
     ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             onError("takeScreenshot requires Android 11+ (API 30+)")
@@ -174,6 +187,13 @@ class ScreenAccessibilityService : AccessibilityService() {
                         3 -> "Interval time too short"
                         4 -> "Invalid display"
                         else -> "Screenshot capture failed"
+                    }
+                    if (errorCode == 3 && retryCount < 1) {
+                        Log.w(TAG, "takeScreenshot throttled; retrying once")
+                        shortcutHandler.postDelayed({
+                            captureSilentScreenshot(displayId, onSuccess, onError, retryCount + 1)
+                        }, 450L)
+                        return
                     }
                     Log.e(TAG, "takeScreenshot failed: $errorMsg ($errorCode)")
                     onError(errorMsg)

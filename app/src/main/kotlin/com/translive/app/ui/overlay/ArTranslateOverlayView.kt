@@ -336,6 +336,20 @@ class ArTranslateOverlayView @JvmOverloads constructor(
      * Pre-computes StaticLayout for every translated box to ensure onDraw is zero-allocation.
      * Uses per-line left-edge anchoring (Approach 2) matching Google Lens / Circle to Search.
      */
+    private fun overlapRatio(a: Rect, b: Rect): Float {
+        val left = max(a.left, b.left)
+        val top = max(a.top, b.top)
+        val right = min(a.right, b.right)
+        val bottom = min(a.bottom, b.bottom)
+        if (right <= left || bottom <= top) return 0f
+        val intersection = (right - left).toFloat() * (bottom - top).toFloat()
+        val smaller = min(
+            (a.right - a.left).toFloat() * (a.bottom - a.top).toFloat(),
+            (b.right - b.left).toFloat() * (b.bottom - b.top).toFloat()
+        )
+        return if (smaller > 0f) intersection / smaller else 0f
+    }
+
     private fun precomputeLayouts() {
         renderBoxes.forEach { it.backgroundPatch?.recycle() }
         renderBoxes.clear()
@@ -412,6 +426,25 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             if (isTruncated) {
                 staticLayout = createTruncatedLayout(text, boxPaint, targetWidth.toInt(), maxLines)
             }
+            val hardMaxLines = max(1, (srcHeight / (boxPaint.fontSpacing * 1.05f)).toInt())
+            if (staticLayout.height > srcHeight || staticLayout.lineCount > hardMaxLines) {
+                staticLayout = createTruncatedLayout(
+                    text,
+                    boxPaint,
+                    targetWidth.toInt(),
+                    min(maxLines, hardMaxLines).coerceAtLeast(1)
+                )
+            }
+
+            // Suppress a duplicate/overlapping parent-child pair. The parent text
+            // already contains the child text, so drawing both creates the
+            // "text on top of text" effect reported on dense pages.
+            val overlapsExisting = renderBoxes.any { existing ->
+                overlapRatio(box.boundingBox, existing.origin.boundingBox) > 0.55f &&
+                    (existing.origin.rawText.contains(box.rawText) ||
+                        box.rawText.contains(existing.origin.rawText))
+            }
+            if (overlapsExisting) continue
 
             // 4. Anchor the text inside the original block (no screen-level drift).
             val layoutW = min(staticLayout.maxLineWidth, targetWidth)
@@ -478,7 +511,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             StaticLayout.Builder.obtain(text, 0, text.length, paint, safeWidth)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1.15f)
+                .setLineSpacing(0f, 1.08f)
                 .setIncludePad(false)
                 .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
                 .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
@@ -519,7 +552,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             StaticLayout.Builder.obtain(text, 0, text.length, paint, safeWidth)
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, 1.05f)
+                .setLineSpacing(0f, 1.02f)
                 .setIncludePad(false)
                 .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
                 .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
@@ -858,21 +891,32 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         val cornerRadius = 3f * density
         for (item in renderBoxes) {
             if (item.isShowingOriginal || showOriginalText) continue
+            erasePaint.color = item.backgroundColor
+            erasePaint.alpha = 255
+            canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
             val patch = item.backgroundPatch
             if (patch != null && !patch.isRecycled) {
-                patchPaint.alpha = 255
+                patchPaint.alpha = 24
                 canvas.drawBitmap(patch, null, item.eraseRect, patchPaint)
-            } else {
-                erasePaint.color = item.backgroundColor
-                erasePaint.alpha = 255
-                canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
             }
+        }
+        val occupied = mutableListOf<RectF>()
+        for (item in renderBoxes) {
+            if (item.isShowingOriginal || showOriginalText) continue
             item.staticLayout.paint.alpha = 255
             canvas.save()
             canvas.clipRect(item.eraseRect)
+            for (previous in occupied) {
+                val left = max(item.eraseRect.left, previous.left)
+                val top = max(item.eraseRect.top, previous.top)
+                val right = min(item.eraseRect.right, previous.right)
+                val bottom = min(item.eraseRect.bottom, previous.bottom)
+                if (right > left && bottom > top) canvas.clipOutRect(left, top, right, bottom)
+            }
             canvas.translate(item.textOffsetX, item.textOffsetY)
             item.staticLayout.draw(canvas)
             canvas.restore()
+            occupied.add(RectF(item.eraseRect))
         }
         return result
     }
@@ -909,28 +953,55 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         // 3. In-place replacement pass. Every box is drawn strictly inside its
         // original block; nothing is shifted over neighbouring UI.
         if (!dimmed) {
+            // Pass 1: erase original glyphs for every block before drawing any
+            // translated text. Drawing patch + text per box lets a later patch
+            // cover an earlier translation on dense pages.
             for (item in renderBoxes) {
                 if (item.isShowingOriginal) continue
                 val alpha = ((revealProgress - item.revealDelay) / 0.55f).coerceIn(0f, 1f)
                 if (alpha <= 0.01f) continue
                 val alphaInt = (255f * alpha).toInt().coerceIn(0, 255)
 
+                erasePaint.color = item.backgroundColor
+                erasePaint.alpha = alphaInt
+                canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
+
+                // The tiny sampled patch adds the surrounding surface tint, but
+                // only as a low-opacity texture: drawn opaque it would keep a
+                // blurred ghost of the source text under the translation.
                 val patch = item.backgroundPatch
                 if (patch != null && !patch.isRecycled) {
-                    patchPaint.alpha = alphaInt
+                    patchPaint.alpha = (alphaInt * 0.10f).toInt().coerceIn(0, 255)
                     canvas.drawBitmap(patch, null, item.eraseRect, patchPaint)
-                } else {
-                    erasePaint.color = item.backgroundColor
-                    erasePaint.alpha = alphaInt
-                    canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
                 }
+            }
+
+            // Pass 2: draw text only after all backgrounds are in place. Text in
+            // a later box is clipped out of earlier boxes so two translated
+            // regions can never print on top of each other.
+            val occupied = mutableListOf<RectF>()
+            for (item in renderBoxes) {
+                if (item.isShowingOriginal) continue
+                val alpha = ((revealProgress - item.revealDelay) / 0.55f).coerceIn(0f, 1f)
+                if (alpha <= 0.01f) continue
+                val alphaInt = (255f * alpha).toInt().coerceIn(0, 255)
 
                 item.staticLayout.paint.alpha = alphaInt
                 canvas.save()
                 canvas.clipRect(item.eraseRect)
+                for (previous in occupied) {
+                    val left = max(item.eraseRect.left, previous.left)
+                    val top = max(item.eraseRect.top, previous.top)
+                    val right = min(item.eraseRect.right, previous.right)
+                    val bottom = min(item.eraseRect.bottom, previous.bottom)
+                    if (right > left && bottom > top) {
+                        canvas.clipOutRect(left, top, right, bottom)
+                    }
+                }
                 canvas.translate(item.textOffsetX, item.textOffsetY)
                 item.staticLayout.draw(canvas)
                 canvas.restore()
+                occupied.add(RectF(item.eraseRect))
             }
         }
 
