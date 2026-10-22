@@ -67,7 +67,7 @@
 
 ## Feature Status Matrix
 
-To avoid false expectations, Parlex maintains an honest, transparent breakdown of what is fully reliable versus what is experimental or undergoing active refactoring:
+To avoid false expectations, Parlex maintains an honest, transparent breakdown of what is fully reliable versus what is experimental or undergoing active refactoring. **Recovery work (2026-10-21)** is tracked in `docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md`; rows below are updated after the first stabilization pass.
 
 | Feature Domain | Module / Implementation | Status | Realistic Current State |
 | :--- | :--- | :---: | :--- |
@@ -76,14 +76,14 @@ To avoid false expectations, Parlex maintains an honest, transparent breakdown o
 | **Transliteration** | `IcuTransliterator.kt` | 🟢 **Stable** | **Production-ready.** Fully offline romanization/transliteration for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul. |
 | **Offline Lexicon** | `TransLiveDatabase.kt` | 🟢 **Stable** | **Production-ready.** Fast grammatical dictionary lookups and offline TSV lexicon import. |
 | **Currency Converter** | `ExchangeRateRepository.kt` | 🟢 **Stable** | **Production-ready.** Real-time on-screen currency regex detection (`$`, `€`, `₫`, `₽`) with baseline offline conversion. |
-| **Voice Dialogue** | `DialogueScreen.kt` | 🟡 **Beta** | **Functional, undergoing acoustic tuning.** Two-way speech flow with Silero VAD turn detection, background audio recording (AAC 48 kbps / 16-bit PCM WAV), audio playback timeline with scrub/seek (1.0x–2.0x), and hardware AEC echo cancellation guard. Background noise suppression and CJK speech calibration are in progress. |
+| **Voice Dialogue** | `DialogueScreen.kt` | 🟡 **Beta** | **Recovery pass applied.** TTS has a hard timeout and per-utterance callbacks; ASR decoding is decoupled from the microphone read loop; AEC/NS and audio focus are enabled when available; turn audio timing is measured instead of hardcoded. Still needs on-device acoustic tuning and streaming partials. |
 | **Floating HUD** | `MiniOverlayHudView.kt` | 🟡 **Beta** | **Functional.** Docked edge controls with Fast NMT vs Smart LLM toggle, quick language carousel, and one-tap screenshot export to `Pictures/Parlex/`. |
-| **Camera & Photo Translation** | `CameraScreen.kt` | 🟠 **Alpha (Partial)** | **Partially working.** Live CameraX capture and printed document translation work well under clear lighting; struggles with low light, reflections, curved surfaces, and cursive handwriting. Requires OCR bounding-box stabilization. |
-| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🔴 **Prototype / Scaffold** | **Early scaffold — NOT ready for daily use.** While system services, accessibility bindings, and UI overlay windows launch successfully, the current node traversal and bounding box clusterer frequently scramble text or return garbled output ("каша"). Undergoing fundamental architectural reconstruction in Phase X. |
+| **Camera & Photo Translation** | `CameraScreen.kt` | 🟠 **Alpha (Partial)** | **Recovery pass applied.** Live OCR is crop-aware and uses a 1280×720 analysis stream; auto mode probes the script once per second instead of three passes per frame; capture painting no longer erases a whole document page. Still lacks on-device quality validation and paragraph reflow for every layout. |
+| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟠 **Beta (Recovery)** | **Major layout/session fixes.** Translations are fitted inside the original block instead of being pushed over neighbouring UI; erase masks no longer move with text; mixed-language blocks use per-language pairs; rotation/window changes dismiss stale overlays; volume chord + diagnostics added. Needs real-device visual acceptance. |
 | **LiteRT-LM Engine** | `LiteRtTranslationEngine.kt` | 🔴 **Experimental** | Google LiteRT-LM GPU runtime for Gemma 4 models (E2B / E4B). |
-| **Multimodal Vision LLMs** | `VisionLlmComponents.kt` | 🔴 **Experimental** | Research prototypes for MiniCPM-V 4.6, SmolVLM-2, and Gemma 4 Edge screen comprehension. |
+| **Multimodal Vision LLMs** | `VisionLlmComponents.kt` | 🔵 **Planned** | Catalog only; not wired into the app. Do not treat as a shipped feature until a phase in the recovery plan is complete. |
 | **AngelSlim Dequant** | `ggml-angelslim.c` (R&D) | 🔴 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim proprietary 1.25-bit (~440 MB) and 2-bit (~573 MB) weights. |
-| **Snapdragon NPU Offload**| Qualcomm QNN / LiteRT NPU | 🔵 **Roadmap** | Direct neural offload to Qualcomm Hexagon Tensor Accelerator for cool, zero-throttling, battery-efficient inference. |
+| **Snapdragon NPU Offload**| Qualcomm QNN / LiteRT NPU | 🔵 **Roadmap** | Direct neural offload to Qualcomm Hexagon Tensor Accelerator (LiteRT backend exists; device verification still pending). |
 
 ---
 
@@ -192,11 +192,11 @@ Arabic, Bengali, Bulgarian, Burmese, Chinese, Croatian, Czech, Danish, Dutch, En
 
 ### Prerequisites
 - Android Studio Ladybug / Meerkat or command-line SDK.
-- Android SDK Platform 36 & Build-Tools `37.0.0`.
+- Android SDK Platform 36 & Build-Tools `36.0.0`.
 - Android NDK `27.3.13750724`.
 - CMake `3.22.1`.
 - Java Development Kit (JDK) 21 (local Gradle targets Java 17 bytecode).
-- Gradle Wrapper `8.11.1`.
+- Gradle Wrapper `9.4.1`.
 - Physical device or emulator with `arm64-v8a`, Android 8.0+ (`minSdk 26`).
 
 ### Clean Clone & Native Submodule Setup
@@ -204,9 +204,10 @@ Arabic, Bengali, Bulgarian, Burmese, Chinese, Croatian, Czech, Danish, Dutch, En
 git clone https://github.com/RandoTeam/Parlex.git
 cd Parlex
 
-# Restore exact tracked llama.cpp submodule commit
-git clone https://github.com/ggml-org/llama.cpp.git app/src/main/cpp/llama.cpp
-git -C app/src/main/cpp/llama.cpp checkout 5dcb71166686799f0d873eab7386234302d05ecf
+# Restores OpenCL headers, the link-time libOpenCL.so stub, and the exact
+# llama.cpp revision recorded in app/src/main/cpp/llama.cpp.version.
+# A clean clone also builds a CPU-only APK without this step.
+powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 ### Build Commands

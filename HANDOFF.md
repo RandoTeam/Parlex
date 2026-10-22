@@ -3,6 +3,12 @@
 This document is the standalone transfer note for continuing Parlex without
 depending on previous chat history.
 
+> **2026-10-21 recovery:** read
+> [`docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md`](docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md)
+> first. It lists verified defects, the phased plan and acceptance criteria.
+> CI is expected to be green after the first baseline pass; native GPU builds
+> are restored by `scripts/setup-native.ps1`.
+
 ## Current Goal
 
 Parlex is an offline Android translator with three main product flows:
@@ -71,8 +77,9 @@ Governance:
 git clone https://github.com/RandoTeam/Parlex.git
 cd Parlex
 
-git clone https://github.com/ggml-org/llama.cpp.git app/src/main/cpp/llama.cpp
-git -C app/src/main/cpp/llama.cpp checkout 5dcb71166686799f0d873eab7386234302d05ecf
+# Restores the OpenCL headers/link stub and the exact llama.cpp revision
+# recorded in app/src/main/cpp/llama.cpp.version.
+powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 The tracked source of truth is:

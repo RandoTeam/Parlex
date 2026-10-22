@@ -1,12 +1,19 @@
 # Project Stage Snapshot
 
-Snapshot date: 2026-09-14
+Snapshot date: 2026-10-21
+
+> **Recovery status:** the 2026-10-21 audit
+> [`docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md`](docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md)
+> supersedes the "COMPLETED" labels below where code and verification disagree.
+> The first stabilization pass covers CI/native reproducibility, screen layout
+> fitting, volume chord diagnostics, camera crop/resolution, voice TTS timeout
+> and ASR decoupling. Device acceptance is still required.
 
 ## Repository
 
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
-- Commit HEAD: `487f0af`
+- Last public release commit: `607638f`
 - Latest public signed prerelease: `v1.5.1-beta.5`
 - Latest public APK asset: `Parlex-v1.5.1-beta.5-release.apk`
 - Public APK SHA-256:
@@ -91,8 +98,8 @@ Restore when needed:
 git clone https://github.com/RandoTeam/Parlex.git
 cd Parlex
 
-git clone https://github.com/ggml-org/llama.cpp.git app/src/main/cpp/llama.cpp
-git -C app/src/main/cpp/llama.cpp checkout 5dcb71166686799f0d873eab7386234302d05ecf
+# OpenCL headers + link stub + exact llama.cpp revision from llama.cpp.version
+powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 For signed builds, also restore:

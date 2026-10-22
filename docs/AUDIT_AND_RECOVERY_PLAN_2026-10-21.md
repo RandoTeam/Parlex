@@ -14,6 +14,27 @@
 
 ---
 
+## 0.1 Статус первого прохода (2026-10-21)
+
+- [x] Официальный `gradlew.bat` с поддержкой `JAVA_HOME`.
+- [x] `scripts/setup-native.ps1/.sh`: OpenCL submodule, link-stub, pinned llama.cpp.
+- [x] CMake больше не падает без OpenCL: CPU-only сборка по умолчанию, GPU — при наличии prerequisite.
+- [x] CI переписан: SDK-пакеты, Gradle cache, unit tests, artifact; отдельная native-джоба.
+- [x] Удалены два неиспользуемых 55 MB AAR.
+- [x] `allowBackup=false`; явные Room-миграции 1→5 вместо destructive.
+- [x] Экранный layout: переводы вписываются в исходный блок, без сдвига поверх соседей; line-маски больше не двигаются; clip.
+- [x] Смешанные языки: группы по source language, отдельная пара на группу; `TranslatorPool` вместо одного глобального переводчика.
+- [x] Сканер/пузырь скрываются перед screenshot; rotation/window change закрывают stale overlay; `ACTION_SHOW_TRANSLATION` обрабатывается.
+- [x] Volume chord через `onKeyEvent` (opt-in) + диагностика/тест в Settings; системный accessibility shortcut сохранён.
+- [x] OCR mode вынесен в настройки; default — FAST_ONLY.
+- [x] Pixel/M3 Expressive-подобное появление: fade/scale + stagger + haptic.
+- [x] Camera: crop-aware live OCR, 1280×720 analysis, один OCR-проход на кадр, без `runBlocking`, LiteRT-aware Quality, per-region document painting.
+- [x] Voice: TTS timeout/watchdog, per-utterance callbacks, ASR decode вне audio read loop, AEC/NS/audio focus, измеряемая длительность реплики, финализация записи.
+- [ ] Проверка на реальном устройстве (Pixel/OnePlus/ColorOS), screenshot golden-тесты, TQI v2 на production layout.
+- [ ] Semantic memory (EmbeddingGemma 2) — отдельный план `docs/SEMANTIC_MEMORY_PLAN_2026-10-21.md`.
+
+---
+
 ## 0. Краткое резюме (TL;DR)
 
 Проект содержит много сильных идей и большой объём кода (145 Kotlin-файлов, ~35 000 строк), но три ключевых сценария — **экранный перевод по кнопкам громкости**, **камера** и **голосовой диалог** — находятся в состоянии, где UI и документация обещают больше, чем реально работает. Главные причины — не «мелкие баги», а архитектурные:
