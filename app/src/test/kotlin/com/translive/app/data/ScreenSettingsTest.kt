@@ -15,7 +15,7 @@ class ScreenSettingsTest {
         override var isScreenSourceAuto: Boolean = true
         override var textTargetLanguage: Language = Language.ENGLISH
         override var screenA11yShortcutBehavior: ScreenA11yShortcutBehavior = ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE
-        override var ocrMode: OcrMode = OcrMode.FULL_SCAN
+        override var ocrMode: OcrMode = OcrMode.FAST_ONLY
     }
 
     @Test
@@ -24,30 +24,30 @@ class ScreenSettingsTest {
 
         assertFalse(settings.screenSyncTargetWithMain)
         assertEquals(ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE, settings.screenA11yShortcutBehavior)
-        assertEquals(OcrMode.FULL_SCAN, settings.ocrMode)
+        assertEquals(OcrMode.FAST_ONLY, settings.ocrMode)
     }
 
     @Test
     fun ocrMode_defaultAndEnumValues_areCorrect() {
         val settings = SettingsRepository()
-        assertEquals(OcrMode.FULL_SCAN, settings.ocrMode)
+        assertEquals(OcrMode.FAST_ONLY, settings.ocrMode)
         assertEquals(OcrMode.FAST_ONLY, OcrMode.valueOf("FAST_ONLY"))
         assertEquals(OcrMode.FULL_SCAN, OcrMode.valueOf("FULL_SCAN"))
     }
 
     @Test
-    fun ocrMode_fromString_safelyFallsBackToFullScan() {
+    fun ocrMode_fromString_safelyFallsBackToFastOnly() {
         assertEquals(OcrMode.FAST_ONLY, OcrMode.fromString("FAST_ONLY"))
         assertEquals(OcrMode.FAST_ONLY, OcrMode.fromString("fast_only"))
         assertEquals(OcrMode.FULL_SCAN, OcrMode.fromString("FULL_SCAN"))
-        assertEquals(OcrMode.FULL_SCAN, OcrMode.fromString(null))
-        assertEquals(OcrMode.FULL_SCAN, OcrMode.fromString("unknown_mode"))
+        assertEquals(OcrMode.FAST_ONLY, OcrMode.fromString(null))
+        assertEquals(OcrMode.FAST_ONLY, OcrMode.fromString("unknown_mode"))
     }
 
     @Test
     fun ocrMode_canBeUpdatedOnFakeRepository() {
         val settings = FakeSettingsRepository()
-        assertEquals(OcrMode.FULL_SCAN, settings.ocrMode)
+        assertEquals(OcrMode.FAST_ONLY, settings.ocrMode)
         settings.ocrMode = OcrMode.FAST_ONLY
         assertEquals(OcrMode.FAST_ONLY, settings.ocrMode)
     }

@@ -31,6 +31,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.translive.app.R
+import com.translive.app.data.model.Language
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
@@ -64,23 +65,15 @@ internal data class ArRenderBox(
     val eraseRect: RectF,
     val linePills: List<ArLinePill>,
     val staticLayout: StaticLayout,
-    var textOffsetX: Float,
-    var textOffsetY: Float,
+    val textOffsetX: Float,
+    val textOffsetY: Float,
     val backgroundColor: Int,
     val textColor: Int,
-    var isShowingOriginal: Boolean = false
-) {
-    fun offset(dx: Float, dy: Float) {
-        pillRect.offset(dx, dy)
-        touchRect.offset(dx, dy)
-        // eraseRect remains strictly pinned to original screen bounds on frozenBitmap (zero-drift inpainting)
-        textOffsetX += dx
-        textOffsetY += dy
-        for (lp in linePills) {
-            lp.lineRect.offset(dx, dy)
-        }
-    }
-}
+    val backgroundPatch: Bitmap? = null,
+    val isTruncated: Boolean = false,
+    var isShowingOriginal: Boolean = false,
+    var revealDelay: Float = 0f
+)
 
 /**
  * Fullscreen In-Place AR Screen Translation Overlay.
@@ -181,6 +174,58 @@ private object InpaintingHelper {
         return yiq < 128
     }
 
+    /**
+     * Builds a tiny blurred patch from the original region. Drawn stretched over
+     * the source text bounds it preserves gradients and photo backgrounds far
+     * better than a single flat sampled colour, while staying cheap enough to run
+     * on the UI thread during overlay creation.
+     */
+    fun createBackgroundPatch(bitmap: Bitmap?, rect: Rect, patchSize: Int = 18): Bitmap? {
+        if (bitmap == null || bitmap.isRecycled) return null
+        val left = rect.left.coerceIn(0, bitmap.width - 1)
+        val top = rect.top.coerceIn(0, bitmap.height - 1)
+        val right = rect.right.coerceIn(left + 1, bitmap.width)
+        val bottom = rect.bottom.coerceIn(top + 1, bitmap.height)
+        if (right <= left || bottom <= top) return null
+
+        val pixels = IntArray(patchSize * patchSize)
+        val width = right - left
+        val height = bottom - top
+        for (y in 0 until patchSize) {
+            val sy = top + (height * y / patchSize).coerceIn(0, height - 1)
+            for (x in 0 until patchSize) {
+                val sx = left + (width * x / patchSize).coerceIn(0, width - 1)
+                pixels[y * patchSize + x] = bitmap.getPixel(sx, sy)
+            }
+        }
+
+        // Two 3x3 box-blur passes remove residual glyph edges.
+        repeat(2) {
+            val copy = pixels.copyOf()
+            for (y in 0 until patchSize) {
+                for (x in 0 until patchSize) {
+                    var r = 0
+                    var g = 0
+                    var b = 0
+                    var count = 0
+                    for (dy in -1..1) {
+                        val yy = (y + dy).coerceIn(0, patchSize - 1)
+                        for (dx in -1..1) {
+                            val xx = (x + dx).coerceIn(0, patchSize - 1)
+                            val c = copy[yy * patchSize + xx]
+                            r += Color.red(c)
+                            g += Color.green(c)
+                            b += Color.blue(c)
+                            count++
+                        }
+                    }
+                    pixels[y * patchSize + x] = Color.rgb(r / count, g / count, b / count)
+                }
+            }
+        }
+        return Bitmap.createBitmap(pixels, patchSize, patchSize, Bitmap.Config.ARGB_8888)
+    }
+
     fun getContrastTextColor(backgroundColor: Int): Int {
         return if (isDark(backgroundColor)) Color.WHITE else Color.BLACK
     }
@@ -240,6 +285,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         style = Paint.Style.FILL
     }
 
+    private val patchPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+
+    private val screenshotPaint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.DITHER_FLAG)
+
     private val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
@@ -272,7 +321,6 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
         initTts()
         precomputeLayouts()
-        resolveOverlaps()
         setupTopBar()
     }
 
@@ -289,50 +337,44 @@ class ArTranslateOverlayView @JvmOverloads constructor(
      * Uses per-line left-edge anchoring (Approach 2) matching Google Lens / Circle to Search.
      */
     private fun precomputeLayouts() {
+        renderBoxes.forEach { it.backgroundPatch?.recycle() }
         renderBoxes.clear()
 
-        val minTextSizePx = 11f * density
-        val maxTextSizePx = 20f * density
+        val scaledDensity = density * context.resources.configuration.fontScale
+        val minTextSizePx = 9f * scaledDensity
         val maxScreenW = screenWidth.toFloat()
         val maxScreenH = screenHeight.toFloat()
-
-        val statusBarHeight = run {
-            val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-            if (resId > 0) context.resources.getDimensionPixelSize(resId) else (38 * density).toInt()
-        }
-        val topMinY = statusBarHeight + (44f * density)
-        val bottomMaxY = maxScreenH - (56f * density)
 
         for (box in rawBoxes) {
             val srcRect = box.boundingBox
             if (srcRect.width() <= 0 || srcRect.height() <= 0) continue
 
             val rawText = if (showOriginalText) box.rawText else box.translatedText.ifBlank { box.rawText }
-            // Collapse single newlines within sentences so StaticLayout wraps naturally
             val text = rawText.replace(Regex("""(?<!\n)\n(?!\n)"""), " ").trim()
+            if (text.isBlank()) continue
             val srcWidth = srcRect.width().toFloat()
             val srcHeight = srcRect.height().toFloat()
 
             // 1. Typography role & proportional font sizing
-            val approxLineHeight = 18f * density
+            val approxLineHeight = 16f * scaledDensity
             val estimatedLineCount = max(1, (srcHeight / approxLineHeight).toInt())
-            val origLineHeight = srcHeight / estimatedLineCount
-
             val isHeadline = (srcHeight >= 20f * density) ||
-                (estimatedLineCount <= 2 && (box.rawText.length < 80 && !box.rawText.endsWith(".")))
+                (estimatedLineCount <= 2 && box.rawText.length < 80 && !box.rawText.endsWith("."))
 
-            var candidateTextSize = if (isHeadline) {
-                (srcHeight * 0.74f).safeCoerceIn(13f * density, 19f * density)
-            } else if (estimatedLineCount > 1) {
-                (origLineHeight * 0.72f).safeCoerceIn(11f * density, 15f * density)
-            } else {
-                (srcHeight * 0.70f).safeCoerceIn(minTextSizePx, max(minTextSizePx, maxTextSizePx))
-            }
+            // The translation must live inside the original block. Start from a
+            // font size that fits the source line height, never from a size that
+            // forces the text to grow over neighbouring content.
+            var candidateTextSize = ArTextFit.initialTextSizePx(
+                sourceHeightPx = srcHeight,
+                estimatedLines = estimatedLineCount,
+                minTextSizePx = 9f * scaledDensity,
+                maxTextSizePx = 22f * scaledDensity
+            )
 
             val bgColor: Int
             val txtColor: Int
             if (overlayStyle == "inpainting") {
-                bgColor = InpaintingHelper.getDominantEdgeColor(frozenBitmap, box.boundingBox, (4 * density).toInt())
+                bgColor = InpaintingHelper.getDominantEdgeColor(frozenBitmap, srcRect, (4 * density).toInt())
                 val isDarkBg = InpaintingHelper.isDark(bgColor)
                 txtColor = if (isHeadline) {
                     if (isDarkBg) Color.WHITE else Color.parseColor("#FF1A1A1A")
@@ -344,41 +386,42 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                 txtColor = if (isHeadline) Color.WHITE else Color.parseColor("#FFE0E0E6")
             }
 
-            // Dedicated TextPaint per box prevents shared state corruption across different sizes/typefaces
             val boxPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.textSize = candidateTextSize
                 this.typeface = if (isHeadline) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
                 this.color = txtColor
             }
 
-            // 2. Determine target layout width anchored to srcRect.left
-            val maxAvailableW = max(48f * density, maxScreenW - srcRect.left.toFloat() - (16f * density))
-            var targetWidth = min(maxAvailableW, max(srcWidth, 48f * density))
+            // 2. Fixed width = original block width, minus inside padding. Never
+            // expand horizontally into a neighbouring column.
+            val targetWidth = max(24f * density, srcWidth - padHorizontal * 2)
             var staticLayout = createStaticLayout(text, boxPaint, targetWidth.toInt())
 
-            // 3. Auto-fit step-down: refine font size if height blows up
+            // 3. Fit vertically inside the source block. If the translation is
+            // longer than the original, shrink first and ellipsize afterwards.
             var attempts = 0
-            val maxAllowedH = if (estimatedLineCount > 1) srcHeight * 1.5f else srcHeight * 2.0f
-            while (attempts < 4 && candidateTextSize > minTextSizePx && staticLayout.height > maxAllowedH) {
-                candidateTextSize = max(minTextSizePx, candidateTextSize * 0.90f)
+            while (attempts < 12 && candidateTextSize > minTextSizePx && staticLayout.height > srcHeight) {
+                candidateTextSize = ArTextFit.nextSmallerSize(candidateTextSize, minTextSizePx)
                 boxPaint.textSize = candidateTextSize
-                targetWidth = min(maxAvailableW, max(targetWidth, staticLayout.maxLineWidth + padHorizontal * 2))
                 staticLayout = createStaticLayout(text, boxPaint, targetWidth.toInt())
                 attempts++
             }
 
-            // 4. Strict Left-Edge Anchoring (No horizontal centering!)
-            val layoutW = staticLayout.maxLineWidth
+            val maxLines = ArTextFit.maxLinesFor(srcHeight, boxPaint.fontSpacing)
+            val isTruncated = ArTextFit.needsTruncation(staticLayout.lineCount, maxLines)
+            if (isTruncated) {
+                staticLayout = createTruncatedLayout(text, boxPaint, targetWidth.toInt(), maxLines)
+            }
+
+            // 4. Anchor the text inside the original block (no screen-level drift).
+            val layoutW = min(staticLayout.maxLineWidth, targetWidth)
             val layoutH = staticLayout.height.toFloat()
+            val textOffsetX = (srcRect.left + padHorizontal)
+                .safeCoerceIn(0f, max(0f, maxScreenW - layoutW))
+            val textOffsetY = (srcRect.top + max(0f, (srcHeight - layoutH) / 2f))
+                .safeCoerceIn(0f, max(0f, maxScreenH - layoutH))
 
-            val minLeft = 8f * density
-            val maxLeft = max(minLeft, maxScreenW - layoutW - minLeft)
-            val textOffsetX = srcRect.left.toFloat().safeCoerceIn(minLeft, maxLeft)
-
-            val maxTop = max(topMinY, bottomMaxY - layoutH)
-            val textOffsetY = srcRect.top.toFloat().safeCoerceIn(topMinY, maxTop)
-
-            // 5. Erase rectangle covering original bounding box with 3dp/2dp bleed
+            // 5. Erase rectangle covering only the original text bounds.
             val bleedX = 3f * density
             val bleedY = 2f * density
             val eraseRect = RectF(
@@ -388,25 +431,8 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                 (srcRect.bottom + bleedY).coerceAtMost(maxScreenH)
             )
 
-            // 6. Per-line pill decomposition
-            val linePills = ArrayList<ArLinePill>(staticLayout.lineCount)
-            val linePadH = 4f * density
-            val linePadV = 2f * density
-            for (i in 0 until staticLayout.lineCount) {
-                val lLeft = textOffsetX + staticLayout.getLineLeft(i)
-                val lWidth = staticLayout.getLineWidth(i)
-                val lTop = textOffsetY + staticLayout.getLineTop(i)
-                val lBottom = textOffsetY + staticLayout.getLineBottom(i)
-                val pillRect = RectF(
-                    lLeft - linePadH,
-                    lTop - linePadV,
-                    lLeft + lWidth + linePadH,
-                    lBottom + linePadV
-                )
-                linePills.add(ArLinePill(pillRect, i))
-            }
-
-            // 7. Overall pillRect (union of eraseRect and layout) and touchRect
+            val linePadH = 2f * density
+            val linePadV = 1f * density
             val pillLeft = min(eraseRect.left, textOffsetX - linePadH)
             val pillTop = min(eraseRect.top, textOffsetY - linePadV)
             val pillRight = max(eraseRect.right, textOffsetX + layoutW + linePadH)
@@ -420,113 +446,30 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                 pillRect.bottom + touchSlopPad
             )
 
+            val backgroundPatch = if (overlayStyle == "inpainting") {
+                InpaintingHelper.createBackgroundPatch(frozenBitmap, srcRect)
+            } else null
+
             renderBoxes.add(
                 ArRenderBox(
                     origin = box,
                     pillRect = pillRect,
                     touchRect = touchRect,
                     eraseRect = eraseRect,
-                    linePills = linePills,
+                    linePills = emptyList(),
                     staticLayout = staticLayout,
                     textOffsetX = textOffsetX,
                     textOffsetY = textOffsetY,
                     backgroundColor = bgColor,
-                    textColor = txtColor
+                    textColor = txtColor,
+                    backgroundPatch = backgroundPatch,
+                    isTruncated = isTruncated,
+                    revealDelay = (renderBoxes.size * 0.035f).coerceAtMost(0.45f)
                 )
             )
         }
-        Log.i("ArTranslateOverlayView", "Precomputed ${renderBoxes.size} render boxes (Approach 2)")
-    }
-
-    private fun calculateHorizontalOverlapRatio(a: RectF, b: RectF): Float {
-        val overlapLeft = max(a.left, b.left)
-        val overlapRight = min(a.right, b.right)
-        val overlapWidth = max(0f, overlapRight - overlapLeft)
-        val minWidth = min(a.width(), b.width())
-        if (minWidth <= 0f) return 0f
-        return overlapWidth / minWidth
-    }
-
-    /**
-     * Column-aware downward elastic collision avoidance engine.
-     * Monotonic forward-scan pass ensures all items sharing horizontal overlap (>= 20%)
-     * never collide, even across interleaved multi-column hierarchies.
-     */
-    private fun resolveOverlaps() {
-        if (renderBoxes.size < 2) return
-        val maxScreenH = screenHeight.toFloat()
-        val statusBarHeight = run {
-            val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-            if (resId > 0) context.resources.getDimensionPixelSize(resId) else (38 * density).toInt()
-        }
-        val topMargin = statusBarHeight + (48f * density)
-        val bottomMargin = 56f * density
-        var gapPx = 4f * density
-        val minColOverlap = 0.20f
-
-        for (pass in 0 until 4) {
-            val sorted = renderBoxes.sortedBy { it.pillRect.top }
-            var anyShifted = false
-
-            for (i in 0 until sorted.size) {
-                val current = sorted[i]
-                var highestRequiredTop = current.pillRect.top
-                for (j in 0 until i) {
-                    val prev = sorted[j]
-                    val colOverlap = calculateHorizontalOverlapRatio(prev.pillRect, current.pillRect)
-                    if (colOverlap >= minColOverlap) {
-                        val neededTop = prev.pillRect.bottom + gapPx
-                        if (neededTop > highestRequiredTop) {
-                            highestRequiredTop = neededTop
-                        }
-                    }
-                }
-
-                val pushDown = highestRequiredTop - current.pillRect.top
-                if (pushDown > 0.5f) {
-                    current.offset(0f, pushDown)
-                    anyShifted = true
-                }
-            }
-
-            // Upward screen containment preserving relative spacing
-            val lowestBottom = sorted.maxOfOrNull { it.pillRect.bottom } ?: 0f
-            val screenLimit = maxScreenH - bottomMargin
-            if (lowestBottom > screenLimit) {
-                val overflow = lowestBottom - screenLimit
-                val minTop = sorted.minOfOrNull { it.pillRect.top } ?: 0f
-                val availableHeadroom = max(0f, minTop - topMargin)
-                val upwardShift = min(overflow, availableHeadroom)
-                if (upwardShift > 0.5f) {
-                    for (box in sorted) {
-                        box.offset(0f, -upwardShift)
-                    }
-                    anyShifted = true
-                }
-
-                if (gapPx > 2f * density) {
-                    gapPx = 2f * density
-                    anyShifted = true
-                }
-
-                // If still overflowing after upward shift and gap compression:
-                val remainingOverflow = (sorted.maxOfOrNull { it.pillRect.bottom } ?: 0f) - screenLimit
-                if (remainingOverflow > 0.5f) {
-                    var nextTop = screenLimit
-                    for (k in sorted.indices.reversed()) {
-                        val item = sorted[k]
-                        if (item.pillRect.bottom > nextTop) {
-                            val pullUp = item.pillRect.bottom - nextTop
-                            item.offset(0f, -pullUp)
-                            anyShifted = true
-                        }
-                        nextTop = item.pillRect.top - gapPx
-                    }
-                }
-            }
-
-            if (!anyShifted) break
-        }
+        Log.i("ArTranslateOverlayView", "Precomputed ${renderBoxes.size} fitted render boxes")
+        startRevealAnimation()
     }
 
     private fun createStaticLayout(text: CharSequence, paint: TextPaint, width: Int): StaticLayout {
@@ -562,6 +505,57 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             }
             return maxW
         }
+
+    private fun createTruncatedLayout(
+        text: CharSequence,
+        paint: TextPaint,
+        width: Int,
+        maxLines: Int
+    ): StaticLayout {
+        val safeWidth = max(1, width)
+        val safeLines = max(1, maxLines)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            StaticLayout.Builder.obtain(text, 0, text.length, paint, safeWidth)
+                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                .setLineSpacing(0f, 1.05f)
+                .setIncludePad(false)
+                .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+                .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+                .setMaxLines(safeLines)
+                .setEllipsize(android.text.TextUtils.TruncateAt.END)
+                .build()
+        } else {
+            @Suppress("DEPRECATION")
+            StaticLayout(
+                text,
+                paint,
+                safeWidth,
+                Layout.Alignment.ALIGN_NORMAL,
+                1.0f,
+                0f,
+                false
+            )
+        }
+    }
+
+    // --- Reveal animation (Material 3 Expressive-style stagger) ---
+
+    private var revealProgress = 1f
+    private var revealAnimator: ValueAnimator? = null
+
+    private fun startRevealAnimation() {
+        revealAnimator?.cancel()
+        revealProgress = 0f
+        revealAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 360L
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                revealProgress = it.animatedValue as Float
+                invalidate()
+            }
+            start()
+        }
+    }
 
     // --- Top Bar & Bottom Dismiss Pill UI (Strict MD3 Zero-Emoji) ---
 
@@ -668,7 +662,6 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                     setStroke((1 * density).toInt(), Color.parseColor("#44FFFFFF"))
                 }
                 precomputeLayouts()
-                resolveOverlaps()
                 invalidate()
             }
         }
@@ -728,19 +721,11 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
     private fun showLanguagePicker(isSource: Boolean, anchor: View) {
         dismissLanguagePicker()
-        val languages = if (isSource) {
-            listOf("auto" to "Auto") + listOf(
-                "en" to "English", "ru" to "Russian", "zh" to "Chinese",
-                "de" to "German", "fr" to "French", "es" to "Spanish",
-                "ja" to "Japanese", "ko" to "Korean", "vi" to "Vietnamese"
-            )
-        } else {
-            listOf(
-                "ru" to "Russian", "en" to "English", "zh" to "Chinese",
-                "de" to "German", "fr" to "French", "es" to "Spanish",
-                "ja" to "Japanese", "ko" to "Korean", "vi" to "Vietnamese"
-            )
-        }
+        val all = Language.allLanguages
+            .map { it.code to it.displayName }
+            .distinctBy { it.first }
+            .sortedBy { it.second.lowercase(Locale.getDefault()) }
+        val languages = if (isSource) listOf("auto" to "Auto") + all else all
 
         val pickerLayout = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -756,10 +741,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
         for ((code, name) in languages) {
             val item = TextView(context).apply {
-                text = "$name (${code.uppercase()})"
+                text = if (code == "auto") "Auto" else "$name (${code.uppercase(Locale.ROOT)})"
                 textSize = 12f
                 typeface = Typeface.DEFAULT
-                setTextColor(Color.WHITE)
+                setTextColor(if (code == currentTargetLang || code == currentSourceLang) Color.parseColor("#80D8FF") else Color.WHITE)
                 setPadding((12 * density).toInt(), (7 * density).toInt(), (12 * density).toInt(), (7 * density).toInt())
                 setOnClickListener {
                     if (isSource) {
@@ -777,20 +762,30 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
         val anchorLoc = IntArray(2)
         anchor.getLocationOnScreen(anchorLoc)
-        val pickerWidth = (140 * density).toInt()
+        val pickerWidth = (170 * density).toInt()
         val minPickerX = (8 * density).toInt()
         val maxPickerX = max(minPickerX, screenWidth - pickerWidth - minPickerX)
         val posX = anchorLoc[0].safeCoerceIn(minPickerX, maxPickerX)
         val posY = (anchorLoc[1] + anchor.height + (4 * density).toInt())
 
-        val params = LayoutParams(pickerWidth, LayoutParams.WRAP_CONTENT).apply {
+        val estimatedHeight = (languages.size * 42 * density).toInt()
+        val maxHeight = (screenHeight * 0.62f).toInt().coerceAtLeast((120 * density).toInt())
+        val pickerHeight = min(estimatedHeight, maxHeight).coerceAtLeast((60 * density).toInt())
+
+        val scroll = android.widget.ScrollView(context).apply {
+            isVerticalScrollBarEnabled = true
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+            addView(pickerLayout, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+
+        val params = LayoutParams(pickerWidth, pickerHeight).apply {
             gravity = Gravity.TOP or Gravity.START
             leftMargin = posX
             topMargin = posY
         }
 
-        addView(pickerLayout, params)
-        activeLanguagePickerMenu = pickerLayout
+        addView(scroll, params)
+        activeLanguagePickerMenu = scroll
     }
 
     private fun dismissLanguagePicker() {
@@ -835,11 +830,13 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         this.rawBoxes = newBoxes
         this.currentSourceLang = sourceCode
         this.currentTargetLang = targetCode
+        this.selectedRenderBox = null
+        dismissMicroToolbar()
+        dismissLanguagePicker()
         updateTopBarLabels()
 
         animate().alpha(0.5f).setDuration(70L).withEndAction {
             precomputeLayouts()
-            resolveOverlaps()
             invalidate()
             animate().alpha(1.0f).setDuration(120L).start()
         }.start()
@@ -850,52 +847,61 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
 
-        // 1. Frozen Screenshot Background (if available)
+        val scaleX = width.toFloat() / screenWidth.coerceAtLeast(1).toFloat()
+        val scaleY = height.toFloat() / screenHeight.coerceAtLeast(1).toFloat()
+        canvas.save()
+        canvas.scale(scaleX, scaleY)
+
+        // 1. Frozen screenshot background in capture-pixel coordinates. The
+        // canvas scale above maps it onto the overlay window exactly.
         frozenBitmap?.let { bmp ->
-            if (!bmp.isRecycled) {
-                canvas.drawBitmap(bmp, 0f, 0f, null)
+            if (!bmp.isRecycled && bmp.width > 0 && bmp.height > 0) {
+                canvas.drawBitmap(bmp, 0f, 0f, screenshotPaint)
             }
         }
 
-        // 2. Dim Backdrop (Only if not using direct inpainting; direct inpainting is completely seamless)
+        // 2. Dim backdrop only for the legacy card style.
         if (overlayStyle != "inpainting") {
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), backdropPaint)
+            canvas.drawRect(0f, 0f, screenWidth.toFloat(), screenHeight.toFloat(), backdropPaint)
         }
 
         val cornerRadius = 3f * density
+        val dimmed = showOriginalText
 
-        // 3. Batched Inpainting Erase Pass (Direct Canvas Masking - Zero Dark Halos)
-        if (!showOriginalText) {
+        // 3. In-place replacement pass. Every box is drawn strictly inside its
+        // original block; nothing is shifted over neighbouring UI.
+        if (!dimmed) {
             for (item in renderBoxes) {
                 if (item.isShowingOriginal) continue
-                erasePaint.color = item.backgroundColor
+                val alpha = ((revealProgress - item.revealDelay) / 0.55f).coerceIn(0f, 1f)
+                if (alpha <= 0.01f) continue
+                val alphaInt = (255f * alpha).toInt().coerceIn(0, 255)
 
-                // Erase the original text bounds (anchored strictly to original coordinates)
-                canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
-
-                // Mask per-line expansion bounds
-                for (lp in item.linePills) {
-                    canvas.drawRoundRect(lp.lineRect, cornerRadius, cornerRadius, erasePaint)
+                val patch = item.backgroundPatch
+                if (patch != null && !patch.isRecycled) {
+                    patchPaint.alpha = alphaInt
+                    canvas.drawBitmap(patch, null, item.eraseRect, patchPaint)
+                } else {
+                    erasePaint.color = item.backgroundColor
+                    erasePaint.alpha = alphaInt
+                    canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
                 }
-            }
-        }
 
-        // 4. Batched Text Layout Pass (Zero-allocation Skia StaticLayout with dedicated per-box typography)
-        if (!showOriginalText) {
-            for (item in renderBoxes) {
-                if (item.isShowingOriginal) continue
+                item.staticLayout.paint.alpha = alphaInt
                 canvas.save()
+                canvas.clipRect(item.eraseRect)
                 canvas.translate(item.textOffsetX, item.textOffsetY)
                 item.staticLayout.draw(canvas)
                 canvas.restore()
             }
         }
 
-        // 5. Interactive Selection Highlight (Only on tapped box, no wireframes on unselected boxes!)
+        // 4. Selection highlight follows the fitted box, not a moved ghost.
         selectedRenderBox?.let { selected ->
-            val rect = selected.pillRect
-            canvas.drawRoundRect(rect, 6f * density, 6f * density, pillStrokeSelectedPaint)
+            canvas.drawRoundRect(selected.pillRect, 6f * density, 6f * density, pillStrokeSelectedPaint)
         }
+
+        canvas.restore()
     }
 
     // --- Resilient Touch & Gesture Handling ---
@@ -929,8 +935,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                     }
                 }
 
-                val touchX = event.x
-                val touchY = event.y
+                val touchScaleX = width.toFloat() / screenWidth.coerceAtLeast(1).toFloat()
+                val touchScaleY = height.toFloat() / screenHeight.coerceAtLeast(1).toFloat()
+                val touchX = event.x / touchScaleX.coerceAtLeast(0.001f)
+                val touchY = event.y / touchScaleY.coerceAtLeast(0.001f)
 
                 // 1. Check if user tapped inside any translated pill
                 val hitItem = renderBoxes.find { it.touchRect.contains(touchX, touchY) }
@@ -993,19 +1001,15 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "ar_speak_${System.currentTimeMillis()}")
         })
 
-        // Action 3: Toggle Original / Translation for this specific card
+        // Action 3: Toggle Original / Translation for this specific card.
+        // Hiding the box reveals the untouched frozen screenshot region, so no
+        // second layout pass and no stale selectedRenderBox are needed.
         val toggleLabel = if (item.isShowingOriginal) "Translate" else "Original"
         toolbar.addView(createMicroActionButton(toggleLabel) {
             item.isShowingOriginal = !item.isShowingOriginal
-            val displayText = if (item.isShowingOriginal) item.origin.rawText else item.origin.translatedText
-            textPaint.textSize = item.staticLayout.paint.textSize
-            val newLayout = createStaticLayout(displayText, textPaint, item.pillRect.width().toInt())
-            val idx = renderBoxes.indexOf(item)
-            if (idx >= 0) {
-                renderBoxes[idx] = item.copy(staticLayout = newLayout, isShowingOriginal = item.isShowingOriginal)
-            }
             invalidate()
             dismissMicroToolbar()
+            selectedRenderBox = item
         })
 
         // Action 4: Hide Individual Pill
@@ -1095,6 +1099,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        startRevealAnimation()
         if (Build.VERSION.SDK_INT >= 33) {
             try {
                 val dispatcher = findOnBackInvokedDispatcher()
@@ -1172,6 +1177,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
 
     private fun cleanup() {
+        revealAnimator?.cancel()
+        revealAnimator = null
+        renderBoxes.forEach { runCatching { it.backgroundPatch?.recycle() } }
+        renderBoxes.clear()
         runCatching {
             tts?.stop()
             tts?.shutdown()

@@ -4,8 +4,10 @@ import android.accessibilityservice.AccessibilityService
 import android.graphics.Bitmap
 import android.graphics.Rect
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -40,15 +42,22 @@ class ScreenAccessibilityService : AccessibilityService() {
         Log.i(TAG, "ScreenAccessibilityService connected successfully")
 
         // Register accessibility button/shortcut callback (API 26+)
-        // Triggered by: Volume Up + Down hold, two-finger swipe up, or floating a11y button
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val controller = accessibilityButtonController
             controller.registerAccessibilityButtonCallback(accessibilityButtonCallback)
+            runCatching {
+                _isAccessibilityButtonAvailable.value = controller.isAccessibilityButtonAvailable
+                Log.i(TAG, "Accessibility button available=${controller.isAccessibilityButtonAvailable}")
+            }
         }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Passive observation of window events
+        // A window change invalidates the frozen screenshot geometry. The
+        // overlay service decides whether an overlay is currently visible.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            ScreenTranslateOverlayService.onWindowStateChanged()
+        }
     }
 
     override fun onInterrupt() {
@@ -68,41 +77,101 @@ class ScreenAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Accessibility button callback — fires when the user triggers the shortcut:
-     * - Volume Up + Volume Down hold (3s)
-     * - Two-finger swipe up from bottom edge
-     * - Floating accessibility button tap
+     * Accessibility button callback — fires when the user triggers the system
+     * accessibility shortcut (including "hold volume keys" where the OEM routes
+     * that shortcut to the accessibility button).
      */
     private val accessibilityButtonCallback =
         object : android.accessibilityservice.AccessibilityButtonController.AccessibilityButtonCallback() {
             override fun onClicked(controller: android.accessibilityservice.AccessibilityButtonController) {
-                Log.i(TAG, "Accessibility shortcut triggered")
-                val behavior = safeSettings.screenA11yShortcutBehavior
+                triggerTranslation("accessibility_shortcut")
+            }
+        }
 
-                when (behavior) {
-                    ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE -> {
-                        val nodes = extractVisibleTextNodesFast()
-                        Log.i(TAG, "Extracted ${nodes.size} vector text nodes from A11y tree in 0ms (Single-shot)")
-                        captureSilentScreenshot(
-                            onSuccess = { bitmap ->
-                                ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, bitmap)
-                            },
-                            onError = { err ->
-                                Log.e(TAG, "Silent screenshot failed: $err")
-                                ScreenTranslateOverlayService.translateNodesOneShot(this@ScreenAccessibilityService, nodes, null)
-                            }
+    private var lastTriggerAtMs = 0L
+    private var volumeUpHeld = false
+    private var volumeDownHeld = false
+    private var volumeChordConsumed = false
+
+    /**
+     * Optional direct VolumeUp+VolumeDown chord. It only works when the system
+     * delivers filtered key events to this service (canRequestFilterKeyEvents +
+     * flagRequestFilterKeyEvents); the accessibility shortcut remains the
+     * recommended path on OEMs that do not.
+     */
+    override fun onKeyEvent(event: KeyEvent?): Boolean {
+        if (event == null || !safeSettings.screenVolumeChordEnabled) {
+            volumeUpHeld = false
+            volumeDownHeld = false
+            volumeChordConsumed = false
+            return false
+        }
+        if (event.keyCode != KeyEvent.KEYCODE_VOLUME_UP &&
+            event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN
+        ) {
+            return false
+        }
+        if (event.repeatCount > 0) {
+            return volumeChordConsumed
+        }
+
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) volumeUpHeld = true
+            else volumeDownHeld = true
+
+            if (volumeUpHeld && volumeDownHeld) {
+                volumeChordConsumed = true
+                triggerTranslation("volume_chord")
+                return true
+            }
+        } else if (event.action == KeyEvent.ACTION_UP) {
+            val consumed = volumeChordConsumed
+            if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) volumeUpHeld = false
+            else volumeDownHeld = false
+            if (!volumeUpHeld && !volumeDownHeld) volumeChordConsumed = false
+            return consumed
+        }
+        return false
+    }
+
+    fun triggerTranslation(source: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastTriggerAtMs < 600L) return
+        lastTriggerAtMs = now
+        _lastTriggerSource.value = source
+        Log.i(TAG, "Screen translation trigger: $source")
+
+        val behavior = safeSettings.screenA11yShortcutBehavior
+        when (behavior) {
+            ScreenA11yShortcutBehavior.SINGLE_SHOT_NO_BUBBLE -> {
+                val nodes = extractVisibleTextNodesFast()
+                captureSilentScreenshot(
+                    onSuccess = { bitmap ->
+                        ScreenTranslateOverlayService.translateNodesOneShot(
+                            this@ScreenAccessibilityService,
+                            nodes,
+                            bitmap
+                        )
+                    },
+                    onError = { err ->
+                        Log.e(TAG, "Silent screenshot failed: $err")
+                        ScreenTranslateOverlayService.translateNodesOneShot(
+                            this@ScreenAccessibilityService,
+                            nodes,
+                            null
                         )
                     }
-                    ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE -> {
-                        if (ScreenTranslateOverlayService.isServiceRunning.value) {
-                            ScreenTranslateOverlayService.stop(this@ScreenAccessibilityService)
-                        } else {
-                            ScreenTranslateOverlayService.start(this@ScreenAccessibilityService)
-                        }
-                    }
+                )
+            }
+            ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE -> {
+                if (ScreenTranslateOverlayService.isServiceRunning.value) {
+                    ScreenTranslateOverlayService.stop(this@ScreenAccessibilityService)
+                } else {
+                    ScreenTranslateOverlayService.start(this@ScreenAccessibilityService)
                 }
             }
         }
+    }
 
     /**
      * Captures a silent screenshot using takeScreenshot API (Android 11 / API 30+).
@@ -191,8 +260,21 @@ class ScreenAccessibilityService : AccessibilityService() {
         private val _isServiceActive = MutableStateFlow(false)
         val isServiceActive: StateFlow<Boolean> = _isServiceActive.asStateFlow()
 
+        private val _isAccessibilityButtonAvailable = MutableStateFlow(false)
+        val isAccessibilityButtonAvailable: StateFlow<Boolean> = _isAccessibilityButtonAvailable.asStateFlow()
+
+        private val _lastTriggerSource = MutableStateFlow<String?>(null)
+        val lastTriggerSource: StateFlow<String?> = _lastTriggerSource.asStateFlow()
+
         fun getInstance(): ScreenAccessibilityService? = instanceRef?.get()
 
         fun isConnected(): Boolean = instanceRef?.get() != null && _isServiceActive.value
+
+        fun triggerForTest(): Boolean {
+            val service = instanceRef?.get() ?: return false
+            if (!_isServiceActive.value) return false
+            service.triggerTranslation("settings_test")
+            return true
+        }
     }
 }

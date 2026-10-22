@@ -73,6 +73,12 @@ class SettingsViewModel @Inject constructor(
     private val _screenA11yShortcutBehavior = MutableStateFlow(settings.screenA11yShortcutBehavior)
     val screenA11yShortcutBehavior: StateFlow<com.translive.app.data.ScreenA11yShortcutBehavior> = _screenA11yShortcutBehavior.asStateFlow()
 
+    private val _screenVolumeChordEnabled = MutableStateFlow(settings.screenVolumeChordEnabled)
+    val screenVolumeChordEnabled: StateFlow<Boolean> = _screenVolumeChordEnabled.asStateFlow()
+
+    private val _ocrMode = MutableStateFlow(settings.ocrMode)
+    val ocrMode: StateFlow<com.translive.app.data.OcrMode> = _ocrMode.asStateFlow()
+
     private val _homeCurrency = MutableStateFlow(settings.homeCurrencyCode)
     val homeCurrency: StateFlow<String> = _homeCurrency.asStateFlow()
 
@@ -260,6 +266,19 @@ class SettingsViewModel @Inject constructor(
         settings.screenA11yShortcutBehavior = behavior
         _screenA11yShortcutBehavior.value = behavior
     }
+
+    fun setScreenVolumeChordEnabled(enabled: Boolean) {
+        settings.screenVolumeChordEnabled = enabled
+        _screenVolumeChordEnabled.value = enabled
+    }
+
+    fun setOcrMode(mode: com.translive.app.data.OcrMode) {
+        settings.ocrMode = mode
+        _ocrMode.value = mode
+    }
+
+    fun triggerScreenTranslationTest(): Boolean =
+        com.translive.app.service.accessibility.ScreenAccessibilityService.triggerForTest()
 
     fun activeModelSupportsCpu(): Boolean = modelRepository.getActiveVariant()?.supportsCpu ?: true
 

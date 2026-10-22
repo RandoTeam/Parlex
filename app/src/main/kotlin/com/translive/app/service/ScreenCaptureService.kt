@@ -103,6 +103,7 @@ class ScreenCaptureService : Service() {
             if (fromOverlay) {
                 val overlayIntent = Intent(this, ScreenTranslateOverlayService::class.java)
                     .setAction(ScreenTranslateOverlayService.ACTION_SHOW_TRANSLATION)
+                    .putExtra(ScreenTranslateOverlayService.EXTRA_ONE_SHOT_MODE, true)
                     .setData(uri)
                 androidx.core.content.ContextCompat.startForegroundService(this, overlayIntent)
             } else {

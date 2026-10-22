@@ -75,6 +75,10 @@ fun SettingsScreen(
     val screenSourceLanguage by viewModel.screenSourceLanguage.collectAsState()
     val isScreenSourceAuto by viewModel.isScreenSourceAuto.collectAsState()
     val screenA11yShortcutBehavior by viewModel.screenA11yShortcutBehavior.collectAsState()
+    val screenVolumeChordEnabled by viewModel.screenVolumeChordEnabled.collectAsState()
+    val ocrMode by viewModel.ocrMode.collectAsState()
+    val lastScreenTrigger by com.translive.app.service.accessibility.ScreenAccessibilityService.lastTriggerSource.collectAsState()
+    val a11yButtonAvailable by com.translive.app.service.accessibility.ScreenAccessibilityService.isAccessibilityButtonAvailable.collectAsState()
     val runtimeDiagnostics by viewModel.runtimeDiagnostics.collectAsState()
     val systemPermissionsState by viewModel.systemPermissionsState.collectAsState()
     var showClearStorageDialog by remember { mutableStateOf(false) }
@@ -176,6 +180,93 @@ fun SettingsScreen(
                     description = stringResource(R.string.settings_screen_shortcut_toggle_bubble_desc),
                     selected = screenA11yShortcutBehavior == com.translive.app.data.ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE,
                     onClick = { viewModel.setScreenA11yShortcutBehavior(com.translive.app.data.ScreenA11yShortcutBehavior.TOGGLE_FLOATING_BUBBLE) }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.settings_screen_volume_chord_title),
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.settings_screen_volume_chord_desc),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Switch(
+                        checked = screenVolumeChordEnabled,
+                        onCheckedChange = { viewModel.setScreenVolumeChordEnabled(it) }
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Text(
+                    stringResource(R.string.settings_screen_ocr_mode_title),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    stringResource(R.string.settings_screen_ocr_mode_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                TranslationPolicyOption(
+                    label = stringResource(R.string.settings_screen_ocr_fast),
+                    description = stringResource(R.string.settings_screen_ocr_fast_desc),
+                    selected = ocrMode == com.translive.app.data.OcrMode.FAST_ONLY,
+                    onClick = { viewModel.setOcrMode(com.translive.app.data.OcrMode.FAST_ONLY) }
+                )
+                TranslationPolicyOption(
+                    label = stringResource(R.string.settings_screen_ocr_full),
+                    description = stringResource(R.string.settings_screen_ocr_full_desc),
+                    selected = ocrMode == com.translive.app.data.OcrMode.FULL_SCAN,
+                    onClick = { viewModel.setOcrMode(com.translive.app.data.OcrMode.FULL_SCAN) }
+                )
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                Text(
+                    stringResource(R.string.settings_screen_trigger_test),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    stringResource(R.string.settings_screen_trigger_test_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick = {
+                        val ok = viewModel.triggerScreenTranslationTest()
+                        android.widget.Toast.makeText(
+                            context,
+                            if (ok) R.string.settings_screen_trigger_test
+                            else R.string.settings_screen_trigger_test_unavailable,
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                ) {
+                    Text(stringResource(R.string.settings_screen_trigger_test))
+                }
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    stringResource(
+                        R.string.settings_screen_trigger_last,
+                        lastScreenTrigger ?: stringResource(R.string.settings_screen_trigger_last_never)
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
