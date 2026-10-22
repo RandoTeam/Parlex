@@ -260,6 +260,7 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 - [Documentation index](docs/INDEX.md)
 - [Product vision](docs/PRODUCT_VISION.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Design system](docs/DESIGN_SYSTEM.md)
 - [Roadmap](ROADMAP.md)
 - [Development pipeline](docs/PIPELINE.md)
 - [Quality gates](docs/QUALITY_GATES.md)

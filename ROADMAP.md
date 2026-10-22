@@ -87,6 +87,14 @@ an explicit workaround.
 - Tune OCR preprocessing and paragraph grouping from data.
 - Decide whether document reflow returns.
 
+### D11. Quiet Glass design system
+
+- Apply `docs/DESIGN_SYSTEM.md` tokens to camera controls, live cards and screen
+  overlay chrome.
+- Add reduced-motion and 48 dp acceptance tests.
+- Capture before/after screenshots on the device matrix.
+- Do not expand the theme to every screen until camera/screen pass device QA.
+
 ### S11. Screen quality and privacy
 
 - Improve in-place typography and edge-aware masks.
