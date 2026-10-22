@@ -53,6 +53,7 @@ class CameraViewModelLifecycleTest {
         private val _uiState = MutableStateFlow(
             CameraUiState(
                 sourceLanguage = Language.ENGLISH,
+                isSourceAuto = false,
                 targetLanguage = Language.RUSSIAN,
                 translationMode = initialTranslationMode,
                 captureStatus = CaptureStatus.IDLE

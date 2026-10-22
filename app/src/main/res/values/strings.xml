@@ -177,6 +177,7 @@
     <string name="camera_warning_script_mismatch">Check language</string>
     <string name="camera_warning_model_unavailable">Model not ready</string>
     <string name="camera_capture_failed">Failed to capture frame</string>
+    <string name="camera_shutter_cd">Take photo</string>
     <string name="history_tab_all">All</string>
     <string name="history_tab_favorites">Favorites</string>
     <string name="history_tab_voice">Voice</string>

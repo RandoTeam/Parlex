@@ -154,7 +154,7 @@ open class SettingsRepository @Inject constructor(
         set(value) = prefs?.edit()?.putString(KEY_CAMERA_SOURCE_LANGUAGE, value.code)?.apply() ?: Unit
 
     var cameraSourceAuto: Boolean
-        get() = prefs?.getBoolean(KEY_CAMERA_SOURCE_AUTO, false) ?: false
+        get() = prefs?.getBoolean(KEY_CAMERA_SOURCE_AUTO, true) ?: true
         set(value) = prefs?.edit()?.putBoolean(KEY_CAMERA_SOURCE_AUTO, value)?.apply() ?: Unit
 
     var cameraTargetLanguage: Language

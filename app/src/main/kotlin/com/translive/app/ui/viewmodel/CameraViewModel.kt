@@ -189,7 +189,7 @@ data class CameraUiState(
     val mode: CameraMode = CameraMode.LIVE,
     val translationMode: CameraTranslationMode = CameraTranslationMode.FAST,
     val sourceLanguage: Language = Language.RUSSIAN,
-    val isSourceAuto: Boolean = false,
+    val isSourceAuto: Boolean = true,
     val detectedSourceLanguage: Language? = null,
     val detectedSourceLanguages: List<Language> = emptyList(),
     val targetLanguage: Language = Language.ENGLISH,
@@ -391,7 +391,7 @@ class CameraViewModel @Inject constructor(
                     bitmap = bitmap,
                     sourceLanguage = _uiState.value.sourceLanguage,
                     sourceAuto = _uiState.value.isSourceAuto,
-                    targetLanguage = _uiState.value.targetLanguage
+                    requestedTargetLanguage = _uiState.value.targetLanguage
                 )
             } catch (e: Exception) {
                 Log.e("CameraVM", "LLM capture improvement failed: ${e.message}", e)
@@ -591,7 +591,7 @@ class CameraViewModel @Inject constructor(
     }
 
     fun captureGalleryImage(uri: Uri) {
-        val state = _uiState.value
+        val state = _uiState.value.copy(isSourceAuto = true)
         translateJob?.cancel()
         clearLiveSession()
         lastCaptureDebugSnapshot = null
@@ -601,6 +601,7 @@ class CameraViewModel @Inject constructor(
                 capturedBitmap = null,
                 paintedBitmap = null,
                 liveBlocks = emptyList(),
+                isSourceAuto = true,
                 captureStatus = CaptureStatus.PROCESSING,
                 captureMessage = texts.text(R.string.camera_capture_opening_photo),
                 detectedSourceLanguage = null,
@@ -631,8 +632,8 @@ class CameraViewModel @Inject constructor(
             processCaptureBitmap(
                 bitmap = workBitmap,
                 sourceLanguage = state.sourceLanguage,
-                sourceAuto = state.isSourceAuto,
-                targetLanguage = state.targetLanguage
+                sourceAuto = true,
+                requestedTargetLanguage = state.targetLanguage
             )
         }
     }
@@ -1063,7 +1064,7 @@ class CameraViewModel @Inject constructor(
                 bitmap = workBitmap,
                 sourceLanguage = state.sourceLanguage,
                 sourceAuto = state.isSourceAuto,
-                targetLanguage = state.targetLanguage
+                requestedTargetLanguage = state.targetLanguage
             )
         }
     }
@@ -1178,12 +1179,35 @@ class CameraViewModel @Inject constructor(
         bitmap: Bitmap,
         sourceLanguage: Language,
         sourceAuto: Boolean,
-        targetLanguage: Language
+        requestedTargetLanguage: Language
     ) {
         try {
             val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage, sourceAuto)
             val ocrResult = captureOcr.result
             val effectiveSourceLanguage = captureOcr.sourceLanguage
+            val targetLanguage = if (effectiveSourceLanguage.code == requestedTargetLanguage.code) {
+                // An English page with an English target used to become a no-op
+                // while the UI still claimed "Russian -> English". Prefer the
+                // user's native language, then fall back to a useful pair.
+                val native = settings.defaultNativeLanguage
+                if (native.code != effectiveSourceLanguage.code) {
+                    native
+                } else if (effectiveSourceLanguage.code != "en") {
+                    Language.ENGLISH
+                } else {
+                    Language.RUSSIAN
+                }
+            } else {
+                requestedTargetLanguage
+            }
+            if (targetLanguage.code != requestedTargetLanguage.code) {
+                _uiState.update { it.copy(targetLanguage = targetLanguage) }
+            }
+            Log.i(
+                "CameraVM",
+                "Capture language: requested=${sourceLanguage.code}, auto=$sourceAuto, " +
+                    "detected=${effectiveSourceLanguage.code}, target=${targetLanguage.code}"
+            )
             val rawCaptureLines = captureOcr.mixedBlocks
                 .flatMap { it.lines }
                 .ifEmpty { extractRawCaptureLines(ocrResult) }
@@ -1216,8 +1240,9 @@ class CameraViewModel @Inject constructor(
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = texts.text(R.string.camera_capture_text_not_found),
-                        detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
-                        detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
+                        detectedSourceLanguage = effectiveSourceLanguage,
+                        sourceLanguage = effectiveSourceLanguage,
+                        detectedSourceLanguages = captureOcr.detectedSourceLanguages,
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -1247,8 +1272,9 @@ class CameraViewModel @Inject constructor(
                     it.copy(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = texts.text(R.string.camera_capture_no_suitable_lines),
-                        detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
-                        detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
+                        detectedSourceLanguage = effectiveSourceLanguage,
+                        sourceLanguage = effectiveSourceLanguage,
+                        detectedSourceLanguages = captureOcr.detectedSourceLanguages,
                         qualityWarnings = qualityWarnings
                     )
                 }
@@ -1329,8 +1355,9 @@ class CameraViewModel @Inject constructor(
                     paintedBitmap = painted,
                     captureStatus = CaptureStatus.READY,
                     captureMessage = null,
-                    detectedSourceLanguage = if (sourceAuto) effectiveSourceLanguage else null,
-                    detectedSourceLanguages = if (sourceAuto) captureOcr.detectedSourceLanguages else emptyList(),
+                    detectedSourceLanguage = effectiveSourceLanguage,
+                    sourceLanguage = effectiveSourceLanguage,
+                    detectedSourceLanguages = captureOcr.detectedSourceLanguages,
                     qualityWarnings = finalQualityWarnings,
                     bilingualParagraphs = bilingualList
                 )

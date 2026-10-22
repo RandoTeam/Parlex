@@ -157,6 +157,7 @@
     <string name="camera_warning_script_mismatch">Проверьте язык</string>
     <string name="camera_warning_model_unavailable">Модель не готова</string>
     <string name="camera_capture_failed">Не удалось снять кадр</string>
+    <string name="camera_shutter_cd">Сделать снимок</string>
     <string name="history_tab_all">Все</string>
     <string name="history_tab_favorites">Избранное</string>
     <string name="history_tab_voice">Голос</string>

@@ -36,6 +36,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
@@ -72,6 +73,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
@@ -390,7 +393,15 @@ fun CameraScreen(
             else -> "Auto"
         }
     } else {
-        "${uiState.sourceLanguage.flag} ${uiState.sourceLanguage.nativeName}"
+        val detected = uiState.detectedSourceLanguage
+        if (detected != null && detected.code != uiState.sourceLanguage.code) {
+            // The OCR fallback may legitimately detect a different language than
+            // the remembered manual choice. Never label the image as Russian when
+            // the actual OCR pass is English.
+            "${detected.flag} ${detected.nativeName}"
+        } else {
+            "${uiState.sourceLanguage.flag} ${uiState.sourceLanguage.nativeName}"
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -489,26 +500,46 @@ fun CameraScreen(
                             onFocusPoint = { focusPoint = it }
                         )
 
-                        CameraBetaBadge()
-                        CameraHardwareControls(
-                            cameraOptions = cameraOptions,
-                            selectedCameraId = selectedCameraId,
+                        CameraTopControls(
+                            modifier = Modifier
+                                .align(Alignment.TopCenter)
+                                .padding(top = 10.dp)
+                                .zIndex(6f),
+                            sourceLabel = sourceChipLabel,
+                            targetLabel = "${uiState.targetLanguage.flag} ${uiState.targetLanguage.nativeName}",
+                            isSourceAuto = uiState.isSourceAuto,
+                            translationMode = uiState.translationMode,
+                            canUseQuality = uiState.isLlmModelAvailable,
+                            onSourceClick = { showSourcePicker = true },
+                            onTargetClick = { showTargetPicker = true },
+                            onSwap = { viewModel.swapLanguages() },
+                            onModeClick = {
+                                if (uiState.translationMode == CameraTranslationMode.FAST) {
+                                    if (uiState.isLlmModelAvailable) {
+                                        viewModel.setTranslationMode(CameraTranslationMode.QUALITY)
+                                    } else {
+                                        showLlmMissingDialog = true
+                                    }
+                                } else {
+                                    viewModel.setTranslationMode(CameraTranslationMode.FAST)
+                                }
+                            }
+                        )
+                        CameraFlashControl(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 12.dp, end = 12.dp)
+                                .zIndex(6f),
+                            hasFlash = cameraOptions.firstOrNull { it.id == selectedCameraId }?.hasFlash == true,
                             torchEnabled = torchEnabled,
                             enabled = !uiState.isCaptureProcessing,
-                            onCameraSelected = { cameraId ->
-                                selectedCameraId = cameraId
-                                torchEnabled = false
-                                cameraPrefs.edit()
-                                    .putString(PREF_SELECTED_CAMERA_ID, cameraId)
-                                    .apply()
-                            },
                             onTorchToggle = { torchEnabled = !torchEnabled }
                         )
                         CameraQualityBadge(
                             warnings = uiState.qualityWarnings,
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
-                                .padding(top = 48.dp, start = 12.dp, end = 12.dp)
+                                .padding(top = 112.dp, start = 12.dp, end = 12.dp)
                         )
 
                         FocusReticle(focusPoint)
@@ -518,7 +549,7 @@ fun CameraScreen(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
-                                    .padding(top = 8.dp)
+                                    .padding(top = 64.dp)
                                     .clip(RoundedCornerShape(20.dp))
                                     .background(Color.Black.copy(alpha = 0.6f))
                                     .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -543,7 +574,7 @@ fun CameraScreen(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopCenter)
-                                    .padding(top = 8.dp)
+                                    .padding(top = 64.dp)
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(Color(0xCCCC3333))
                                     .padding(horizontal = 12.dp, vertical = 8.dp)
@@ -672,27 +703,41 @@ fun CameraScreen(
                         .align(Alignment.BottomCenter)
                         .padding(bottom = 8.dp)
                 ) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    if (uiState.mode == CameraMode.LIVE) {
+                        CameraZoomSelector(
+                            options = cameraOptions,
+                            selectedCameraId = selectedCameraId,
+                            enabled = !uiState.isCaptureProcessing,
+                            onSelect = { cameraId ->
+                                selectedCameraId = cameraId
+                                torchEnabled = false
+                                cameraPrefs.edit()
+                                    .putString(PREF_SELECTED_CAMERA_ID, cameraId)
+                                    .apply()
+                            }
+                        )
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         if (uiState.mode == CameraMode.LIVE) {
                             GalleryPhotoButton(
                                 enabled = !uiState.isCaptureProcessing,
                                 onClick = openGallery
                             )
-                            Spacer(Modifier.width(18.dp))
-                            IconButton(
+                            Spacer(Modifier.width(26.dp))
+                            CameraShutterButton(
+                                enabled = !uiState.isCaptureProcessing,
                                 onClick = {
                                     captureRequest?.invoke()
                                         ?: viewModel.failCameraNotReady()
-                                },
-                                enabled = !uiState.isCaptureProcessing,
-                                modifier = Modifier
-                                    .size(72.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.3f))
-                            ) {
-                                Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White))
-                            }
-                            Spacer(Modifier.width(18.dp))
+                                }
+                            )
+                            Spacer(Modifier.width(26.dp))
                             IconButton(
                                 onClick = { viewModel.handleSubtitleAction(SubtitleAction.ToggleSubtitleMode) },
                                 enabled = !uiState.isCaptureProcessing,
@@ -744,83 +789,6 @@ fun CameraScreen(
                                 Text(stringResource(R.string.camera_translate_with_llm))
                             }
                         }
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-
-                    // Language bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.85f))
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        AssistChip(
-                            onClick = { showSourcePicker = true },
-                            label = {
-                                Text(
-                                    sourceChipLabel,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                        IconButton(
-                            onClick = { viewModel.swapLanguages() },
-                            enabled = !uiState.isSourceAuto
-                        ) {
-                            Icon(Icons.Filled.SwapHoriz, "Swap")
-                        }
-                        AssistChip(
-                            onClick = { showTargetPicker = true },
-                            label = { Text("${uiState.targetLanguage.flag} ${uiState.targetLanguage.nativeName}") },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp)
-                        )
-                    }
-
-                    Spacer(Modifier.height(8.dp))
-                    SingleChoiceSegmentedButtonRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp)
-                    ) {
-                        SegmentedButton(
-                            selected = uiState.translationMode == CameraTranslationMode.FAST,
-                            onClick = { viewModel.setTranslationMode(CameraTranslationMode.FAST) },
-                            shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-                            icon = {}
-                        ) {
-                            Text(stringResource(R.string.camera_translation_mode_fast))
-                        }
-                        SegmentedButton(
-                            selected = uiState.translationMode == CameraTranslationMode.QUALITY,
-                            onClick = {
-                                if (!uiState.isLlmModelAvailable) {
-                                    showLlmMissingDialog = true
-                                } else {
-                                    viewModel.setTranslationMode(CameraTranslationMode.QUALITY)
-                                }
-                            },
-                            shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-                            icon = {}
-                        ) {
-                            Text(stringResource(R.string.camera_translation_mode_quality))
-                        }
-                    }
-                    if (uiState.translationMode == CameraTranslationMode.QUALITY) {
-                        Text(
-                            text = stringResource(R.string.camera_translation_mode_quality_note),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
-                        )
                     }
                 }
 
@@ -888,6 +856,213 @@ fun CameraScreen(
             excludeLanguage = if (uiState.isSourceAuto) null else uiState.sourceLanguage,
             onLanguageSelected = { viewModel.setTargetLanguage(it); showTargetPicker = false },
             onDismiss = { showTargetPicker = false }
+        )
+    }
+}
+
+@Composable
+private fun CameraTopControls(
+    modifier: Modifier = Modifier,
+    sourceLabel: String,
+    targetLabel: String,
+    isSourceAuto: Boolean,
+    translationMode: CameraTranslationMode,
+    canUseQuality: Boolean,
+    onSourceClick: () -> Unit,
+    onTargetClick: () -> Unit,
+    onSwap: () -> Unit,
+    onModeClick: () -> Unit
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 12.dp, end = 64.dp),
+        color = Color.Black.copy(alpha = 0.42f),
+        contentColor = Color.White,
+        shape = RoundedCornerShape(22.dp),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onModeClick),
+                color = if (translationMode == CameraTranslationMode.QUALITY) {
+                    Color(0xFFFFB95C).copy(alpha = 0.24f)
+                } else {
+                    Color.White.copy(alpha = 0.12f)
+                },
+                contentColor = Color.White
+            ) {
+                Text(
+                    text = if (translationMode == CameraTranslationMode.FAST) {
+                        stringResource(R.string.camera_translation_mode_fast)
+                    } else {
+                        stringResource(R.string.camera_translation_mode_quality)
+                    },
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1
+                )
+            }
+
+            AssistChip(
+                onClick = onSourceClick,
+                label = {
+                    Text(sourceLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = Color.White.copy(alpha = 0.12f),
+                    labelColor = Color.White,
+                    leadingIconContentColor = Color.White
+                )
+            )
+            IconButton(
+                onClick = onSwap,
+                enabled = !isSourceAuto,
+                modifier = Modifier.size(34.dp)
+            ) {
+                Icon(
+                    Icons.Filled.SwapHoriz,
+                    contentDescription = "Swap languages",
+                    tint = if (isSourceAuto) Color.White.copy(alpha = 0.35f) else Color.White
+                )
+            }
+            AssistChip(
+                onClick = onTargetClick,
+                label = {
+                    Text(targetLabel, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                colors = AssistChipDefaults.assistChipColors(
+                    containerColor = Color.White.copy(alpha = 0.12f),
+                    labelColor = Color.White,
+                    leadingIconContentColor = Color.White
+                )
+            )
+        }
+    }
+}
+
+@Composable
+private fun CameraFlashControl(
+    modifier: Modifier = Modifier,
+    hasFlash: Boolean,
+    torchEnabled: Boolean,
+    enabled: Boolean,
+    onTorchToggle: () -> Unit
+) {
+    Surface(
+        modifier = modifier,
+        color = Color.Black.copy(alpha = 0.42f),
+        contentColor = Color.White,
+        shape = CircleShape,
+        tonalElevation = 0.dp
+    ) {
+        IconButton(
+            onClick = onTorchToggle,
+            enabled = enabled && hasFlash,
+            modifier = Modifier.size(44.dp)
+        ) {
+            Icon(
+                imageVector = if (torchEnabled) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
+                contentDescription = if (torchEnabled) {
+                    stringResource(R.string.cd_torch_off)
+                } else {
+                    stringResource(R.string.cd_torch_on)
+                },
+                tint = if (torchEnabled && hasFlash) Color(0xFFFFD08A) else Color.White,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun CameraZoomSelector(
+    options: List<CameraLensOption>,
+    selectedCameraId: String?,
+    enabled: Boolean,
+    onSelect: (String) -> Unit
+) {
+    if (options.isEmpty()) return
+
+    val preferredLabels = listOf("0.6x", "1x", "3x")
+    val preferred = preferredLabels.mapNotNull { label ->
+        options.firstOrNull { it.shortLabel == label }
+    }
+    val visible = if (preferred.isNotEmpty()) {
+        preferred
+    } else {
+        options.filter { it.lensFacing == CameraSelector.LENS_FACING_BACK }
+            .ifEmpty { options }
+            .take(3)
+    }
+    if (visible.isEmpty()) return
+
+    Surface(
+        modifier = Modifier.padding(bottom = 8.dp),
+        color = Color.Black.copy(alpha = 0.38f),
+        shape = RoundedCornerShape(24.dp),
+        tonalElevation = 0.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            visible.forEach { option ->
+                val selected = option.id == selectedCameraId
+                Surface(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .clickable(enabled = enabled) { onSelect(option.id) },
+                    color = if (selected) Color.White else Color.Transparent,
+                    contentColor = if (selected) Color.Black else Color.White,
+                    shape = CircleShape
+                ) {
+                    Text(
+                        text = option.shortLabel,
+                        modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CameraShutterButton(
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val shutterDescription = stringResource(R.string.camera_shutter_cd)
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier
+            .size(84.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFFF6B2C))
+            .border(3.dp, Color.White.copy(alpha = 0.92f), CircleShape)
+            .semantics { contentDescription = shutterDescription }
+    ) {
+        Box(
+            modifier = Modifier
+                .size(58.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.18f))
+                .border(1.dp, Color.White.copy(alpha = 0.42f), CircleShape)
         )
     }
 }
