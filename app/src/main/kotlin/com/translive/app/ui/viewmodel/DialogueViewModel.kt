@@ -196,9 +196,10 @@ class DialogueViewModel @Inject constructor(
     ): DialogueTranslationResult {
         val policy = settings.translationPolicy
         if (policy == TranslationPolicy.FAST || policy == TranslationPolicy.FAST_WITH_LLM_IMPROVE) {
-            val activated = fastTranslateEngine.activateDownloadedPair(source.code, target.code)
+            val activated = fastTranslateEngine.isReadyFor(source.code, target.code) ||
+                fastTranslateEngine.activateDownloadedPair(source.code, target.code)
             if (activated) {
-                val translated = fastTranslateEngine.translate(sourceText)
+                val translated = fastTranslateEngine.translateFor(sourceText, source.code, target.code)
                 return DialogueTranslationResult(text = translated, isLlm = false)
             }
         }
@@ -394,6 +395,7 @@ class DialogueViewModel @Inject constructor(
 
                     _uiState.update { it.copy(phase = DialoguePhase.TRANSLATING) }
 
+                    val turnStartOffsetMs = audioRecorder.getRelativeOffsetMs()
                     val state = _uiState.value
                     val pair = DialogueSessionPair(
                         primaryLanguage = state.sourceLanguage,
@@ -410,7 +412,7 @@ class DialogueViewModel @Inject constructor(
                     val fromLang = arbitration.resolvedLanguage
                     val toLang = arbitration.targetLanguage
 
-                    Log.d(TAG, "Arbitrated utterance '$rawText' -> ${fromLang.code} to ${toLang.code} via ${arbitration.resolutionMethod} (conf=${arbitration.confidence})")
+                    Log.d(TAG, "Arbitrated turn ${fromLang.code}->${toLang.code}, ${rawText.length} chars, method=${arbitration.resolutionMethod}, conf=${arbitration.confidence}")
 
                     // 2. Perform translation (Fast NMT first ~20ms, or LLM directly if configured/fallback)
                     val translationResult = translateWithActiveRuntime(
@@ -432,6 +434,7 @@ class DialogueViewModel @Inject constructor(
                     turnIndexCounter++
 
                     val currentOffset = audioRecorder.getRelativeOffsetMs()
+                    val measuredDurationMs = (currentOffset - turnStartOffsetMs).coerceIn(0L, 60_000L)
                     val sessionId = currentSessionId
                     var insertedDbId: Long? = null
                     if (sessionId != null) {
@@ -443,8 +446,8 @@ class DialogueViewModel @Inject constructor(
                             originalLanguage = fromLang.code,
                             translatedLanguage = toLang.code,
                             timestamp = System.currentTimeMillis(),
-                            audioStartTimeMs = currentOffset,
-                            audioDurationMs = 2500L,
+                            audioStartTimeMs = turnStartOffsetMs,
+                            audioDurationMs = measuredDurationMs,
                             wordCount = wordsInTurn,
                             characterCount = charsInTurn
                         )
@@ -483,12 +486,14 @@ class DialogueViewModel @Inject constructor(
                     // 5. Conditional TTS Playback with Hardware AEC frame suppression
                     if (autoSpeak) {
                         speechEngine.notifyTtsPlaybackStarted()
-                        systemTts.speakAndWait(translated, toLang.code)
-                        speechEngine.notifyTtsPlaybackFinished()
-
-                        // 6. Post-TTS acoustic reverb cooldown
-                        delay(REVERB_COOLDOWN_MS)
-                        speechEngine.resetVad()
+                        try {
+                            systemTts.speakAndWait(translated, toLang.code)
+                        } finally {
+                            speechEngine.notifyTtsPlaybackFinished()
+                            // 6. Post-TTS acoustic reverb cooldown
+                            delay(REVERB_COOLDOWN_MS)
+                            speechEngine.resetVad()
+                        }
                     }
 
                     // 7. Advance turn context for alternation prior heuristics
@@ -609,6 +614,8 @@ class DialogueViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         speechEngine.stopListening()
+        speechEngine.onPcmSamplesRead = null
         systemTts.stop()
+        audioRecorder.stopSession()
     }
 }

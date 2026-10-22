@@ -3,9 +3,14 @@ package com.translive.app.engine
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
+import android.media.AudioManager
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.k2fsa.sherpa.onnx.*
@@ -13,6 +18,7 @@ import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.SttModelInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,9 +56,15 @@ class SpeechEngine @Inject constructor(
     private var vad: Vad? = null
     private var recognizer: OfflineRecognizer? = null
     private var audioRecord: AudioRecord? = null
-    private var listenJob: Job? = null
+    private var audioJob: Job? = null
+    private var recognitionJob: Job? = null
+    private var segmentChannel: Channel<FloatArray>? = null
     private var currentLanguage = ""
     private var currentSpeechModel = ""
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
+    private val audioManager by lazy { context.getSystemService(AudioManager::class.java) }
+    private var audioFocusRequest: AudioFocusRequest? = null
 
     private val _state = MutableStateFlow(ListeningState.IDLE)
     val state: StateFlow<ListeningState> = _state.asStateFlow()
@@ -218,7 +230,7 @@ class SpeechEngine @Inject constructor(
     }
 
     fun startListening(language: String, singleShot: Boolean, onResult: (SpeechResult) -> Unit) {
-        if (_state.value == ListeningState.LISTENING) return
+        if (_state.value == ListeningState.LISTENING || _state.value == ListeningState.PROCESSING) return
         if (!_isReady.value || currentLanguage != language.take(2) || currentSpeechModel != settings.speechModel) {
             if (!initialize(language)) {
                 _state.value = ListeningState.ERROR
@@ -231,57 +243,140 @@ class SpeechEngine @Inject constructor(
         }
         val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT).coerceAtLeast(SAMPLE_RATE * 2)
-        audioRecord = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
+        val record = AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, bufferSize)
-        if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            runCatching { record.release() }
             _state.value = ListeningState.ERROR
             return
         }
-        audioRecord?.startRecording()
+        audioRecord = record
+        enableAudioEffects(record)
+        requestAudioFocus()
+        record.startRecording()
         vad?.reset()
         _state.value = ListeningState.LISTENING
-        listenJob = CoroutineScope(Dispatchers.IO).launch {
-            val samples = ShortArray(512)
-            var wasSuppressed = false
 
-            while (isActive && _state.value == ListeningState.LISTENING) {
-                val read = audioRecord?.read(samples, 0, samples.size) ?: -1
-                if (read <= 0) continue
+        // Recognition runs on its own coroutine. It must never block the audio
+        // read loop, otherwise a 1-3s Whisper decode drops the next phrase.
+        val channel = Channel<FloatArray>(Channel.UNLIMITED)
+        segmentChannel = channel
 
-                onPcmSamplesRead?.invoke(samples, read)
-
-                val isSuppressed = isAecSuppressed.get()
-                val isInCooldown = SystemClock.elapsedRealtime() < aecMuteUntilTimestampMs.get()
-                val shouldDropFrames = isSuppressed || isInCooldown
-
-                if (shouldDropFrames) {
-                    wasSuppressed = true
-                    continue
-                }
-
-                if (wasSuppressed) {
-                    vad?.reset()
-                    wasSuppressed = false
-                }
-
-                vad?.acceptWaveform(FloatArray(read) { samples[it] / 32768.0f })
-                while (vad?.empty() == false) {
-                    val segment = vad?.front()
-                    vad?.pop()
-                    if (segment?.samples?.isNotEmpty() == true) {
-                        _state.value = ListeningState.PROCESSING
-                        recognizeSegment(segment.samples)?.let { result ->
-                            withContext(Dispatchers.Main) { onResult(result) }
-                            if (singleShot) {
-                                stopListening()
-                                return@launch
-                            }
-                        }
+        recognitionJob = CoroutineScope(Dispatchers.IO).launch {
+            try {
+                for (segment in channel) {
+                    if (!isActive) break
+                    _state.value = ListeningState.PROCESSING
+                    val result = runCatching { recognizeSegment(segment) }.getOrNull()
+                    if (_state.value == ListeningState.IDLE) return@launch
+                    if (result != null) {
+                        withContext(Dispatchers.Main) { onResult(result) }
+                    }
+                    if (singleShot) {
+                        stopListening()
+                        return@launch
+                    }
+                    if (_state.value == ListeningState.PROCESSING) {
                         _state.value = ListeningState.LISTENING
                     }
                 }
+            } catch (_: CancellationException) {
+                // Normal stop.
+            } finally {
+                if (_state.value == ListeningState.PROCESSING) {
+                    _state.value = ListeningState.LISTENING
+                }
             }
         }
+
+        audioJob = CoroutineScope(Dispatchers.IO).launch {
+            val samples = ShortArray(512)
+            var wasSuppressed = false
+            try {
+                while (isActive && _state.value != ListeningState.IDLE) {
+                    val read = runCatching { record.read(samples, 0, samples.size) }.getOrDefault(-1)
+                    if (read <= 0) continue
+
+                    onPcmSamplesRead?.invoke(samples, read)
+
+                    val isSuppressed = isAecSuppressed.get()
+                    val isInCooldown = SystemClock.elapsedRealtime() < aecMuteUntilTimestampMs.get()
+                    if (isSuppressed || isInCooldown) {
+                        wasSuppressed = true
+                        continue
+                    }
+                    if (wasSuppressed) {
+                        vad?.reset()
+                        wasSuppressed = false
+                    }
+
+                    vad?.acceptWaveform(FloatArray(read) { samples[it] / 32768.0f })
+                    while (vad?.empty() == false) {
+                        val segment = vad?.front()
+                        vad?.pop()
+                        if (segment?.samples?.isNotEmpty() == true) {
+                            channel.trySend(segment.samples)
+                        }
+                    }
+                }
+            } catch (_: CancellationException) {
+                // Normal stop.
+            } catch (e: Exception) {
+                Log.e(TAG, "Audio capture loop failed", e)
+                _state.value = ListeningState.ERROR
+            } finally {
+                channel.close()
+            }
+        }
+    }
+
+    private fun enableAudioEffects(record: AudioRecord) {
+        runCatching {
+            if (AcousticEchoCanceler.isAvailable()) {
+                echoCanceler = AcousticEchoCanceler.create(record.audioSessionId)?.apply { enabled = true }
+            }
+        }.onFailure { Log.w(TAG, "AEC unavailable: ${it.message}") }
+        runCatching {
+            if (NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(record.audioSessionId)?.apply { enabled = true }
+            }
+        }.onFailure { Log.w(TAG, "NoiseSuppressor unavailable: ${it.message}") }
+    }
+
+    private fun releaseAudioEffects() {
+        runCatching { echoCanceler?.enabled = false; echoCanceler?.release() }
+        runCatching { noiseSuppressor?.enabled = false; noiseSuppressor?.release() }
+        echoCanceler = null
+        noiseSuppressor = null
+    }
+
+    private fun requestAudioFocus() {
+        val manager = audioManager ?: return
+        if (audioFocusRequest != null) return
+        val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(attributes)
+            .setOnAudioFocusChangeListener { change ->
+                if (change == AudioManager.AUDIOFOCUS_LOSS ||
+                    change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+                ) {
+                    // A short guard is enough; a real loss is also surfaced through
+                    // the microphone read error path.
+                    aecMuteUntilTimestampMs.set(SystemClock.elapsedRealtime() + 1_000L)
+                }
+            }
+            .build()
+        runCatching { manager.requestAudioFocus(request) }
+        audioFocusRequest = request
+    }
+
+    private fun abandonAudioFocus() {
+        val manager = audioManager ?: return
+        audioFocusRequest?.let { runCatching { manager.abandonAudioFocusRequest(it) } }
+        audioFocusRequest = null
     }
 
     private fun recognizeSegment(samples: FloatArray): SpeechResult? {
@@ -320,10 +415,18 @@ class SpeechEngine @Inject constructor(
 
     fun stopListening() {
         _state.value = ListeningState.IDLE
-        listenJob?.cancel()
-        listenJob = null
-        audioRecord?.runCatching { stop(); release() }
+        audioJob?.cancel()
+        audioJob = null
+        recognitionJob?.cancel()
+        recognitionJob = null
+        segmentChannel?.close()
+        segmentChannel = null
+        val record = audioRecord
         audioRecord = null
+        record?.runCatching { stop() }
+        releaseAudioEffects()
+        record?.runCatching { release() }
+        abandonAudioFocus()
     }
 
     fun release() {
