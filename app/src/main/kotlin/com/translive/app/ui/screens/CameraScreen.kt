@@ -1707,11 +1707,25 @@ private fun TranslationOverlay(
             val expandedHeight = (h + 2f).coerceAtMost(size.height - expandedTop)
 
             if (block.translatedText.isNotBlank()) {
+                val glassTop = Color(0xD90B1220)
+                val glassBottom = Color(0xB3070A10)
                 drawRoundRect(
-                    color = Color.Black.copy(alpha = 0.42f),
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(glassTop, glassBottom)
+                    ),
                     topLeft = Offset(expandedLeft, expandedTop),
                     size = Size(expandedWidth, expandedHeight),
-                    cornerRadius = CornerRadius(8f)
+                    cornerRadius = CornerRadius(10f * density)
+                )
+                drawRoundRect(
+                    color = Color.White.copy(alpha = 0.16f),
+                    topLeft = Offset(expandedLeft + 0.5f, expandedTop + 0.5f),
+                    size = Size(
+                        (expandedWidth - 1f).coerceAtLeast(0f),
+                        (expandedHeight - 1f).coerceAtLeast(0f)
+                    ),
+                    cornerRadius = CornerRadius(10f * density),
+                    style = Stroke(width = 1f)
                 )
 
                 drawIntoCanvas { canvas ->
@@ -1797,7 +1811,7 @@ private fun createOverlayTextLayout(
     StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
         .setAlignment(Layout.Alignment.ALIGN_NORMAL)
         .setIncludePad(false)
-        .setLineSpacing(0f, 0.95f)
+        .setLineSpacing(0f, 1.04f)
         .setMaxLines(maxLines)
         .setEllipsize(TextUtils.TruncateAt.END)
         .build()
