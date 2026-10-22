@@ -2,6 +2,10 @@
 
 Thanks for helping improve Parlex. External pull requests are welcome, but the project keeps maintainer review and release control.
 
+Before contributing, read `docs/INDEX.md`, `ROADMAP.md` and
+`docs/QUALITY_GATES.md`. A PR should fit one roadmap phase or a clearly scoped
+bug fix.
+
 ## Pull Request Rules
 
 - Keep one pull request focused on one topic.

@@ -1,60 +1,127 @@
-# Codex Rules For This Repository
+# Agent & Maintainer Rules
 
-These rules are part of the project state and should survive a clean clone.
+These rules are part of the project and survive a clean clone. They apply to AI
+agents and human maintainers unless the repository owner explicitly overrides a
+rule in the current request.
 
-## Working Contract
+## Mission
 
-- Treat requests as product-engineering work. Make concrete repository changes when the user asks to build, fix, improve, release, or implement.
-- Keep changes surgical. Do not rewrite unrelated code or reformat files without need.
-- Prefer existing project patterns over new abstractions.
-- Use `rg`/`rg --files` for search.
-- Use `apply_patch` for manual source/document edits.
-- Do not revert user changes unless explicitly asked.
-- Always validate with the narrowest useful checks, then broader checks when release risk is high.
+Ship a privacy-first, offline Android translator whose text, camera, screen and
+voice surfaces are predictable on real devices, with honest status reporting and
+reproducible releases.
 
-## Android Project Rules
+## Roles
 
-- Keep secrets and generated artifacts out of git: `keystore.properties`, APK/AAB files, Gradle build folders, local models, diagnostics, and native engine checkouts are ignored.
-- The local `llama.cpp` checkout is restored separately under `app/src/main/cpp/llama.cpp/`; keep `app/src/main/cpp/llama.cpp.version` as the tracked source of truth.
-- Use official upstream sources for dependency, model, and native-engine audits.
-- For release builds, verify the signed APK with `apksigner` and inspect `versionCode` / `versionName` before publishing.
-- Release notes should describe user-visible functionality, not internal dependency details.
+An agent may act as one or more roles. State the role in the report.
 
-## Git And Release Rules
+- **Architect**: boundaries, data flow, ADRs, non-goals.
+- **Android engineer**: Kotlin/Compose/CameraX/services/JNI integration.
+- **QA**: reproduction, device matrix, regression coverage.
+- **Security/privacy reviewer**: permissions, capture, intents, secrets, model
+  integrity.
+- **Release engineer**: versioning, signing, APK verification, prerelease.
+- **Technical writer**: README, docs, release notes, legal/third-party notices.
 
-- Keep feature work in focused commits.
-- Before a GitHub release: bump `versionCode`, bump `versionName`, update visible version docs/badges, build signed release APK, verify signature, push `main`, then create a prerelease/tag with the APK asset.
-- Do not commit restore-only files that are reproducible locally.
+## Autonomy
 
-## Documentation And Stage Lifecycle
+Allowed without asking, when it directly serves the request:
 
-- Maintain documentation as the living source of truth for the codebase:
-  - `PROJECT_STAGE.md`: Update on every release or major phase completion (snapshot date, commit HEAD, `versionCode`/`versionName`, public APK SHA-256, feature statuses, and next maintainer action).
-  - `README.md`: Keep latest public signed release, system requirements, and setup commands synchronized.
-  - `HANDOFF.md`: Keep standalone and up to date so a new engineer or agent can onboard and build cleanly without relying on prior chat history.
-  - `ROADMAP.md`: Enforce the single-phase-at-a-time rule. Keep phases granular (`R*`, `C*`, `L*`, `M*`, `P*`) and check off items only after verification.
-  - `docs/*_PLAN_*.md`: Create or update detailed technical plans before executing complex architectural features (Camera, Screen Overlay, GPU/NMT).
-  - `docs/DEPENDENCY_*.md` & R&D notes: Record dated dependency/runtime audits, benchmark results, and hold rationales.
-  - `THIRD_PARTY_NOTICES.md`: Update when adding dependencies, fonts, models, or native engines. Strictly enforce GPL code isolation (ideas/protocols may be independently reproduced; GPL code must never be copied into the repository).
-  - `app/src/main/cpp/*.version`: Keep exact 40-character upstream commit SHAs for native submodules (`llama.cpp.version`, `MNN.version`).
+- read/search the repository and run builds/tests/lint;
+- edit code, tests and docs;
+- create focused commits and push `main` when the user asked to continue or
+  publish;
+- build and verify a signed beta when the release key is present;
+- update GitHub metadata/docs when the user asked for repository presentation;
+- clean verified dead code when no production references exist.
 
-## Work Stages And Execution Contract
+Ask before:
 
-- Enforce one phase per commit. Complete, verify, and document each phase before moving forward.
-- Keep changes surgical. Do not touch unrelated code or reformat arbitrarily.
-- Always validate with the narrowest useful checks first (e.g. `:app:compileDebugKotlin`, unit tests), followed by full assemble and APK signature checks when relevant.
+- rotating/replacing the release signing key or changing signing behavior;
+- destructive database migration or deleting user data paths;
+- deleting a large subsystem/legacy feature rather than isolating it;
+- changing repository visibility or account/billing settings;
+- force-push, history rewrite, tag/asset replacement;
+- adding telemetry, accounts, cloud translation or broad new permissions;
+- adding a new native toolchain (for example Rust) or a large dependency.
 
-## Communication
+Never:
 
-- Final responses must remain dry, concise, and purely technical:
-  - `Changed:`
-  - `Files:`
-  - `Validation:`
-  - `Notes:`
+- commit secrets, keystores, tokens, APKs/AABs, model weights or personal data;
+- publish a debug APK as a beta/release;
+- fake device QA or claim unverified behavior passed;
+- disable tests/lint/security checks to make CI green;
+- introduce hidden network calls or user-text upload;
+- copy GPL code into the repository; independently reproduce ideas/protocols only.
 
-## Skills And Plugins
+## Phase workflow
 
-- Codex skills/plugins are installed globally on the workstation, not vendored into this repo.
-- Use available GitHub tooling or `gh` for issue/release work.
-- Use official documentation/source links when checking unstable current versions.
+1. Pick one phase from `ROADMAP.md`.
+2. For architectural work, write/update a design note or ADR.
+3. Implement surgically, preserving user data and existing public behavior.
+4. Run the narrowest check, then broader checks for release risk.
+5. Update docs/release notes if behavior changes.
+6. Commit code and docs separately when practical.
+7. Report changed files, validation, remaining risks and next executable step.
 
+One phase per commit group. Do not mix unrelated surfaces.
+
+## Validation matrix
+
+| Change | Minimum |
+|---|---|
+| Kotlin/doc-only | compile + affected unit tests |
+| UI/camera/screen/voice | unit tests + lint + assembleDebug |
+| JNI/CMake/model | native build + release APK inspection |
+| Release | tests + lint + assembleRelease + apksigner + badging + SHA-256 |
+| Data/schema | migration tests or explicit P0 warning until they exist |
+| Dependency/model | license/source/SHA update in notices |
+
+A green unit suite is not proof that overlay/camera/voice production paths work;
+shadow tests must be named as a risk, not hidden.
+
+## Git and release
+
+- `main` must stay buildable.
+- Use focused conventional commits, for example `fix(camera): ...`.
+- Do not revert user changes without explicit instruction.
+- Never rewrite published tags or silently replace release assets.
+- A beta publication sequence is in `docs/RELEASES.md`.
+- Release notes must include user-visible changes, validation, APK integrity,
+  **what to verify on a device**, and known limitations.
+
+## Documentation
+
+- `docs/INDEX.md` is the canonical map.
+- `ROADMAP.md` decides priority.
+- `docs/PIPELINE.md` decides process.
+- `docs/QUALITY_GATES.md` decides done.
+- `PROJECT_STAGE.md` is the latest verified snapshot.
+- `HANDOFF.md` must let a new engineer build without chat history.
+- Dated audits/old plans are historical; link them, do not treat them as current.
+- Update README/PROJECT_STAGE/HANDOFF and release notes on every beta.
+- New dependency/model/asset requires a license/source update in
+  `THIRD_PARTY_NOTICES.md` and `docs/LEGAL.md`.
+
+## Security and privacy
+
+- Prefer local processing; no telemetry or user-text upload.
+- Validate intents, URIs, archive extraction, file paths and model downloads.
+- Keep `allowBackup=false` unless a migration/backup design is accepted.
+- Accessibility/MediaProjection privileges must be disclosed and user-enabled.
+- Report vulnerabilities privately via `SECURITY.md`.
+
+## Reporting
+
+Final report format:
+
+```text
+Changed:
+Files:
+Validation:
+Notes:
+What to verify:
+Next:
+```
+
+`Next` should contain concrete options the user can accept with `go`.
+Device-only work must be explicitly marked as device-pending.
