@@ -8,7 +8,7 @@
 
 *100% Local Neural Inference • Zero Network Calls • Zero Telemetry • Complete Privacy*
 
-[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.5-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.5)
+[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.6-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.6)
 [![Android](https://img.shields.io/badge/Android-8.0%20%E2%80%94%2016%20(API%2026--36)-34A853?logo=android&logoColor=white&style=flat-square)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Arch-arm64--v8a-blue?style=flat-square)](https://developer.android.com/ndk/guides/abis)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
@@ -222,7 +222,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 .\gradlew.bat assembleRelease --no-daemon
 ```
 
-### Verification & Signatures (v1.5.1-beta.3)
+### Verification & Signatures (v1.5.1-beta.6)
 ```powershell
 # Verify APK Signature Scheme v2
 & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
@@ -232,9 +232,9 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 - **Package**: `com.translive.app`
-- **Version**: `1.5.1-beta.3` (`versionCode: 15102`)
+- **Version**: `1.5.1-beta.6` (`versionCode: 15106`)
 - **Target SDK**: `36` • **Min SDK**: `26`
-- **Official APK SHA-256**: `8c9eff3ac2c0dd46ba5b37780055a51abeeedd7a9fa7713bcf3cb850543fd685`
+- **Official APK SHA-256**: `baf615c3f468368ea236cfb02318ee39db05df76df5c43deeaa969b1c22ec95a`
 
 ---
 

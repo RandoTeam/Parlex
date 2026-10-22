@@ -1,6 +1,6 @@
 # Project Stage Snapshot
 
-Snapshot date: 2026-10-21
+Snapshot date: 2026-10-22
 
 > **Recovery status:** the 2026-10-21 audit
 > [`docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md`](docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md)
@@ -13,17 +13,17 @@ Snapshot date: 2026-10-21
 
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
-- Last public release commit: `607638f`
+- Last public release commit: `PENDING_RELEASE_COMMIT`
 - Recovery work HEAD at audit time: `fe7d4b4`
-- Latest public signed prerelease: `v1.5.1-beta.5`
-- Latest public APK asset: `Parlex-v1.5.1-beta.5-release.apk`
+- Latest public signed prerelease: `v1.5.1-beta.6`
+- Latest public APK asset: `Parlex-v1.5.1-beta.6-release.apk`
 - Public APK SHA-256:
-  `d1fdb4f767bc2f0dfdd2a7605a1e2b6b13e5bd5493bc0a8a68cc05df70045caf`
+  `baf615c3f468368ea236cfb02318ee39db05df76df5c43deeaa969b1c22ec95a`
 
 ## App Version
 
-- `versionCode`: 15105
-- `versionName`: `1.5.1-beta.5`
+- `versionCode`: 15106
+- `versionName`: `1.5.1-beta.6`
 - `compileSdk`: 36
 - `targetSdk`: 36
 - `minSdk`: 26
@@ -79,12 +79,23 @@ Snapshot date: 2026-10-21
 
 ## Current Release Signing State
 
-The original release signing key was not available after the workstation
-rebuild, so `v1.4.1-beta.1` uses a newly generated 2026 Parlex release key.
+The original Parlex release key was lost after the workstation rebuild. The key
+used for `v1.5.1-beta.5` is also unavailable on the current build machine.
 
-Android treats this as a signing-key rotation without lineage. Users with older
-Parlex APKs signed by the previous key must uninstall the old app before
-installing `v1.4.1-beta.1`.
+`v1.5.1-beta.6` is signed with a newly generated 2026 Parlex release key:
+
+- Subject: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
+- Certificate SHA-256:
+  `FF:D6:14:86:FD:4C:D7:68:B3:0A:AD:02:76:CE:B4:1D:2C:6B:1C:B9:D9:2F:E6:AB:23:F5:50:B8:EF:37:20:0A`
+- Alias: `parlex`
+
+Android treats this as another signing-key rotation without lineage. Users
+with `v1.5.1-beta.5` or older builds must uninstall the old app before
+installing beta.6; local data is lost unless exported first.
+
+The matching keystore and `keystore.properties` are stored outside the
+repository. Back them up before the next release; do not publish a build signed
+with a debug key.
 
 Do not upload `app-debug.apk` as a beta or release.
 

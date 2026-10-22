@@ -61,15 +61,24 @@ if (-not (Test-Path $clang)) {
 $stubDir = Join-Path $cpp "opencl-linker/arm64-v8a"
 New-Item -ItemType Directory -Force -Path $stubDir | Out-Null
 $stubSource = Join-Path $stubDir "opencl_stub.c"
-@"
-/* Link-time placeholder. The app declares <uses-native-library libOpenCL.so>
- * and packaging excludes this file, so the real Adreno driver is used at runtime. */
-void parlex_opencl_link_stub(void) {}
-"@ | Set-Content -LiteralPath $stubSource -Encoding ASCII
+$clHeader = Join-Path $openClHeaders "CL/cl.h"
+$openClSymbols = @(
+    Select-String -Path $clHeader -Pattern '^\s*(cl[A-Z][A-Za-z0-9_]*)\s*\(' -AllMatches |
+        ForEach-Object { $_.Matches } |
+        ForEach-Object { $_.Groups[1].Value } |
+        Sort-Object -Unique
+)
+if ($openClSymbols.Count -eq 0) {
+    throw "No OpenCL entry points found in $clHeader"
+}
+$stubLines = @(
+    "/* Link-time OpenCL stubs. The device supplies the real libOpenCL.so. */"
+) + ($openClSymbols | ForEach-Object { "void $_ (void) {}" })
+Set-Content -LiteralPath $stubSource -Value $stubLines -Encoding ASCII
 
 & $clang -shared -fPIC -o (Join-Path $stubDir "libOpenCL.so") $stubSource
 if ($LASTEXITCODE -ne 0) { throw "Failed to compile the OpenCL link stub." }
-Write-Host "OpenCL link stub: $stubDir/libOpenCL.so"
+Write-Host "OpenCL link stub: $stubDir/libOpenCL.so ($($openClSymbols.Count) symbols)"
 
 # 3. llama.cpp at the exact tracked revision.
 if (-not $SkipLlama) {
@@ -104,6 +113,14 @@ if ($WithMnn) {
         git -C $mnnDir checkout $mnnCommit
         Write-Host "MNN: $mnnCommit"
     }
+}
+
+# A stale external-native cache can keep using the JNI stub after llama.cpp is
+# restored. Drop it so the next Gradle build links the real native engine.
+$cxxCache = Join-Path $root "app/.cxx"
+if (Test-Path $cxxCache) {
+    Remove-Item -Recurse -Force $cxxCache
+    Write-Host "Removed stale native cache: $cxxCache"
 }
 
 Write-Host "Native prerequisites are ready. Rebuild with: .\gradlew.bat :app:assembleDebug"

@@ -37,10 +37,17 @@ CLANG="$NDK/toolchains/llvm/prebuilt/$HOST_TAG/bin/aarch64-linux-android26-clang
 
 STUB_DIR="$CPP/opencl-linker/arm64-v8a"
 mkdir -p "$STUB_DIR"
-cat > "$STUB_DIR/opencl_stub.c" <<'EOF'
-/* Link-time placeholder. The real Adreno libOpenCL.so is supplied by the device. */
-void parlex_opencl_link_stub(void) {}
-EOF
+CL_HEADER="$CPP/third_party/OpenCL-Headers/CL/cl.h"
+if [ ! -f "$CL_HEADER" ]; then
+  echo "OpenCL headers not found: $CL_HEADER" >&2
+  exit 1
+fi
+{
+  echo "/* Link-time OpenCL stubs. The device supplies the real libOpenCL.so. */"
+  grep -E '^[[:space:]]*cl[A-Z][A-Za-z0-9_]*[[:space:]]*\(' "$CL_HEADER" |
+    sed -E 's/^[[:space:]]*(cl[A-Z][A-Za-z0-9_]*).*/void \1 (void) {}/' |
+    sort -u
+} > "$STUB_DIR/opencl_stub.c"
 "$CLANG" -shared -fPIC -o "$STUB_DIR/libOpenCL.so" "$STUB_DIR/opencl_stub.c"
 echo "OpenCL link stub: $STUB_DIR/libOpenCL.so"
 
@@ -71,4 +78,7 @@ if [ "$WITH_MNN" -eq 1 ]; then
   fi
 fi
 
+# A stale external-native cache can keep using the JNI stub after llama.cpp is
+# restored. Drop it so the next Gradle build links the real native engine.
+rm -rf "$ROOT/app/.cxx"
 echo "Native prerequisites are ready. Rebuild with: ./gradlew :app:assembleDebug"

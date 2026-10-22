@@ -24,9 +24,9 @@ processed locally whenever the selected feature is available offline.
 
 - Repository: `https://github.com/RandoTeam/Parlex.git`
 - Main branch: `main`
-- Latest public signed beta: `v1.5.1-beta.5`
+- Latest public signed beta: `v1.5.1-beta.6`
 - App package: `com.translive.app`
-- Current app version in Gradle: `1.5.1-beta.5`, `versionCode` 15105
+- Current app version in Gradle: `1.5.1-beta.6`, `versionCode` 15106
 - Supported ABI: `arm64-v8a`
 - Native translation runtime: `llama.cpp` through JNI
 - Stable model format: GGUF
@@ -36,9 +36,16 @@ Current release signing state:
 
 - The original release signing key was not available after the workstation
   rebuild.
-- `v1.5.1-beta.5` is signed with the 2026 Parlex release key (`CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`).
-- Users with older Parlex APKs signed by keys before rotation must uninstall the old
-  app before installing this beta.
+- `v1.5.1-beta.5` was signed with the previous 2026 Parlex key; that key is no
+  longer available on this build machine.
+- `v1.5.1-beta.6` is signed with a new 2026 Parlex release key:
+  `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
+  (certificate SHA-256 `FF:D6:14:86:FD:4C:D7:68:B3:0A:AD:02:76:CE:B4:1D:2C:6B:1C:B9:D9:2F:E6:AB:23:F5:50:B8:EF:37:20:0A`).
+- Users with `v1.5.1-beta.5` or older APKs must uninstall the old app before
+  installing beta.6. Android will reject the update because the signing key
+  changed.
+- The new keystore and `keystore.properties` are stored outside the repository.
+  Back them up before the next release.
 - Do not use debug APKs as releases.
 
 ## What Is Implemented
@@ -156,15 +163,17 @@ Release checklist:
 5. Verify signature:
 
    ```powershell
-   & "$env:ANDROID_HOME\build-tools\37.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+   & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
    ```
 
 6. Inspect APK version with Android build tools.
-7. Commit and push `main`.
-8. Create GitHub prerelease and upload the signed APK asset.
-9. Release notes must describe user-facing functionality only.
+7. Verify the SHA-256 and attach the APK as `Parlex-v<version>-release.apk`.
+8. Commit and push `main`.
+9. Create GitHub prerelease and upload the signed APK asset.
+10. Release notes must describe user-facing functionality and device checks; keep
+    the internal command log in `docs/`.
 
-Recommended next beta version: use the next beta after `v1.4.1-beta.1`.
+Recommended next beta version: `v1.5.1-beta.7` after beta.6.
 
 ## Key Files
 
