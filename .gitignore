@@ -39,6 +39,7 @@ build_output*.txt
 app/src/main/cpp/llama.cpp/
 app/src/main/cpp/whisper.cpp/
 app/src/main/cpp/MNN/
+app/src/main/cpp/opencl-linker/
 
 # Local planning, research and release scratch
 /.research/

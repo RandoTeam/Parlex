@@ -7,6 +7,12 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # llama.cpp source directory (to be cloned/placed here)
 set(LLAMA_CPP_DIR "${CMAKE_SOURCE_DIR}/llama.cpp")
 set(MNN_DIR "${CMAKE_SOURCE_DIR}/MNN")
+
+# OpenCL is an optional accelerator. A clean clone must always be able to
+# build a CPU-only APK even when the OpenCL headers or the link-time stub are
+# not present; `scripts/setup-native.*` restores both for GPU builds.
+option(PARLEX_OPENCL "Build llama.cpp with the Adreno/OpenCL backend when its prerequisites exist" ON)
+set(PARLEX_OPENCL_ENABLED OFF)
 # Reconfigure when the separately restored llama.cpp checkout appears or changes.
 # Without this dependency, a clean clone can keep packaging the JNI stub after
 # llama.cpp is restored because the previous CMake cache selected the stub path.
@@ -22,19 +28,24 @@ if(EXISTS "${LLAMA_CPP_DIR}/CMakeLists.txt")
     set(GGML_OPENMP OFF CACHE BOOL "" FORCE)  # pthreads > OpenMP on Android
     # GGUF GPU path for Qualcomm devices. This uses the upstream ggml OpenCL
     # backend and its Adreno kernels; it is not a separate inference engine.
-    set(GGML_OPENCL ON CACHE BOOL "" FORCE)
-    set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "" FORCE)
-    set(GGML_OPENCL_EMBED_KERNELS ON CACHE BOOL "" FORCE)
-    set(GGML_OPENCL_TARGET_VERSION "200" CACHE STRING "" FORCE)
     set(OPENCL_HEADERS_DIR "${CMAKE_SOURCE_DIR}/third_party/OpenCL-Headers")
     set(OPENCL_LINK_STUB "${CMAKE_SOURCE_DIR}/opencl-linker/${ANDROID_ABI}/libOpenCL.so")
-    if (NOT EXISTS "${OPENCL_HEADERS_DIR}/CL/cl.h" OR NOT EXISTS "${OPENCL_LINK_STUB}")
-        message(FATAL_ERROR
-            "OpenCL build prerequisites are missing. Initialise third_party/OpenCL-Headers "
-            "and generate opencl-linker/${ANDROID_ABI}/libOpenCL.so with the documented setup script.")
+    if(PARLEX_OPENCL AND EXISTS "${OPENCL_HEADERS_DIR}/CL/cl.h" AND EXISTS "${OPENCL_LINK_STUB}")
+        set(PARLEX_OPENCL_ENABLED ON)
+        set(GGML_OPENCL ON CACHE BOOL "" FORCE)
+        set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "" FORCE)
+        set(GGML_OPENCL_EMBED_KERNELS ON CACHE BOOL "" FORCE)
+        set(GGML_OPENCL_TARGET_VERSION "200" CACHE STRING "" FORCE)
+        set(OpenCL_INCLUDE_DIR "${OPENCL_HEADERS_DIR}" CACHE PATH "" FORCE)
+        set(OpenCL_LIBRARY "${OPENCL_LINK_STUB}" CACHE FILEPATH "" FORCE)
+        message(STATUS "OpenCL backend enabled (Adreno kernels, OpenCL 2.0 target).")
+    else()
+        set(GGML_OPENCL OFF CACHE BOOL "" FORCE)
+        message(WARNING
+            "OpenCL prerequisites are missing (third_party/OpenCL-Headers/CL/cl.h or "
+            "opencl-linker/${ANDROID_ABI}/libOpenCL.so). Building llama.cpp on CPU only. "
+            "Run scripts/setup-native.ps1 (or .sh) to restore the GPU backend.")
     endif()
-    set(OpenCL_INCLUDE_DIR "${OPENCL_HEADERS_DIR}" CACHE PATH "" FORCE)
-    set(OpenCL_LIBRARY "${OPENCL_LINK_STUB}" CACHE FILEPATH "" FORCE)
     add_subdirectory(${LLAMA_CPP_DIR} llama.cpp)
 
     # Our JNI bridge library
