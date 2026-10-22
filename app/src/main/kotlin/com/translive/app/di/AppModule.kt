@@ -3,6 +3,7 @@ package com.translive.app.di
 import android.content.Context
 import androidx.room.Room
 import com.translive.app.data.ModelRepository
+import com.translive.app.data.db.DatabaseMigrations
 import com.translive.app.data.db.DialogueDao
 import com.translive.app.data.db.TransLiveDatabase
 import com.translive.app.data.db.TranslationDao
@@ -25,7 +26,9 @@ object AppModule {
             context,
             TransLiveDatabase::class.java,
             "translive.db"
-        ).fallbackToDestructiveMigration().build()
+        )
+            .addMigrations(*DatabaseMigrations.ALL)
+            .build()
     }
 
     @Provides

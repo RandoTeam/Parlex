@@ -16,6 +16,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.suspendCancellableCoroutine
 import javax.inject.Inject
@@ -48,6 +50,8 @@ class FastTranslateEngine @Inject constructor() {
     private var currentTranslator: Translator? = null
     private var currentSourceLang: String = ""
     private var currentTargetLang: String = ""
+    private val translatorMutex = Mutex()
+    private val translatorPool = mutableMapOf<String, Translator>()
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
@@ -392,48 +396,79 @@ class FastTranslateEngine @Inject constructor() {
 
     /**
      * Activates only an already installed pair. It never starts a download.
+     *
+     * Translators are cached per language pair. Screen translation, camera and
+     * dialogue all share this singleton, and closing the previous client here
+     * used to cancel in-flight work on the other surface.
      */
     suspend fun activateDownloadedPair(sourceCode: String, targetCode: String): Boolean {
-        // Already prepared for this pair
-        if (sourceCode == currentSourceLang && targetCode == currentTargetLang && _isReady.value) {
-            return true
-        }
-        if (sourceCode == currentSourceLang && targetCode == currentTargetLang && _isDownloading.value) {
+        val translator = ensureTranslator(sourceCode, targetCode) ?: run {
+            if (sourceCode == currentSourceLang && targetCode == currentTargetLang) {
+                _isReady.value = false
+            }
             return false
         }
-
-        val srcLang = toMlKitLang(sourceCode)
-        val tgtLang = toMlKitLang(targetCode)
-
-        if (srcLang == null || tgtLang == null) {
-            Log.w(TAG, "Unsupported language pair: $sourceCode -> $targetCode")
-            _isReady.value = false
-            return false
-        }
-
-        // Close previous translator
-        currentTranslator?.close()
-
-        val options = TranslatorOptions.Builder()
-            .setSourceLanguage(srcLang)
-            .setTargetLanguage(tgtLang)
-            .build()
-
-        val translator = Translation.getClient(options)
         currentTranslator = translator
         currentSourceLang = sourceCode
         currentTargetLang = targetCode
+        _isReady.value = true
+        Log.i(TAG, "ML Kit model activated: $sourceCode -> $targetCode (pool=${translatorPool.size})")
+        return true
+    }
 
-        _isReady.value = false
-        val status = getPackageStatus(sourceCode, targetCode)
-        if (!status.isReady) {
-            Log.i(TAG, "ML Kit language packs are not installed: $sourceCode -> $targetCode")
-            return false
+    private fun pairKey(sourceCode: String, targetCode: String) = "$sourceCode>$targetCode"
+
+    private suspend fun ensureTranslator(sourceCode: String, targetCode: String): Translator? =
+        translatorMutex.withLock {
+            val key = pairKey(sourceCode, targetCode)
+            translatorPool[key]?.let { return@withLock it }
+
+            val srcLang = toMlKitLang(sourceCode)
+            val tgtLang = toMlKitLang(targetCode)
+            if (srcLang == null || tgtLang == null) {
+                Log.w(TAG, "Unsupported language pair: $sourceCode -> $targetCode")
+                return@withLock null
+            }
+
+            _isDownloading.value = false
+            val status = getPackageStatus(sourceCode, targetCode)
+            if (!status.isReady) {
+                Log.i(TAG, "ML Kit language packs are not installed: $sourceCode -> $targetCode")
+                return@withLock null
+            }
+
+            val options = TranslatorOptions.Builder()
+                .setSourceLanguage(srcLang)
+                .setTargetLanguage(tgtLang)
+                .build()
+            val translator = Translation.getClient(options)
+            translatorPool[key] = translator
+            translator
         }
 
-        Log.i(TAG, "ML Kit model activated: $sourceCode -> $targetCode")
-        _isReady.value = true
-        return true
+    /**
+     * Translate with an explicit pair without changing the "current" pair used by
+     * legacy callers. Safe for concurrent screen/camera/dialogue requests.
+     */
+    suspend fun translateFor(text: String, sourceCode: String, targetCode: String): String {
+        if (text.isBlank()) return text
+        val translator = ensureTranslator(sourceCode, targetCode) ?: return text
+        return translateWith(translator, text)
+    }
+
+    suspend fun translateLinesFor(
+        lines: List<String>,
+        sourceCode: String,
+        targetCode: String
+    ): List<String> {
+        if (lines.isEmpty()) return lines
+        val translator = ensureTranslator(sourceCode, targetCode) ?: return lines
+        val concurrency = Semaphore(3)
+        return coroutineScope {
+            lines.map { line ->
+                async { concurrency.withPermit { translateWith(translator, line) } }
+            }.awaitAll()
+        }
     }
 
     fun isReadyFor(sourceCode: String, targetCode: String): Boolean =
@@ -454,8 +489,11 @@ class FastTranslateEngine @Inject constructor() {
     suspend fun translate(text: String): String {
         val translator = currentTranslator ?: return text
         if (!_isReady.value) return text
-        if (text.isBlank()) return text
+        return translateWith(translator, text)
+    }
 
+    private suspend fun translateWith(translator: Translator, text: String): String {
+        if (text.isBlank()) return text
         return suspendCancellableCoroutine { cont ->
             translator.translate(text)
                 .addOnSuccessListener { translated ->
@@ -487,6 +525,8 @@ class FastTranslateEngine @Inject constructor() {
         _isReady.value = false
         currentSourceLang = ""
         currentTargetLang = ""
+        translatorPool.values.forEach { runCatching { it.close() } }
+        translatorPool.clear()
     }
 }
 
