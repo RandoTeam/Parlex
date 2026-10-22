@@ -430,7 +430,6 @@ class FastTranslateEngine @Inject constructor() {
                 return@withLock null
             }
 
-            _isDownloading.value = false
             val status = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
                 getPackageStatus(sourceCode, targetCode)
             } ?: run {
@@ -448,6 +447,10 @@ class FastTranslateEngine @Inject constructor() {
                 .build()
             val translator = Translation.getClient(options)
             translatorPool[key] = translator
+            while (translatorPool.size > 4) {
+                val evict = translatorPool.keys.firstOrNull { it != key } ?: break
+                translatorPool.remove(evict)?.let { runCatching { it.close() } }
+            }
             translator
         }
 
@@ -530,13 +533,12 @@ class FastTranslateEngine @Inject constructor() {
     }
 
     fun release() {
-        currentTranslator?.close()
+        translatorPool.values.forEach { runCatching { it.close() } }
+        translatorPool.clear()
         currentTranslator = null
         _isReady.value = false
         currentSourceLang = ""
         currentTargetLang = ""
-        translatorPool.values.forEach { runCatching { it.close() } }
-        translatorPool.clear()
     }
 }
 

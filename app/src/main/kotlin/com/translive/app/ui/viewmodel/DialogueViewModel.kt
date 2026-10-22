@@ -438,7 +438,13 @@ class DialogueViewModel @Inject constructor(
                     turnIndexCounter++
 
                     val currentOffset = audioRecorder.getRelativeOffsetMs()
-                    val measuredDurationMs = (currentOffset - turnStartOffsetMs).coerceIn(0L, 60_000L)
+                    val spokenDurationMs = result.durationMs.coerceAtLeast(0L)
+                    val measuredDurationMs = if (spokenDurationMs > 0L) {
+                        spokenDurationMs
+                    } else {
+                        (currentOffset - turnStartOffsetMs).coerceIn(0L, 60_000L)
+                    }
+                    val audioStartMs = (currentOffset - measuredDurationMs).coerceAtLeast(0L)
                     val sessionId = currentSessionId
                     var insertedDbId: Long? = null
                     if (sessionId != null) {
@@ -450,7 +456,7 @@ class DialogueViewModel @Inject constructor(
                             originalLanguage = fromLang.code,
                             translatedLanguage = toLang.code,
                             timestamp = System.currentTimeMillis(),
-                            audioStartTimeMs = turnStartOffsetMs,
+                            audioStartTimeMs = audioStartMs,
                             audioDurationMs = measuredDurationMs,
                             wordCount = wordsInTurn,
                             characterCount = charsInTurn

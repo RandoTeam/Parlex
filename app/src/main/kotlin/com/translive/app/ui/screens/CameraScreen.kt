@@ -1549,6 +1549,8 @@ private fun TranslationOverlay(
     imageWidth: Int,
     imageHeight: Int
 ) {
+    val density = LocalDensity.current.density
+    val fontScale = LocalDensity.current.fontScale
     Canvas(modifier = Modifier.fillMaxSize()) {
         for (block in blocks) {
             val box = block.boundingBox
@@ -1583,7 +1585,10 @@ private fun TranslationOverlay(
                     val textPaint = TextPaint().apply {
                         isAntiAlias = true
                         color = android.graphics.Color.rgb(255, 255, 255)
-                        textSize = (h * 0.56f).coerceIn(10f, 28f)
+                        textSize = (h * 0.56f)
+                            .coerceAtMost(24f * density * fontScale)
+                            .coerceAtMost(h * 0.9f)
+                            .coerceAtLeast(9f * density * fontScale)
                         isFakeBoldText = false
                         setShadowLayer(2.5f, 0f, 1f, android.graphics.Color.BLACK)
                     }

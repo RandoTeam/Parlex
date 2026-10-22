@@ -544,6 +544,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
     private var revealProgress = 1f
     private var revealAnimator: ValueAnimator? = null
+    private val renderLock = Any()
 
     private fun startRevealAnimation() {
         revealAnimator?.cancel()
@@ -848,7 +849,9 @@ class ArTranslateOverlayView @JvmOverloads constructor(
      * Renders the exact in-place translation the user sees (without the top bar
      * or selection chrome) so "Save" cannot drift from the overlay layout.
      */
-    fun renderComposite(): Bitmap? {
+    fun renderComposite(): Bitmap? = synchronized(renderLock) { renderCompositeLocked() }
+
+    private fun renderCompositeLocked(): Bitmap? {
         val source = frozenBitmap?.takeIf { !it.isRecycled } ?: return null
         val result = source.copy(Bitmap.Config.ARGB_8888, true) ?: return null
         val canvas = Canvas(result)
@@ -878,7 +881,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        synchronized(renderLock) { drawContent(canvas) }
+    }
 
+    private fun drawContent(canvas: Canvas) {
         val scaleX = width.toFloat() / screenWidth.coerceAtLeast(1).toFloat()
         val scaleY = height.toFloat() / screenHeight.coerceAtLeast(1).toFloat()
         canvas.save()
@@ -954,6 +960,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
                 isEdgeSwipe = (swipeStartX <= edgeMarginPx || swipeStartX >= width - edgeMarginPx)
             }
             MotionEvent.ACTION_UP -> {
+                performClick()
                 // Edge-swipe dismiss fallback (for OEMs where system back gesture doesn't route to overlays)
                 if (isEdgeSwipe) {
                     val dx = event.rawX - swipeStartX

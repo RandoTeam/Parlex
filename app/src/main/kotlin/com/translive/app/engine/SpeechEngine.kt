@@ -18,6 +18,7 @@ import com.translive.app.data.SettingsRepository
 import com.translive.app.data.model.SttModelInfo
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,7 +36,9 @@ enum class ListeningState { IDLE, LISTENING, PROCESSING, ERROR }
 data class SpeechResult(
     val text: String,
     /** The language used by the recognizer. Qwen3-ASR supplies its detected language. */
-    val language: String
+    val language: String,
+    /** Spoken segment duration in milliseconds (from the VAD segment length). */
+    val durationMs: Long = 0L
 )
 
 /**
@@ -63,6 +66,8 @@ class SpeechEngine @Inject constructor(
     private var currentSpeechModel = ""
     private var echoCanceler: AcousticEchoCanceler? = null
     private var noiseSuppressor: NoiseSuppressor? = null
+    private val isRecognizing = AtomicBoolean(false)
+    private val releaseRequested = AtomicBoolean(false)
     private val audioManager by lazy { context.getSystemService(AudioManager::class.java) }
     private var audioFocusRequest: AudioFocusRequest? = null
 
@@ -259,7 +264,10 @@ class SpeechEngine @Inject constructor(
 
         // Recognition runs on its own coroutine. It must never block the audio
         // read loop, otherwise a 1-3s Whisper decode drops the next phrase.
-        val channel = Channel<FloatArray>(Channel.UNLIMITED)
+        val channel = Channel<FloatArray>(
+            capacity = 4,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST
+        )
         segmentChannel = channel
 
         recognitionJob = CoroutineScope(Dispatchers.IO).launch {
@@ -295,10 +303,10 @@ class SpeechEngine @Inject constructor(
             try {
                 while (isActive && _state.value != ListeningState.IDLE) {
                     val read = runCatching { record.read(samples, 0, samples.size) }.getOrDefault(-1)
-                    if (read <= 0) continue
-
-                    onPcmSamplesRead?.let { callback ->
-                        runCatching { callback(samples, read) }
+                    if (read <= 0) {
+                        if (_state.value == ListeningState.IDLE || !isActive) break
+                        delay(10L)
+                        continue
                     }
 
                     val isSuppressed = isAecSuppressed.get()
@@ -310,6 +318,10 @@ class SpeechEngine @Inject constructor(
                     if (wasSuppressed) {
                         vad?.reset()
                         wasSuppressed = false
+                    }
+
+                    onPcmSamplesRead?.let { callback ->
+                        runCatching { callback(samples, read) }
                     }
 
                     vad?.acceptWaveform(FloatArray(read) { samples[it] / 32768.0f })
@@ -383,6 +395,7 @@ class SpeechEngine @Inject constructor(
 
     private fun recognizeSegment(samples: FloatArray): SpeechResult? {
         val rec = recognizer ?: return null
+        isRecognizing.set(true)
         val stream = rec.createStream()
         return try {
             stream.acceptWaveform(samples, SAMPLE_RATE)
@@ -394,10 +407,23 @@ class SpeechEngine @Inject constructor(
                 normalizeQwenLanguage(result.lang)
             } else currentLanguage
             val resolvedLanguage = language.ifBlank { "auto" }
-            SpeechResult(text, resolvedLanguage)
+            SpeechResult(
+                text = text,
+                language = resolvedLanguage,
+                durationMs = (samples.size * 1000L / SAMPLE_RATE).coerceAtLeast(0L)
+            )
         } finally {
             stream.release()
+            isRecognizing.set(false)
+            if (releaseRequested.compareAndSet(true, false)) releaseNativeModels()
         }
+    }
+
+    private fun releaseNativeModels() {
+        vad?.release(); vad = null
+        recognizer?.release(); recognizer = null
+        currentSpeechModel = ""
+        _isReady.value = false
     }
 
     private fun normalizeQwenLanguage(value: String): String = when (value.trim().lowercase()) {
@@ -433,9 +459,12 @@ class SpeechEngine @Inject constructor(
 
     fun release() {
         stopListening()
-        vad?.release(); vad = null
-        recognizer?.release(); recognizer = null
-        currentSpeechModel = ""
-        _isReady.value = false
+        if (isRecognizing.get()) {
+            // A blocking native decode is still running. Freeing recognizer/VAD
+            // here would be a use-after-free; finish it in recognizeSegment().
+            releaseRequested.set(true)
+            return
+        }
+        releaseNativeModels()
     }
 }

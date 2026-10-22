@@ -2338,7 +2338,7 @@ class CameraViewModel @Inject constructor(
         // model as a deterministic fallback.  It is slower than ML Kit, so
         // the UI still reports that the fast package is unavailable.
         if (!fastTranslateEngine.getPackageStatus(sourceLanguage.code, targetLanguage.code).supported) {
-            return if (translationEngine.isLoaded) {
+            return if (isMainModelLoaded()) {
                 translateCaptureLinesWithMainModel(lines, sourceLanguage, targetLanguage)
             } else {
                 texts

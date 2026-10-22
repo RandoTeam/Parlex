@@ -217,7 +217,9 @@ class FloatingBubbleView @JvmOverloads constructor(
     init {
         setWillNotDraw(false)
         isClickable = true
-        isFocusable = false
+        isFocusable = true
+        contentDescription = context.getString(com.translive.app.R.string.screen_translate_title)
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
     }
 
     fun attachToWindowManager(wm: WindowManager, params: WindowManager.LayoutParams) {
@@ -502,6 +504,7 @@ class FloatingBubbleView @JvmOverloads constructor(
                 mainHandler.removeCallbacks(longPressRunnable)
 
                 if (!isDragging && !isLongPressTriggered) {
+                    performClick()
                     handleClickWithDebounce()
                 } else if (isDragging) {
                     val isDismissed = listener?.onDragRelease() ?: false

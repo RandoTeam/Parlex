@@ -319,44 +319,82 @@ class OcrEngine @Inject constructor(
         }
 
         // CameraX with a ViewPort returns a cropped analysis frame. ML Kit has no
-        // cropRect concept, so the bitmap path must be used whenever the frame is
-        // cropped; otherwise OCR boxes refer to the full sensor image while the
-        // preview shows the viewport crop.
+        // cropRect input, so OCR runs on the full frame (zero-copy) and the
+        // resulting boxes are mapped into the viewport afterwards. This avoids the
+        // JPEG round-trip that used to halve live FPS.
         val crop = imageProxy.cropRect
-        val fullFrame = Rect(0, 0, mediaImage.width, mediaImage.height)
-        if (crop != fullFrame) {
-            val bitmap = try {
-                imageProxyToUprightBitmap(imageProxy)
-            } finally {
-                imageProxy.close()
-            }
-            return if (bitmap != null) {
-                recognize(bitmap, sourceLanguageCode)
-            } else {
-                OcrResult(emptyList(), 0, 0)
-            }
-        }
-
-        val image = InputImage.fromMediaImage(
-            mediaImage,
-            imageProxy.imageInfo.rotationDegrees
-        )
         val rotation = imageProxy.imageInfo.rotationDegrees
         val uprightWidth = if (rotation % 180 == 0) mediaImage.width else mediaImage.height
         val uprightHeight = if (rotation % 180 == 0) mediaImage.height else mediaImage.width
+
+        val image = InputImage.fromMediaImage(mediaImage, rotation)
         val recognitionStartedAt = SystemClock.elapsedRealtime()
-        return recognizeWithMlKit(
+        val raw = recognizeWithMlKit(
             image = image,
             recognizer = recognizer,
             imageWidth = uprightWidth,
             imageHeight = uprightHeight,
             onComplete = imageProxy::close
-        ).copy(
+        )
+        val cropped = cropOcrResultToViewport(
+            result = raw,
+            cropRect = crop,
+            imageWidth = mediaImage.width,
+            imageHeight = mediaImage.height,
+            rotationDegrees = rotation
+        )
+        return cropped.copy(
             diagnostics = OcrDiagnostics(
                 backend = backendFor(sourceLanguageCode).name,
                 recognitionMs = SystemClock.elapsedRealtime() - recognitionStartedAt
             )
         )
+    }
+
+    /**
+     * Maps ML Kit boxes from upright capture space into CameraX viewport space.
+     * The crop rectangle is expressed in raw sensor coordinates, so it is rotated
+     * into the same upright space as ML Kit's output before subtraction.
+     */
+    private fun cropOcrResultToViewport(
+        result: OcrResult,
+        cropRect: Rect,
+        imageWidth: Int,
+        imageHeight: Int,
+        rotationDegrees: Int
+    ): OcrResult {
+        val rotation = ((rotationDegrees % 360) + 360) % 360
+        val crop = when (rotation) {
+            90 -> Rect(imageHeight - cropRect.bottom, cropRect.left, imageHeight - cropRect.top, cropRect.right)
+            180 -> Rect(imageWidth - cropRect.right, imageHeight - cropRect.bottom, imageWidth - cropRect.left, imageHeight - cropRect.top)
+            270 -> Rect(cropRect.top, imageWidth - cropRect.right, cropRect.bottom, imageWidth - cropRect.left)
+            else -> Rect(cropRect)
+        }
+        if (crop.width() <= 0 || crop.height() <= 0) return result
+
+        fun mapRect(source: Rect): Rect? {
+            val mapped = Rect(source)
+            mapped.offset(-crop.left, -crop.top)
+            if (mapped.right <= 0 || mapped.bottom <= 0 ||
+                mapped.left >= crop.width() || mapped.top >= crop.height()
+            ) {
+                return null
+            }
+            mapped.left = mapped.left.coerceIn(0, crop.width())
+            mapped.top = mapped.top.coerceIn(0, crop.height())
+            mapped.right = mapped.right.coerceIn(0, crop.width())
+            mapped.bottom = mapped.bottom.coerceIn(0, crop.height())
+            return mapped.takeIf { it.width() > 0 && it.height() > 0 }
+        }
+
+        val blocks = result.blocks.mapNotNull { block ->
+            val blockBox = mapRect(block.boundingBox) ?: return@mapNotNull null
+            val lines = block.lines.mapNotNull { line ->
+                mapRect(line.boundingBox)?.let { OcrLine(line.text, it) }
+            }
+            if (lines.isEmpty()) null else OcrBlock(block.text, blockBox, lines)
+        }
+        return OcrResult(blocks, crop.width(), crop.height())
     }
 
     // -- ML Kit -----------------------------------------------------------

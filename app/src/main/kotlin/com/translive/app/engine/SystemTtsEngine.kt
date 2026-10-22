@@ -52,13 +52,15 @@ class SystemTtsEngine @Inject constructor(
         tts = TextToSpeech(context) { status ->
             if (status == TextToSpeech.SUCCESS) {
                 _isReady.value = true
-                installProgressListener()
                 Log.i(TAG, "System TTS initialized")
             } else {
                 Log.e(TAG, "System TTS init failed: $status")
                 _isReady.value = false
             }
         }
+        // The init callback can fire before the TextToSpeech constructor returns,
+        // so install the listener outside the callback as well.
+        installProgressListener()
     }
 
     private fun installProgressListener() {
