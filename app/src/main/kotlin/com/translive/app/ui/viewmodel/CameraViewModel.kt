@@ -42,6 +42,7 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,6 +51,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
+import kotlin.coroutines.coroutineContext
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -197,6 +199,8 @@ data class CameraUiState(
     val captureStatus: CaptureStatus = CaptureStatus.IDLE,
     val captureMessage: String? = null,
     val capturedBitmap: Bitmap? = null,
+    /** Last gallery image, shown as a thumbnail on the camera gallery button. */
+    val galleryThumbnail: Bitmap? = null,
     /** Bitmap with translations painted on top */
     val paintedBitmap: Bitmap? = null,
     val imageWidth: Int = 0,
@@ -393,6 +397,8 @@ class CameraViewModel @Inject constructor(
                     sourceAuto = _uiState.value.isSourceAuto,
                     requestedTargetLanguage = _uiState.value.targetLanguage
                 )
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e("CameraVM", "LLM capture improvement failed: ${e.message}", e)
                 _uiState.update {
@@ -624,6 +630,11 @@ class CameraViewModel @Inject constructor(
             }
 
             val workBitmap = prepareCaptureBitmap(bitmap)
+            val thumbnail = makeGalleryThumbnail(workBitmap)
+            if (thumbnail != null) {
+                _uiState.update { it.copy(galleryThumbnail = thumbnail) }
+            }
+            coroutineContext.ensureActive()
             enterCaptureMode(
                 workBitmap = workBitmap,
                 message = texts.text(R.string.camera_capture_finding_text_photo),
@@ -707,7 +718,10 @@ class CameraViewModel @Inject constructor(
                     lineBoxes = rawLines.map { it.boundingBox },
                     sourceLanguage = liveOcr.sourceLanguage,
                     canTranslate = liveOcr.sourceLanguage.code == state.targetLanguage.code ||
-                        fastTranslateEngine.isReadyFor(liveOcr.sourceLanguage.code, state.targetLanguage.code)
+                        fastTranslateEngine.getPackageStatus(
+                            liveOcr.sourceLanguage.code,
+                            state.targetLanguage.code
+                        ).isReady
                 )
 
                 if (rawLines.isEmpty()) {
@@ -916,9 +930,10 @@ class CameraViewModel @Inject constructor(
      * screen or changes languages.  Auto-detected pairs remain visible but
      * are translated only after their pack has been explicitly prepared.
      */
-    private fun reportLiveTranslationReadiness(sourceLanguage: Language, targetLanguage: Language) {
+    private suspend fun reportLiveTranslationReadiness(sourceLanguage: Language, targetLanguage: Language) {
         if (sourceLanguage.code == targetLanguage.code) return
-        if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) return
+        val status = fastTranslateEngine.getPackageStatus(sourceLanguage.code, targetLanguage.code)
+        if (status.isReady) return
         val key = "${sourceLanguage.code}:${targetLanguage.code}"
         if (lastLivePairWarningKey == key) return
         lastLivePairWarningKey = key
@@ -945,7 +960,7 @@ class CameraViewModel @Inject constructor(
         }
     }
 
-    private fun canCameraTranslateAll(
+    private suspend fun canCameraTranslateAll(
         lines: List<PaintLine>,
         defaultSourceLanguage: Language,
         targetLanguage: Language
@@ -955,10 +970,13 @@ class CameraViewModel @Inject constructor(
             .distinctBy { it.code }
             .all { sourceLanguage ->
                 sourceLanguage.code == targetLanguage.code ||
-                    fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)
+                    fastTranslateEngine.getPackageStatus(
+                        sourceLanguage.code,
+                        targetLanguage.code
+                    ).isReady
             }
 
-    private fun canTranslateCapture(
+    private suspend fun canTranslateCapture(
         lines: List<PaintLine>,
         sourceLanguage: Language,
         targetLanguage: Language
@@ -982,15 +1000,17 @@ class CameraViewModel @Inject constructor(
             }
         }
 
-        if (!fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
+        val packageStatus = fastTranslateEngine.getPackageStatus(
+            sourceLanguage.code,
+            targetLanguage.code
+        )
+        if (!packageStatus.supported || !packageStatus.isReady) {
             // ML Kit is only the realtime accelerator. Languages which do not
-            // have an ML Kit package must still work offline through the
-            // already loaded local translation model. Keep this fallback
-            // explicit so a missing fast package never turns into an empty
-            // overlay or a network request from a camera frame.
+            // have a ready ML Kit package should still work offline through the
+            // already loaded local translation model.
             if (!isMainModelLoaded()) {
                 return lines.map { line ->
-                    TranslatedBlock(line.text, "", line.boundingBox)
+                    TranslatedBlock(line.text, line.text, line.boundingBox)
                 }
             }
             return lines.map { line ->
@@ -1102,9 +1122,26 @@ class CameraViewModel @Inject constructor(
                 captureMessage = message ?: texts.text(R.string.camera_capture_finding_text),
                 detectedSourceLanguage = null,
                 detectedSourceLanguages = emptyList(),
-                qualityWarnings = emptyList()
+                qualityWarnings = emptyList(),
+                bilingualParagraphs = emptyList(),
+                selectedParagraph = null,
+                selectedParagraphCurrency = null,
+                selectedWordDictionaryEntries = emptyList(),
+                isSpeaking = false
             )
         }
+    }
+
+    private fun makeGalleryThumbnail(bitmap: Bitmap): Bitmap? {
+        val maxSide = 180
+        val longest = max(bitmap.width, bitmap.height)
+        if (longest <= 0) return null
+        val scale = maxSide.toFloat() / longest
+        val width = (bitmap.width * scale).toInt().coerceAtLeast(1)
+        val height = (bitmap.height * scale).toInt().coerceAtLeast(1)
+        return runCatching {
+            Bitmap.createScaledBitmap(bitmap, width, height, true)
+        }.getOrNull()
     }
 
     private fun decodeGalleryBitmap(uri: Uri): Bitmap? {
@@ -1185,7 +1222,7 @@ class CameraViewModel @Inject constructor(
             val captureOcr = recognizeCaptureBitmap(bitmap, sourceLanguage, sourceAuto)
             val ocrResult = captureOcr.result
             val effectiveSourceLanguage = captureOcr.sourceLanguage
-            val targetLanguage = if (effectiveSourceLanguage.code == requestedTargetLanguage.code) {
+            val targetLanguage = if (sourceAuto && effectiveSourceLanguage.code == requestedTargetLanguage.code) {
                 // An English page with an English target used to become a no-op
                 // while the UI still claimed "Russian -> English". Prefer the
                 // user's native language, then fall back to a useful pair.
@@ -1201,7 +1238,9 @@ class CameraViewModel @Inject constructor(
                 requestedTargetLanguage
             }
             if (targetLanguage.code != requestedTargetLanguage.code) {
+                settings.cameraTargetLanguage = targetLanguage
                 _uiState.update { it.copy(targetLanguage = targetLanguage) }
+                prepareNmt()
             }
             Log.i(
                 "CameraVM",
@@ -1241,7 +1280,7 @@ class CameraViewModel @Inject constructor(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = texts.text(R.string.camera_capture_text_not_found),
                         detectedSourceLanguage = effectiveSourceLanguage,
-                        sourceLanguage = effectiveSourceLanguage,
+                        sourceLanguage = if (sourceAuto) effectiveSourceLanguage else it.sourceLanguage,
                         detectedSourceLanguages = captureOcr.detectedSourceLanguages,
                         qualityWarnings = qualityWarnings
                     )
@@ -1273,7 +1312,7 @@ class CameraViewModel @Inject constructor(
                         captureStatus = CaptureStatus.EMPTY,
                         captureMessage = texts.text(R.string.camera_capture_no_suitable_lines),
                         detectedSourceLanguage = effectiveSourceLanguage,
-                        sourceLanguage = effectiveSourceLanguage,
+                        sourceLanguage = if (sourceAuto) effectiveSourceLanguage else it.sourceLanguage,
                         detectedSourceLanguages = captureOcr.detectedSourceLanguages,
                         qualityWarnings = qualityWarnings
                     )
@@ -1350,18 +1389,21 @@ class CameraViewModel @Inject constructor(
                 )
             }
 
+            coroutineContext.ensureActive()
             _uiState.update {
                 it.copy(
                     paintedBitmap = painted,
                     captureStatus = CaptureStatus.READY,
                     captureMessage = null,
                     detectedSourceLanguage = effectiveSourceLanguage,
-                    sourceLanguage = effectiveSourceLanguage,
+                    sourceLanguage = if (sourceAuto) effectiveSourceLanguage else it.sourceLanguage,
                     detectedSourceLanguages = captureOcr.detectedSourceLanguages,
                     qualityWarnings = finalQualityWarnings,
                     bilingualParagraphs = bilingualList
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("CameraVM", "Capture error: ${e.message}", e)
             _uiState.update {
@@ -1632,11 +1674,11 @@ class CameraViewModel @Inject constructor(
      * where correctness is preferable to live-frame latency.
      */
     private suspend fun autoCaptureOcrCandidates(): List<Language> {
-        val downloadedModelCodes = fastTranslateEngine.downloadedLanguageCodes()
-        val installed = Language.allLanguages.filter { language ->
-            fastTranslateEngine.toMlKitLang(language.code) in downloadedModelCodes
-        }
-        val available = installed.ifEmpty { AUTO_CAPTURE_FALLBACK_LANGUAGES }
+        // OCR capability must be driven by bundled OCR models, not by which
+        // translation packs happen to be downloaded. Otherwise an English/Russian
+        // translation set can never probe Japanese or Korean images and the UI
+        // labels them as the wrong source.
+        val available = AUTO_CAPTURE_OCR_LANGUAGES
         return available
             .groupBy(::autoOcrBackendKey)
             .values
@@ -2374,7 +2416,7 @@ class CameraViewModel @Inject constructor(
 
         prepareCaptureTranslateModel(sourceLanguage, targetLanguage)
         return if (fastTranslateEngine.isReadyFor(sourceLanguage.code, targetLanguage.code)) {
-            fastTranslateEngine.translateLinesFor(texts, sourceLanguage.code, targetLanguage.code)
+            fastTranslateEngine.translateBatchFor(texts, sourceLanguage.code, targetLanguage.code)
         } else {
             texts
         }
@@ -3143,7 +3185,13 @@ class CameraViewModel @Inject constructor(
                 captureMessage = null,
                 detectedSourceLanguage = null,
                 detectedSourceLanguages = emptyList(),
-                qualityWarnings = emptyList()
+                qualityWarnings = emptyList(),
+                bilingualParagraphs = emptyList(),
+                selectedParagraph = null,
+                selectedParagraphCurrency = null,
+                selectedWordDictionaryEntries = emptyList(),
+                isSpeaking = false,
+                subtitleState = it.subtitleState.copy(subtitles = emptyList(), activeTrackCount = 0)
             )
         }
     }
@@ -3187,11 +3235,14 @@ private const val LIVE_TRANSLATION_CACHE_LIMIT = 160
 private const val LIVE_FRAME_INTERVAL_MS = 200L
 private const val AUTO_LIVE_PROBE_EVERY_FRAMES = 30
 
-private val AUTO_CAPTURE_FALLBACK_LANGUAGES = listOf(
+private val AUTO_CAPTURE_OCR_LANGUAGES = listOf(
     Language.ENGLISH,
     Language.RUSSIAN,
     Language.CHINESE_SIMPLIFIED,
-    Language.HINDI
+    Language.JAPANESE,
+    Language.KOREAN,
+    Language.HINDI,
+    Language.ARABIC
 )
 
 private data class LiveTextTrack(

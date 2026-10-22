@@ -347,6 +347,15 @@ class LensScanEffectView @JvmOverloads constructor(
         transitionProgress = 0f
         visibility = VISIBLE
 
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            currentState = ScanEffectState.SETTLED
+            scanProgress = 1f
+            transitionProgress = 1f
+            invalidate()
+            onScanCompletedListener?.invoke()
+            return
+        }
+
         scanAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = scanDurationMs
             interpolator = AccelerateDecelerateInterpolator()

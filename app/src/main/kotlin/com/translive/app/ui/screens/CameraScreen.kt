@@ -35,17 +35,17 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -312,7 +312,7 @@ private fun CameraLensCandidate.toCameraLabel(backMainOpticalScale: Float?, inde
             val ratio = relativeOpticalZoom(backMainOpticalScale)
             when {
                 ratio == null -> "Back ${index + 1}"
-                ratio < 0.72f -> "0.5x"
+                ratio < 0.72f -> "0.6x"
                 ratio < 0.9f -> "${formatZoomRatio(ratio)}x"
                 ratio < 1.2f -> "1x"
                 ratio < 1.85f -> "${formatZoomRatio(ratio)}x"
@@ -499,6 +499,11 @@ fun CameraScreen(
                             },
                             onFocusPoint = { focusPoint = it }
                         )
+                        TranslationOverlay(
+                            blocks = uiState.liveBlocks,
+                            imageWidth = uiState.imageWidth,
+                            imageHeight = uiState.imageHeight
+                        )
 
                         CameraTopControls(
                             modifier = Modifier
@@ -509,7 +514,6 @@ fun CameraScreen(
                             targetLabel = "${uiState.targetLanguage.flag} ${uiState.targetLanguage.nativeName}",
                             isSourceAuto = uiState.isSourceAuto,
                             translationMode = uiState.translationMode,
-                            canUseQuality = uiState.isLlmModelAvailable,
                             onSourceClick = { showSourcePicker = true },
                             onTargetClick = { showTargetPicker = true },
                             onSwap = { viewModel.swapLanguages() },
@@ -540,6 +544,11 @@ fun CameraScreen(
                             modifier = Modifier
                                 .align(Alignment.TopCenter)
                                 .padding(top = 112.dp, start = 12.dp, end = 12.dp)
+                        )
+                        CameraCaptureStatusBadge(
+                            status = uiState.captureStatus,
+                            message = uiState.captureMessage,
+                            topPadding = 160.dp
                         )
 
                         FocusReticle(focusPoint)
@@ -645,7 +654,8 @@ fun CameraScreen(
                         )
                         CameraCaptureStatusBadge(
                             status = uiState.captureStatus,
-                            message = uiState.captureMessage
+                            message = uiState.captureMessage,
+                            topPadding = 160.dp
                         )
                         CameraQualityBadge(
                             warnings = uiState.qualityWarnings,
@@ -727,6 +737,7 @@ fun CameraScreen(
                         if (uiState.mode == CameraMode.LIVE) {
                             GalleryPhotoButton(
                                 enabled = !uiState.isCaptureProcessing,
+                                thumbnail = uiState.galleryThumbnail,
                                 onClick = openGallery
                             )
                             Spacer(Modifier.width(26.dp))
@@ -867,7 +878,6 @@ private fun CameraTopControls(
     targetLabel: String,
     isSourceAuto: Boolean,
     translationMode: CameraTranslationMode,
-    canUseQuality: Boolean,
     onSourceClick: () -> Unit,
     onTargetClick: () -> Unit,
     onSwap: () -> Unit,
@@ -889,6 +899,7 @@ private fun CameraTopControls(
         ) {
             Surface(
                 modifier = Modifier
+                    .heightIn(min = 42.dp)
                     .clip(RoundedCornerShape(12.dp))
                     .clickable(onClick = onModeClick),
                 color = if (translationMode == CameraTranslationMode.QUALITY) {
@@ -969,7 +980,7 @@ private fun CameraFlashControl(
         IconButton(
             onClick = onTorchToggle,
             enabled = enabled && hasFlash,
-            modifier = Modifier.size(44.dp)
+            modifier = Modifier.size(48.dp)
         ) {
             Icon(
                 imageVector = if (torchEnabled) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
@@ -1020,12 +1031,29 @@ private fun CameraZoomSelector(
         ) {
             visible.forEach { option ->
                 val selected = option.id == selectedCameraId
+                val animatedBg by animateColorAsState(
+                    targetValue = if (selected) Color.White else Color.Transparent,
+                    label = "zoom-bg"
+                )
+                val animatedFg by animateColorAsState(
+                    targetValue = if (selected) Color.Black else Color.White,
+                    label = "zoom-fg"
+                )
+                val animatedScale by animateFloatAsState(
+                    targetValue = if (selected) 1f else 0.92f,
+                    label = "zoom-scale"
+                )
                 Surface(
                     modifier = Modifier
+                        .heightIn(min = 38.dp)
                         .clip(CircleShape)
-                        .clickable(enabled = enabled) { onSelect(option.id) },
-                    color = if (selected) Color.White else Color.Transparent,
-                    contentColor = if (selected) Color.Black else Color.White,
+                        .clickable(enabled = enabled) { onSelect(option.id) }
+                        .graphicsLayer {
+                            scaleX = animatedScale
+                            scaleY = animatedScale
+                        },
+                    color = animatedBg,
+                    contentColor = animatedFg,
                     shape = CircleShape
                 ) {
                     Text(
@@ -1068,104 +1096,34 @@ private fun CameraShutterButton(
 }
 
 @Composable
-private fun BoxScope.CameraBetaBadge() {
-    Surface(
-        modifier = Modifier
-            .align(Alignment.TopStart)
-            .padding(12.dp),
-        color = Color.Black.copy(alpha = 0.55f),
-        contentColor = Color.White,
-        shape = RoundedCornerShape(14.dp)
-    ) {
-        Text(
-            text = "Beta",
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-            style = MaterialTheme.typography.labelSmall
-        )
-    }
-}
-
-@Composable
 private fun GalleryPhotoButton(
     enabled: Boolean,
+    thumbnail: android.graphics.Bitmap? = null,
     onClick: () -> Unit
 ) {
     IconButton(
         onClick = onClick,
         enabled = enabled,
         modifier = Modifier
-            .size(52.dp)
+            .size(56.dp)
             .clip(CircleShape)
             .background(Color.Black.copy(alpha = 0.5f))
     ) {
-        Icon(
-            imageVector = Icons.Filled.PhotoLibrary,
-            contentDescription = stringResource(R.string.cd_pick_photo),
-            tint = if (enabled) Color.White else Color.White.copy(alpha = 0.38f)
-        )
-    }
-}
-
-@Composable
-private fun BoxScope.CameraHardwareControls(
-    cameraOptions: List<CameraLensOption>,
-    selectedCameraId: String?,
-    torchEnabled: Boolean,
-    enabled: Boolean,
-    onCameraSelected: (String) -> Unit,
-    onTorchToggle: () -> Unit
-) {
-    val selectedCamera = cameraOptions.firstOrNull { it.id == selectedCameraId }
-    val hasFlash = selectedCamera?.hasFlash == true
-
-    Surface(
-        modifier = Modifier
-            .align(Alignment.TopEnd)
-            .padding(12.dp)
-            .zIndex(3f),
-        color = Color.Black.copy(alpha = 0.56f),
-        contentColor = Color.White,
-        shape = RoundedCornerShape(18.dp)
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(horizontal = 8.dp, vertical = 6.dp)
-                .horizontalScroll(rememberScrollState()),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (cameraOptions.size > 1) {
-                cameraOptions.forEach { option ->
-                    FilterChip(
-                        selected = option.id == selectedCameraId,
-                        onClick = { onCameraSelected(option.id) },
-                        label = { Text(option.shortLabel) },
-                        enabled = enabled,
-                        modifier = Modifier.height(34.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = Color.Transparent,
-                            labelColor = Color.White,
-                            selectedContainerColor = Color.White.copy(alpha = 0.22f),
-                            selectedLabelColor = Color.White,
-                            disabledContainerColor = Color.Transparent,
-                            disabledLabelColor = Color.White.copy(alpha = 0.38f)
-                        )
-                    )
-                }
-            }
-
-            IconButton(
-                onClick = onTorchToggle,
-                enabled = enabled && hasFlash,
-                modifier = Modifier.size(36.dp)
-            ) {
-                Icon(
-                    imageVector = if (torchEnabled) Icons.Filled.FlashOn else Icons.Filled.FlashOff,
-                    contentDescription = if (torchEnabled) stringResource(R.string.cd_torch_off) else stringResource(R.string.cd_torch_on),
-                    tint = if (torchEnabled && hasFlash) Color(0xFFFFD54F) else Color.White
-                )
-            }
+        if (thumbnail != null) {
+            Image(
+                bitmap = thumbnail.asImageBitmap(),
+                contentDescription = stringResource(R.string.cd_pick_photo),
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(CircleShape)
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Filled.PhotoLibrary,
+                contentDescription = stringResource(R.string.cd_pick_photo),
+                tint = if (enabled) Color.White else Color.White.copy(alpha = 0.38f)
+            )
         }
     }
 }
@@ -1173,7 +1131,8 @@ private fun BoxScope.CameraHardwareControls(
 @Composable
 private fun BoxScope.CameraCaptureStatusBadge(
     status: CaptureStatus,
-    message: String?
+    message: String?,
+    topPadding: androidx.compose.ui.unit.Dp = 12.dp
 ) {
     if (status == CaptureStatus.IDLE || (status == CaptureStatus.READY && message == null)) return
 
@@ -1186,7 +1145,7 @@ private fun BoxScope.CameraCaptureStatusBadge(
     Surface(
         modifier = Modifier
             .align(Alignment.TopCenter)
-            .padding(top = 12.dp, start = 12.dp, end = 12.dp),
+            .padding(top = topPadding, start = 12.dp, end = 12.dp),
         color = color,
         contentColor = Color.White,
         shape = RoundedCornerShape(18.dp)

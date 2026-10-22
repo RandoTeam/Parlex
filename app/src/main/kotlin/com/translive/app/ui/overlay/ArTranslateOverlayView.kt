@@ -351,8 +351,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     }
 
     private fun precomputeLayouts() {
-        renderBoxes.forEach { it.backgroundPatch?.recycle() }
-        renderBoxes.clear()
+        synchronized(renderLock) {
+            renderBoxes.forEach { runCatching { it.backgroundPatch?.recycle() } }
+            renderBoxes.clear()
+        }
 
         val scaledDensity = density * context.resources.configuration.fontScale
         val minTextSizePx = 9f * scaledDensity
@@ -582,6 +584,11 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     private fun startRevealAnimation() {
         revealAnimator?.cancel()
         revealProgress = 0f
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            revealProgress = 1f
+            invalidate()
+            return
+        }
         revealAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 360L
             interpolator = DecelerateInterpolator()
@@ -1298,8 +1305,10 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     private fun cleanup() {
         revealAnimator?.cancel()
         revealAnimator = null
-        renderBoxes.forEach { runCatching { it.backgroundPatch?.recycle() } }
-        renderBoxes.clear()
+        synchronized(renderLock) {
+            renderBoxes.forEach { runCatching { it.backgroundPatch?.recycle() } }
+            renderBoxes.clear()
+        }
         runCatching {
             tts?.stop()
             tts?.shutdown()

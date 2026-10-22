@@ -23,8 +23,8 @@ android {
         applicationId = "com.translive.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15108
-        versionName = "1.5.1-beta.8"
+        versionCode = 15109
+        versionName = "1.5.1-beta.9"
 
         ndk {
             abiFilters += listOf("arm64-v8a")
@@ -82,6 +82,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     testOptions {
@@ -145,8 +146,8 @@ dependencies {
     // Splash screen
     implementation("androidx.core:core-splashscreen:1.2.0")
 
-    // Lottie for animations
-    implementation("com.airbnb.android:lottie-compose:6.7.1")
+    // (Lottie was removed; camera/overlay motion is rendered with native
+    // ValueAnimator/Compose animations.)
 
     // OkHttp for model downloads
     implementation("com.squareup.okhttp3:okhttp:5.4.0")

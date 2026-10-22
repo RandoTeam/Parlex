@@ -30,6 +30,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.translive.app.R
+import com.translive.app.BuildConfig
 import com.translive.app.data.SettingsRepository
 import com.translive.app.data.TranslationPolicy
 import com.translive.app.i18n.AppLocale
@@ -1172,7 +1173,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
                     ) {
                         Text(
-                            text = "v1.5.0-beta.1",
+                            text = "v${BuildConfig.VERSION_NAME}",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1184,7 +1185,7 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Text(
-                            text = "Build 15000",
+                            text = "Build ${BuildConfig.VERSION_CODE}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -1307,8 +1308,8 @@ fun SettingsScreen(
 
             // 5. System Metadata & Diagnostics Card
             SettingsCard(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
-                InfoRow(stringResource(R.string.settings_version), "1.5.0-beta.1 (15000)")
-                InfoRow("Target SDK", "Android 15 (API 36)")
+                InfoRow(stringResource(R.string.settings_version), "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
+                InfoRow("Target SDK", "Android 16 (API 36)")
                 InfoRow("Architecture", "arm64-v8a (64-bit)")
                 InfoRow("Text-to-Speech", stringResource(R.string.settings_tts_engine_value))
 

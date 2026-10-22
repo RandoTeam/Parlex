@@ -148,7 +148,7 @@ class ScreenTranslateOverlayService : Service() {
         // Android 14+ requires a foreground service of type mediaProjection to
         // be running *before* getMediaProjection(). Starting it as dataSync first
         // and only then attaching the projection throws SecurityException.
-        ensureForeground(includeProjection = hasProjectionGrant)
+        ensureForeground(includeProjection = hasProjectionGrant || captureController.isAttached)
 
         if (hasProjectionGrant && resultData != null) {
             val manager = getSystemService(MediaProjectionManager::class.java)
@@ -1196,7 +1196,9 @@ class ScreenTranslateOverlayService : Service() {
         val boxes = lastArBoxes
         serviceScope.launch {
             val targetCode = activeTargetCode.ifBlank { settings.effectiveScreenTargetLanguage.code }
-            val rendered = withContext(Dispatchers.Default) { arOverlayView?.renderComposite() }
+            val rendered = withContext(Dispatchers.Default) {
+                runCatching { arOverlayView?.renderComposite() }.getOrNull()
+            }
             val result = try {
                 if (rendered != null) {
                     screenTranslationExporter.exportRendered(rendered, activeSourceCode, targetCode)
@@ -1410,33 +1412,11 @@ class ScreenTranslateOverlayService : Service() {
             }
         }
 
-        fun translateScreenshot(context: Context, bitmap: Bitmap) {
-            putPending(null, bitmap)
-            val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
-                action = ACTION_TRANSLATE_BITMAP
-                putExtra(EXTRA_ONE_SHOT_MODE, false)
-            }
-            ContextCompat.startForegroundService(context, intent)
-        }
-
         fun translateScreenshotOneShot(context: Context, bitmap: Bitmap) {
             putPending(null, bitmap)
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_BITMAP
                 putExtra(EXTRA_ONE_SHOT_MODE, true)
-            }
-            ContextCompat.startForegroundService(context, intent)
-        }
-
-        fun translateNodes(
-            context: Context,
-            nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>,
-            bitmap: Bitmap? = null
-        ) {
-            putPending(nodes, bitmap)
-            val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
-                action = ACTION_TRANSLATE_NODES
-                putExtra(EXTRA_ONE_SHOT_MODE, false)
             }
             ContextCompat.startForegroundService(context, intent)
         }

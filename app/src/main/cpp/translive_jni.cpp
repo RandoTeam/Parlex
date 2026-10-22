@@ -8,7 +8,7 @@
  * - Robust null checks on model, ctx, vocab, sampler, and JNI callback objects.
  * - Full protection against empty inputs and context window overflow.
  *
- * Upstream Engine: llama.cpp b9464 (commit 5dcb71166686799f0d873eab7386234302d05ecf).
+ * Upstream Engine: llama.cpp b10452 (commit b94041a98ec86e29e63b02decd29175d6820b2a1).
  */
 
 #include <jni.h>

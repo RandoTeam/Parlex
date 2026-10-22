@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translive.app.R
+import com.translive.app.BuildConfig
 import com.translive.app.data.LanguagePackRepository
 import com.translive.app.data.ModelRepository
 import com.translive.app.data.SettingsRepository
@@ -806,7 +807,7 @@ class ModelManagerViewModel @Inject constructor(
                 val downloadedCodes = FastTranslateEngine.downloadedLanguageCodes().toList()
                 val manifest = ParlexFastManifest(
                     format = ParlexFastManifest.FORMAT_V1,
-                    appVersion = "1.5.0",
+                    appVersion = BuildConfig.VERSION_NAME,
                     timestamp = System.currentTimeMillis(),
                     languages = downloadedCodes,
                     totalSizeBytes = downloadedCodes.size * com.translive.app.engine.FastTranslateEngine.PACKAGE_SIZE_BYTES
