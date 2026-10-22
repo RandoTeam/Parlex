@@ -16,6 +16,9 @@
 
 ## 0.1 Статус первого прохода (2026-10-21)
 
+Recovery commits: `2101c79..fe7d4b4` (main). Validation: `:app:testDebugUnitTest`
+— **470/470**, `:app:lintDebug` — **BUILD SUCCESSFUL**, `:app:assembleDebug` — OK.
+
 - [x] Официальный `gradlew.bat` с поддержкой `JAVA_HOME`.
 - [x] `scripts/setup-native.ps1/.sh`: OpenCL submodule, link-stub, pinned llama.cpp.
 - [x] CMake больше не падает без OpenCL: CPU-only сборка по умолчанию, GPU — при наличии prerequisite.

@@ -14,6 +14,7 @@ Snapshot date: 2026-10-21
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
 - Last public release commit: `607638f`
+- Recovery work HEAD at audit time: `fe7d4b4`
 - Latest public signed prerelease: `v1.5.1-beta.5`
 - Latest public APK asset: `Parlex-v1.5.1-beta.5-release.apk`
 - Public APK SHA-256:

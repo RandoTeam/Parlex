@@ -299,11 +299,11 @@ class ScreenTranslateOverlayService : Service() {
         }
 
         dismissMiniOverlayHud()
-        if (arOverlayView != null) {
-            // The frozen screenshot and its pixel coordinates are invalid after a
-            // rotation/display-size change. Dismiss instead of drawing the old
-            // portrait translation over a landscape app.
+        if (arOverlayView != null || activeTranslationJob?.isActive == true) {
+            // Frozen screenshots and in-flight geometry are invalid after a
+            // rotation/display-size change.
             retranslateJob?.cancel()
+            cancelActiveTranslation()
             dismissArOverlay()
             if (isOneShotSession && floatingBubbleView == null) {
                 stopSelf()
