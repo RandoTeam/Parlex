@@ -431,7 +431,12 @@ class FastTranslateEngine @Inject constructor() {
             }
 
             _isDownloading.value = false
-            val status = getPackageStatus(sourceCode, targetCode)
+            val status = kotlinx.coroutines.withTimeoutOrNull(4_000L) {
+                getPackageStatus(sourceCode, targetCode)
+            } ?: run {
+                Log.w(TAG, "Timed out checking ML Kit package status for $sourceCode -> $targetCode")
+                return@withLock null
+            }
             if (!status.isReady) {
                 Log.i(TAG, "ML Kit language packs are not installed: $sourceCode -> $targetCode")
                 return@withLock null
@@ -494,15 +499,20 @@ class FastTranslateEngine @Inject constructor() {
 
     private suspend fun translateWith(translator: Translator, text: String): String {
         if (text.isBlank()) return text
-        return suspendCancellableCoroutine { cont ->
-            translator.translate(text)
-                .addOnSuccessListener { translated ->
-                    if (cont.isActive) cont.resume(translated)
-                }
-                .addOnFailureListener { e ->
-                    Log.e(TAG, "Translation failed: ${e.message}")
-                    if (cont.isActive) cont.resume(text)
-                }
+        return kotlinx.coroutines.withTimeoutOrNull(8_000L) {
+            suspendCancellableCoroutine { cont ->
+                translator.translate(text)
+                    .addOnSuccessListener { translated ->
+                        if (cont.isActive) cont.resume(translated)
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e(TAG, "Translation failed: ${e.message}")
+                        if (cont.isActive) cont.resume(text)
+                    }
+            }
+        } ?: run {
+            Log.w(TAG, "ML Kit translation timed out; returning source text")
+            text
         }
     }
 

@@ -634,7 +634,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
 
         // 2. Global Original / Translation Toggle Button
         val toggleBtn = TextView(context).apply {
-            text = if (showOriginalText) "Original" else "Translate"
+            text = if (showOriginalText) context.getString(R.string.screen_ar_original) else context.getString(R.string.screen_ar_translate)
             textSize = 11f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             setTextColor(Color.WHITE)
@@ -654,7 +654,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             }
             setOnClickListener {
                 showOriginalText = !showOriginalText
-                text = if (showOriginalText) "Original" else "Translate"
+                text = if (showOriginalText) context.getString(R.string.screen_ar_original) else context.getString(R.string.screen_ar_translate)
                 background = GradientDrawable().apply {
                     shape = GradientDrawable.RECTANGLE
                     cornerRadius = 16 * density
@@ -674,7 +674,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         topBar.addView(spacer)
 
         val saveBtn = TextView(context).apply {
-            text = "Save"
+            text = context.getString(R.string.screen_ar_save)
             textSize = 12f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             setTextColor(Color.WHITE)
@@ -813,7 +813,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
     }
 
     private fun formatLangLabel(code: String): String = when (code.lowercase()) {
-        "auto" -> "Auto ▼"
+        "auto" -> context.getString(R.string.screen_ar_auto)
         "ru" -> "RU ▼"
         "en" -> "EN ▼"
         "zh" -> "ZH ▼"
@@ -987,16 +987,21 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         }
 
         // Action 1: Context-Aware Copy (copies active text: original or translated)
-        toolbar.addView(createMicroActionButton("Copy") {
+        toolbar.addView(createMicroActionButton(context.getString(R.string.screen_ar_copy)) {
             val textToCopy = if (item.isShowingOriginal) item.origin.rawText else item.origin.translatedText
             val clip = context.getSystemService(ClipboardManager::class.java)
             clip?.setPrimaryClip(ClipData.newPlainText("Parlex", textToCopy))
-            Toast.makeText(context, if (item.isShowingOriginal) "Copied original" else "Copied translation", Toast.LENGTH_SHORT).show()
+            Toast.makeText(
+                context,
+                if (item.isShowingOriginal) context.getString(R.string.screen_ar_copied_original)
+                else context.getString(R.string.screen_ar_copied_translation),
+                Toast.LENGTH_SHORT
+            ).show()
             dismissMicroToolbar()
         })
 
         // Action 2: Speak TTS
-        toolbar.addView(createMicroActionButton("Speak") {
+        toolbar.addView(createMicroActionButton(context.getString(R.string.screen_ar_speak)) {
             val textToSpeak = if (item.isShowingOriginal) item.origin.rawText else item.origin.translatedText
             tts?.speak(textToSpeak, TextToSpeech.QUEUE_FLUSH, null, "ar_speak_${System.currentTimeMillis()}")
         })
@@ -1004,7 +1009,11 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         // Action 3: Toggle Original / Translation for this specific card.
         // Hiding the box reveals the untouched frozen screenshot region, so no
         // second layout pass and no stale selectedRenderBox are needed.
-        val toggleLabel = if (item.isShowingOriginal) "Translate" else "Original"
+        val toggleLabel = if (item.isShowingOriginal) {
+            context.getString(R.string.screen_ar_translate)
+        } else {
+            context.getString(R.string.screen_ar_original)
+        }
         toolbar.addView(createMicroActionButton(toggleLabel) {
             item.isShowingOriginal = !item.isShowingOriginal
             invalidate()
@@ -1013,7 +1022,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         })
 
         // Action 4: Hide Individual Pill
-        toolbar.addView(createMicroActionButton("Hide") {
+        toolbar.addView(createMicroActionButton(context.getString(R.string.screen_ar_hide)) {
             renderBoxes.remove(item)
             selectedRenderBox = null
             invalidate()

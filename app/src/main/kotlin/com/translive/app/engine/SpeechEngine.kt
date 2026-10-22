@@ -297,7 +297,9 @@ class SpeechEngine @Inject constructor(
                     val read = runCatching { record.read(samples, 0, samples.size) }.getOrDefault(-1)
                     if (read <= 0) continue
 
-                    onPcmSamplesRead?.invoke(samples, read)
+                    onPcmSamplesRead?.let { callback ->
+                        runCatching { callback(samples, read) }
+                    }
 
                     val isSuppressed = isAecSuppressed.get()
                     val isInCooldown = SystemClock.elapsedRealtime() < aecMuteUntilTimestampMs.get()

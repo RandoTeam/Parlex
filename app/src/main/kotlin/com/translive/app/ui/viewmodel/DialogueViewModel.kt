@@ -386,6 +386,10 @@ class DialogueViewModel @Inject constructor(
      */
     private fun processDialogueTurn(result: SpeechResult) {
         if (!_uiState.value.isConversationActive) return
+        if (turnMutex.isLocked) {
+            Log.d(TAG, "Dropping STT result while previous turn is still processing")
+            return
+        }
 
         viewModelScope.launch(Dispatchers.IO) {
             turnMutex.withLock {
