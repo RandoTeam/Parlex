@@ -69,11 +69,11 @@ class FastBatchTranslatorTest {
 
     @Test
     fun translateBatch_delimiterCollapse_fallsBackToIndividualTranslation() = runBlocking {
-        var callCount = 0
+        val callCount = java.util.concurrent.atomic.AtomicInteger(0)
         val translator = FastBatchTranslator(
             translateFunc = { text ->
-                callCount++
-                if (callCount == 1) {
+                val call = callCount.incrementAndGet()
+                if (call == 1) {
                     // Simulate NMT corrupting/collapsing delimiter into single paragraph
                     "Главная Настройки Профиль"
                 } else {
@@ -92,7 +92,7 @@ class FastBatchTranslatorTest {
         val result = translator.translateBatch(inputs)
 
         // 1 initial batch call + 3 fallback calls = 4
-        assertEquals(4, callCount)
+        assertEquals(4, callCount.get())
         assertEquals(3, result.size)
         assertEquals("Главная", result[0])
         assertEquals("Настройки", result[1])
