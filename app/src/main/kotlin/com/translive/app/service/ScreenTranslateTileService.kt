@@ -1,6 +1,7 @@
 package com.translive.app.service
 
 import android.content.Intent
+import android.annotation.SuppressLint
 import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
@@ -43,6 +44,7 @@ class ScreenTranslateTileService : TileService() {
         super.onStopListening()
     }
 
+    @SuppressLint("StartActivityAndCollapseDeprecated")
     override fun onClick() {
         super.onClick()
         if (!Settings.canDrawOverlays(this)) {

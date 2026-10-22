@@ -1,6 +1,7 @@
 package com.translive.app.engine.camera
 
 import android.graphics.*
+import android.annotation.SuppressLint
 import android.os.Build
 import android.text.Layout
 import android.text.StaticLayout
@@ -137,6 +138,7 @@ object CameraTextInpainter {
         return bestLayout ?: createStaticLayout(text, paint, targetWidth, maxLines)
     }
 
+    @SuppressLint("WrongConstant")
     private fun createStaticLayout(
         text: String,
         paint: TextPaint,

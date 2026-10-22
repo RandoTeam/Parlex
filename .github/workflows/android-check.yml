@@ -53,6 +53,9 @@ jobs:
           chmod +x ./gradlew
           ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
+      - name: Lint
+        run: ./gradlew :app:lintDebug --no-daemon --stacktrace
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 

@@ -1,17 +1,21 @@
 package com.translive.app.engine
 
+import android.annotation.SuppressLint
 import android.icu.text.Transliterator
+import android.os.Build
 import com.translive.app.data.model.Language
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Offline Romanization/Transliteration engine powered by Android ICU Transliterator (API 24+).
+ * Offline Romanization/Transliteration engine powered by Android ICU Transliterator (API 29+).
  * Converts non-Latin scripts (Cyrillic, Han/Pinyin, Kana/Romaji, Hangul, Devanagari, Arabic, etc.)
  * into Latin phonetics for reading aloud or pronunciation assistance.
+ * On Android 8–9 the platform ICU API is unavailable and transliteration is skipped.
  */
 @Singleton
+@SuppressLint("NewApi") // android.icu Transliterator is API 29+; the guard below disables the feature on older devices.
 class TransliterationEngine @Inject constructor() {
 
     private val transliteratorCache = ConcurrentHashMap<String, Transliterator>()
@@ -45,6 +49,8 @@ class TransliterationEngine @Inject constructor() {
     }
 
     private fun getTransliterator(id: String): Transliterator? {
+        // android.icu.text.Transliterator was added in Android 10 (API 29).
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
         val cached = transliteratorCache[id]
         if (cached != null) return cached
 

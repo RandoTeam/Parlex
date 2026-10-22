@@ -87,6 +87,23 @@ class ScreenTranslationExporter @Inject constructor(
     }
 
     /**
+     * Saves an already-composited overlay bitmap. Use this instead of [export]
+     * when the caller has already rendered the exact layout the user sees.
+     */
+    suspend fun exportRendered(
+        bitmap: Bitmap,
+        sourceLangCode: String = "auto",
+        targetLangCode: String = "ru"
+    ): ScreenExportResult = withContext(Dispatchers.IO) {
+        try {
+            saveToStorage(bitmap, sourceLangCode, targetLangCode)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Rendered screen export failed", e)
+            ScreenExportResult.Failure(e, e.message ?: "Unknown export failure")
+        }
+    }
+
+    /**
      * Renders translated pill overlays on top of the source bitmap into a new mutable Bitmap.
      */
     fun renderComposite(

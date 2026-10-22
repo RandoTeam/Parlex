@@ -1119,6 +1119,8 @@ class ScreenTranslateOverlayService : Service() {
 
     private fun retranslateCurrentScreen(newSourceCode: String, newTargetCode: String) {
         settings.updateScreenLanguagePair(newSourceCode, newTargetCode)
+        activeSourceCode = newSourceCode
+        activeTargetCode = newTargetCode
         val candidates = lastCandidates.takeIf { it.isNotEmpty() }
             ?: lastArBoxes.map { CandidateBlock(it.rawText, it.boundingBox) }
         if (candidates.isEmpty()) return
@@ -1153,7 +1155,13 @@ class ScreenTranslateOverlayService : Service() {
         val boxes = lastArBoxes
         serviceScope.launch {
             val targetCode = activeTargetCode.ifBlank { settings.effectiveScreenTargetLanguage.code }
-            when (val result = screenTranslationExporter.export(bitmap, boxes, activeSourceCode, targetCode)) {
+            val rendered = arOverlayView?.renderComposite()
+            val result = if (rendered != null) {
+                screenTranslationExporter.exportRendered(rendered, activeSourceCode, targetCode)
+            } else {
+                screenTranslationExporter.export(bitmap, boxes, activeSourceCode, targetCode)
+            }
+            when (result) {
                 is com.translive.app.engine.export.ScreenExportResult.Success -> {
                     Toast.makeText(this@ScreenTranslateOverlayService, "Saved: ${result.relativePath}", Toast.LENGTH_SHORT).show()
                 }

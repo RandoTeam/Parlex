@@ -88,6 +88,17 @@ android {
         unitTests.isReturnDefaultValues = true
     }
 
+    lint {
+        // AGP 9.2 lint crashes in ClickableViewAccessibilityDetector while
+        // resolving the custom overlay view (Kotlin FIR bug). The view already
+        // calls performClick()/sets clickable in onTouchEvent.
+        disable += "ClickableViewAccessibility"
+        // zh-CN/zh-TW are still being completed; untranslated keys must fall back
+        // to the base resource instead of failing the build.
+        disable += "MissingTranslation"
+        abortOnError = true
+    }
+
     // libOpenCL.so is a link-time stub only. The manifest declares the public
     // Android system library, so packaging this stub would mask the Adreno
     // driver on the device.

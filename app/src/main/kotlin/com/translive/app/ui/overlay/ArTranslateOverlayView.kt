@@ -472,6 +472,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
         startRevealAnimation()
     }
 
+    @SuppressLint("WrongConstant")
     private fun createStaticLayout(text: CharSequence, paint: TextPaint, width: Int): StaticLayout {
         val safeWidth = max(1, width)
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -506,6 +507,7 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             return maxW
         }
 
+    @SuppressLint("WrongConstant")
     private fun createTruncatedLayout(
         text: CharSequence,
         paint: TextPaint,
@@ -840,6 +842,36 @@ class ArTranslateOverlayView @JvmOverloads constructor(
             invalidate()
             animate().alpha(1.0f).setDuration(120L).start()
         }.start()
+    }
+
+    /**
+     * Renders the exact in-place translation the user sees (without the top bar
+     * or selection chrome) so "Save" cannot drift from the overlay layout.
+     */
+    fun renderComposite(): Bitmap? {
+        val source = frozenBitmap?.takeIf { !it.isRecycled } ?: return null
+        val result = source.copy(Bitmap.Config.ARGB_8888, true) ?: return null
+        val canvas = Canvas(result)
+        val cornerRadius = 3f * density
+        for (item in renderBoxes) {
+            if (item.isShowingOriginal || showOriginalText) continue
+            val patch = item.backgroundPatch
+            if (patch != null && !patch.isRecycled) {
+                patchPaint.alpha = 255
+                canvas.drawBitmap(patch, null, item.eraseRect, patchPaint)
+            } else {
+                erasePaint.color = item.backgroundColor
+                erasePaint.alpha = 255
+                canvas.drawRoundRect(item.eraseRect, cornerRadius, cornerRadius, erasePaint)
+            }
+            item.staticLayout.paint.alpha = 255
+            canvas.save()
+            canvas.clipRect(item.eraseRect)
+            canvas.translate(item.textOffsetX, item.textOffsetY)
+            item.staticLayout.draw(canvas)
+            canvas.restore()
+        }
+        return result
     }
 
     // --- Drawing Engine ---
