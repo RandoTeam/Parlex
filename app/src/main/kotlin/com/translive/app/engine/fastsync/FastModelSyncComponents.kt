@@ -153,13 +153,20 @@ object FastModelArchiveValidator {
 
     fun unpackToDirectory(zipFile: File, destinationDir: File) {
         destinationDir.mkdirs()
+        val root = destinationDir.canonicalFile
         ZipFile(zipFile).use { zf ->
             val entries = zf.entries()
             while (entries.hasMoreElements()) {
                 val entry = entries.nextElement()
                 if (entry.name == ParlexFastManifest.MANIFEST_ENTRY_NAME) continue
+                if (entry.name.startsWith("/") || entry.name.contains("..")) {
+                    throw IllegalArgumentException("Unsafe archive entry: ${entry.name}")
+                }
 
-                val destPath = File(destinationDir, entry.name)
+                val destPath = File(destinationDir, entry.name).canonicalFile
+                require(destPath.path == root.path || destPath.path.startsWith(root.path + File.separator)) {
+                    "Archive entry escapes the destination: ${entry.name}"
+                }
                 if (entry.isDirectory) {
                     destPath.mkdirs()
                 } else {

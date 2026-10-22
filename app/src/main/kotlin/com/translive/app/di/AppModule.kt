@@ -28,6 +28,7 @@ object AppModule {
             "translive.db"
         )
             .addMigrations(*DatabaseMigrations.ALL)
+            .fallbackToDestructiveMigrationOnDowngrade()
             .build()
     }
 

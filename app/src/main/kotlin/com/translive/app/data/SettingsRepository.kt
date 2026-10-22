@@ -37,7 +37,6 @@ open class SettingsRepository @Inject constructor(
         private const val KEY_SCREEN_TARGET_LANGUAGE = "screen_target_language"
         private const val KEY_SCREEN_SYNC_TARGET_WITH_MAIN = "screen_sync_target_with_main"
         private const val KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR = "screen_a11y_shortcut_behavior"
-        private const val KEY_SCREEN_VOLUME_CHORD = "screen_volume_chord_enabled"
         private const val KEY_DIALOGUE_SOURCE_LANGUAGE = "dialogue_source_language"
         private const val KEY_DIALOGUE_TARGET_LANGUAGE = "dialogue_target_language"
         private const val KEY_DIALOGUE_AUTO_SPEAK = "dialogue_auto_speak"
@@ -247,15 +246,6 @@ open class SettingsRepository @Inject constructor(
     open var screenA11yShortcutBehavior: ScreenA11yShortcutBehavior
         get() = ScreenA11yShortcutBehavior.fromId(prefs?.getString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, null))
         set(value) = prefs?.edit()?.putString(KEY_SCREEN_A11Y_SHORTCUT_BEHAVIOR, value.id)?.apply() ?: Unit
-
-    /**
-     * Optional direct VolumeUp+VolumeDown chord via accessibility key filtering.
-     * The system accessibility shortcut remains available and is the recommended
-     * path on OEMs that do not deliver filtered key events.
-     */
-    open var screenVolumeChordEnabled: Boolean
-        get() = prefs?.getBoolean(KEY_SCREEN_VOLUME_CHORD, true) ?: true
-        set(value) = prefs?.edit()?.putBoolean(KEY_SCREEN_VOLUME_CHORD, value)?.apply() ?: Unit
 
     open var ocrMode: OcrMode
         get() = OcrMode.fromString(prefs?.getString(KEY_OCR_MODE, null))

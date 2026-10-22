@@ -301,6 +301,7 @@
     <string name="settings_screen_trigger_last">Последний запуск: %1$s</string>
     <string name="settings_screen_trigger_last_never">ещё не запускался</string>
     <string name="settings_screen_trigger_test_unavailable">Сервис доступности не подключён</string>
+    <string name="settings_screen_trigger_test_success">Команда перевода отправлена</string>
     <string name="screen_ar_auto">Авто ▼</string>
     <string name="screen_ar_translate">Перевод</string>
     <string name="screen_ar_original">Оригинал</string>

@@ -141,12 +141,16 @@ class ScreenTranslateOverlayService : Service() {
             return START_NOT_STICKY
         }
 
-        ensureForeground()
-
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Int.MIN_VALUE) ?: Int.MIN_VALUE
         val resultData = intent?.parcelableIntent(EXTRA_RESULT_DATA)
+        val hasProjectionGrant = resultCode == Activity.RESULT_OK && resultData != null
 
-        if (resultCode == Activity.RESULT_OK && resultData != null) {
+        // Android 14+ requires a foreground service of type mediaProjection to
+        // be running *before* getMediaProjection(). Starting it as dataSync first
+        // and only then attaching the projection throws SecurityException.
+        ensureForeground(includeProjection = hasProjectionGrant)
+
+        if (hasProjectionGrant && resultData != null) {
             val manager = getSystemService(MediaProjectionManager::class.java)
             try {
                 val newProjection = manager?.getMediaProjection(resultCode, resultData)
@@ -162,6 +166,7 @@ class ScreenTranslateOverlayService : Service() {
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to initialize MediaProjection in service", e)
+                ensureForeground(includeProjection = false)
             }
         }
 
@@ -191,6 +196,7 @@ class ScreenTranslateOverlayService : Service() {
                             processAndShowArTranslation(bitmap = bitmap)
                         } else {
                             floatingBubbleView?.setState(FloatingBubbleView.BubbleState.ERROR)
+                            if (isOneShotSession && floatingBubbleView == null) stopSelf()
                         }
                     } catch (_: kotlinx.coroutines.CancellationException) {
                         // Cancelled by user.
@@ -236,8 +242,11 @@ class ScreenTranslateOverlayService : Service() {
         }
 
         if (intent?.action == ACTION_TRANSLATE_BITMAP) {
-            val bmp = pendingDirectBitmap
-            pendingDirectBitmap = null
+            val bmp: Bitmap?
+            synchronized(pendingLock) {
+                bmp = pendingDirectBitmap
+                pendingDirectBitmap = null
+            }
             if (bmp != null && acquireTranslationLock()) {
                 floatingBubbleView?.setState(FloatingBubbleView.BubbleState.TRANSLATING)
                 showLensScanEffect()
@@ -557,8 +566,13 @@ class ScreenTranslateOverlayService : Service() {
 
     private val watchdogRunnable = Runnable {
         if (translationMutex.isLocked) {
-            Log.w(TAG, "Watchdog triggered: Translation pipeline exceeded 10s timeout, forcing recovery")
-            recoverToIdle(getString(R.string.screen_overlay_timeout))
+            if (activeTranslationJob?.isActive != true) {
+                Log.w(TAG, "Watchdog: no active job but translation lock is held; releasing")
+                releaseTranslationLock()
+            } else {
+                Log.w(TAG, "Watchdog triggered: Translation pipeline exceeded 10s timeout, forcing recovery")
+                recoverToIdle(getString(R.string.screen_overlay_timeout))
+            }
         }
     }
 
@@ -629,8 +643,13 @@ class ScreenTranslateOverlayService : Service() {
 
         floatingBubbleView?.setState(FloatingBubbleView.BubbleState.SCANNING)
         setBubbleVisible(false)
-
-        val fastNodes = a11y.extractVisibleTextNodesFast()
+        val fastNodes = runCatching { a11y.extractVisibleTextNodesFast() }.getOrElse { error ->
+            Log.e(TAG, "Accessibility text extraction failed", error)
+            setBubbleVisible(true)
+            releaseTranslationLock()
+            floatingBubbleView?.setState(FloatingBubbleView.BubbleState.ERROR)
+            return
+        }
         a11y.captureSilentScreenshot(
             onSuccess = { bitmap ->
                 setBubbleVisible(true)
@@ -962,11 +981,13 @@ class ScreenTranslateOverlayService : Service() {
         for ((sourceCode, group) in toTranslate.groupBy { it.language.code }) {
             ensureActive()
             val sourceLanguage = Language.fromCode(sourceCode) ?: continue
-            val shielded = group.map { item ->
-                if (com.translive.app.engine.entity.BrandEntityShield.isExactEntity(item.block.rawText)) {
-                    item.block.rawText to emptyMap<String, String>()
+            val prefixes = group.map { com.translive.app.engine.TextPrefixProtector.split(it.block.rawText) }
+            val shielded = group.mapIndexed { index, item ->
+                val protected = prefixes[index]
+                if (com.translive.app.engine.entity.BrandEntityShield.isExactEntity(protected.cleanText)) {
+                    protected.cleanText to emptyMap<String, String>()
                 } else {
-                    com.translive.app.engine.entity.BrandEntityShield.shieldEntities(item.block.rawText)
+                    com.translive.app.engine.entity.BrandEntityShield.shieldEntities(protected.cleanText)
                 }
             }
             val texts = shielded.map { it.first }
@@ -975,7 +996,7 @@ class ScreenTranslateOverlayService : Service() {
                 isLlm && isLlmLoaded() -> texts.mapIndexed { index, text ->
                     ensureActive()
                     if (shielded[index].second.isEmpty() &&
-                        com.translive.app.engine.entity.BrandEntityShield.isExactEntity(group[index].block.rawText)
+                        com.translive.app.engine.entity.BrandEntityShield.isExactEntity(prefixes[index].cleanText)
                     ) {
                         text
                     } else {
@@ -995,7 +1016,7 @@ class ScreenTranslateOverlayService : Service() {
                         // Use the explicit pair instead of the global "current"
                         // translator so concurrent surfaces cannot flip it.
                         fastTranslateEngine.translateLinesFor(texts, sourceCode, targetLanguage.code)
-                    } else if (isLlmLoaded()) {
+                    } else if (isLlm && isLlmLoaded()) {
                         texts.map { text ->
                             ensureActive()
                             translateLlm(text, sourceLanguage, targetLanguage)
@@ -1012,7 +1033,11 @@ class ScreenTranslateOverlayService : Service() {
                     rawTranslation,
                     shielded[index].second
                 )
-                val finalized = com.translive.app.engine.NmtTechGlossaryPostProcessor.postProcess(unshielded)
+                val recombined = com.translive.app.engine.TextPrefixProtector.recombine(
+                    prefixes[index].prefix,
+                    unshielded
+                )
+                val finalized = com.translive.app.engine.NmtTechGlossaryPostProcessor.postProcess(recombined)
                 resultByBlock[item.block] = ArTranslatedBox(
                     rawText = item.block.rawText,
                     translatedText = finalized,
@@ -1135,7 +1160,9 @@ class ScreenTranslateOverlayService : Service() {
                     candidates = candidates,
                     requestedSource = sourceLang,
                     targetLanguage = targetLang,
-                    isLlm = isLlm
+                    isLlm = isLlm,
+                    screenLanguage = sourceLang
+                        ?: Language.fromCode(lastArBoxes.firstOrNull()?.sourceLangCode ?: "")
                 )
 
                 lastArBoxes = arBoxes
@@ -1155,11 +1182,17 @@ class ScreenTranslateOverlayService : Service() {
         val boxes = lastArBoxes
         serviceScope.launch {
             val targetCode = activeTargetCode.ifBlank { settings.effectiveScreenTargetLanguage.code }
-            val rendered = arOverlayView?.renderComposite()
-            val result = if (rendered != null) {
-                screenTranslationExporter.exportRendered(rendered, activeSourceCode, targetCode)
-            } else {
-                screenTranslationExporter.export(bitmap, boxes, activeSourceCode, targetCode)
+            val rendered = withContext(Dispatchers.Default) { arOverlayView?.renderComposite() }
+            val result = try {
+                if (rendered != null) {
+                    screenTranslationExporter.exportRendered(rendered, activeSourceCode, targetCode)
+                } else {
+                    screenTranslationExporter.export(bitmap, boxes, activeSourceCode, targetCode)
+                }
+            } finally {
+                if (rendered != null && rendered !== bitmap) {
+                    runCatching { rendered.recycle() }
+                }
             }
             when (result) {
                 is com.translive.app.engine.export.ScreenExportResult.Success -> {
@@ -1214,6 +1247,8 @@ class ScreenTranslateOverlayService : Service() {
     }
 
     private fun dismissArOverlay() {
+        retranslateJob?.cancel()
+        retranslateJob = null
         val overlay = arOverlayView ?: return
         arOverlayView = null
         overlay.dismissOverlay(immediate = true)
@@ -1231,7 +1266,7 @@ class ScreenTranslateOverlayService : Service() {
         startActivity(intent)
     }
 
-    private fun ensureForeground() {
+    private fun ensureForeground(includeProjection: Boolean = captureController.isAttached) {
         val manager = getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -1256,7 +1291,7 @@ class ScreenTranslateOverlayService : Service() {
             .setContentIntent(pendingIntent)
             .build()
 
-        val fgsType = if (captureController.isAttached) {
+        val fgsType = if (includeProjection) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
         } else {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
@@ -1324,6 +1359,7 @@ class ScreenTranslateOverlayService : Service() {
                 // Ignore the window event caused by showing the overlay itself.
                 if (android.os.SystemClock.elapsedRealtime() - service.overlayShownAtMs < 500L) return@post
                 Log.i(TAG, "Window changed under AR overlay; dismissing stale translation")
+                service.cancelActiveTranslation()
                 service.dismissArOverlay()
                 service.floatingBubbleView?.setState(FloatingBubbleView.BubbleState.IDLE)
             }
@@ -1332,8 +1368,18 @@ class ScreenTranslateOverlayService : Service() {
         private val _isServiceRunning = MutableStateFlow(false)
         val isServiceRunning: StateFlow<Boolean> = _isServiceRunning.asStateFlow()
 
+        private fun putPending(
+            nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>?,
+            bitmap: Bitmap?
+        ) {
+            synchronized(pendingLock) {
+                pendingDirectNodes = nodes
+                pendingDirectBitmap = bitmap
+            }
+        }
+
         fun translateScreenshot(context: Context, bitmap: Bitmap) {
-            pendingDirectBitmap = bitmap
+            putPending(null, bitmap)
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_BITMAP
                 putExtra(EXTRA_ONE_SHOT_MODE, false)
@@ -1342,7 +1388,7 @@ class ScreenTranslateOverlayService : Service() {
         }
 
         fun translateScreenshotOneShot(context: Context, bitmap: Bitmap) {
-            pendingDirectBitmap = bitmap
+            putPending(null, bitmap)
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_BITMAP
                 putExtra(EXTRA_ONE_SHOT_MODE, true)
@@ -1355,8 +1401,7 @@ class ScreenTranslateOverlayService : Service() {
             nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>,
             bitmap: Bitmap? = null
         ) {
-            pendingDirectNodes = nodes
-            pendingDirectBitmap = bitmap
+            putPending(nodes, bitmap)
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_NODES
                 putExtra(EXTRA_ONE_SHOT_MODE, false)
@@ -1369,8 +1414,7 @@ class ScreenTranslateOverlayService : Service() {
             nodes: List<com.translive.app.service.accessibility.AccessibilityTextNode>,
             bitmap: Bitmap? = null
         ) {
-            pendingDirectNodes = nodes
-            pendingDirectBitmap = bitmap
+            putPending(nodes, bitmap)
             val intent = Intent(context, ScreenTranslateOverlayService::class.java).apply {
                 action = ACTION_TRANSLATE_NODES
                 putExtra(EXTRA_ONE_SHOT_MODE, true)

@@ -75,7 +75,6 @@ fun SettingsScreen(
     val screenSourceLanguage by viewModel.screenSourceLanguage.collectAsState()
     val isScreenSourceAuto by viewModel.isScreenSourceAuto.collectAsState()
     val screenA11yShortcutBehavior by viewModel.screenA11yShortcutBehavior.collectAsState()
-    val screenVolumeChordEnabled by viewModel.screenVolumeChordEnabled.collectAsState()
     val ocrMode by viewModel.ocrMode.collectAsState()
     val lastScreenTrigger by com.translive.app.service.accessibility.ScreenAccessibilityService.lastTriggerSource.collectAsState()
     val a11yButtonAvailable by com.translive.app.service.accessibility.ScreenAccessibilityService.isAccessibilityButtonAvailable.collectAsState()
@@ -184,31 +183,6 @@ fun SettingsScreen(
 
                 HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            stringResource(R.string.settings_screen_volume_chord_title),
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            stringResource(R.string.settings_screen_volume_chord_desc),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Switch(
-                        checked = screenVolumeChordEnabled,
-                        onCheckedChange = { viewModel.setScreenVolumeChordEnabled(it) }
-                    )
-                }
-
-                HorizontalDivider(modifier = Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-
                 Text(
                     stringResource(R.string.settings_screen_ocr_mode_title),
                     style = MaterialTheme.typography.titleSmall
@@ -251,7 +225,7 @@ fun SettingsScreen(
                         val ok = viewModel.triggerScreenTranslationTest()
                         android.widget.Toast.makeText(
                             context,
-                            if (ok) R.string.settings_screen_trigger_test
+                            if (ok) R.string.settings_screen_trigger_test_success
                             else R.string.settings_screen_trigger_test_unavailable,
                             android.widget.Toast.LENGTH_SHORT
                         ).show()

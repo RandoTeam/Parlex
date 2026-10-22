@@ -9,6 +9,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
  * The database was previously opened with `fallbackToDestructiveMigration()`,
  * which silently erased history, dictionaries and dialogue recordings whenever
  * the schema changed. These migrations preserve user data on upgrade.
+ *
+ * Tables that gain NOT NULL columns are recreated instead of using
+ * `ALTER TABLE ... DEFAULT 0`. Room validates the exact column defaults, and a
+ * recreated table keeps the schema byte-for-byte equivalent to a fresh install.
  */
 object DatabaseMigrations {
 
@@ -16,8 +20,32 @@ object DatabaseMigrations {
     val MIGRATION_1_2 = object : Migration(1, 2) {
         override fun migrate(db: SupportSQLiteDatabase) {
             db.execSQL(
-                "ALTER TABLE `dialogue_messages` ADD COLUMN `isFavorite` INTEGER NOT NULL DEFAULT 0"
+                """
+                CREATE TABLE IF NOT EXISTS `dialogue_messages_new` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `sessionId` INTEGER NOT NULL,
+                    `speaker` TEXT NOT NULL,
+                    `originalText` TEXT NOT NULL,
+                    `translatedText` TEXT NOT NULL,
+                    `originalLanguage` TEXT NOT NULL,
+                    `translatedLanguage` TEXT NOT NULL,
+                    `timestamp` INTEGER NOT NULL,
+                    `isFavorite` INTEGER NOT NULL
+                )
+                """.trimIndent()
             )
+            db.execSQL(
+                """
+                INSERT INTO `dialogue_messages_new`
+                    (`id`, `sessionId`, `speaker`, `originalText`, `translatedText`,
+                     `originalLanguage`, `translatedLanguage`, `timestamp`, `isFavorite`)
+                SELECT `id`, `sessionId`, `speaker`, `originalText`, `translatedText`,
+                       `originalLanguage`, `translatedLanguage`, `timestamp`, 0
+                FROM `dialogue_messages`
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE `dialogue_messages`")
+            db.execSQL("ALTER TABLE `dialogue_messages_new` RENAME TO `dialogue_messages`")
         }
     }
 
@@ -36,8 +64,8 @@ object DatabaseMigrations {
                     `pronunciation` TEXT,
                     `definition` TEXT NOT NULL,
                     `examples` TEXT,
-                    `isFavorite` INTEGER NOT NULL DEFAULT 0,
-                    `isCustom` INTEGER NOT NULL DEFAULT 0,
+                    `isFavorite` INTEGER NOT NULL,
+                    `isCustom` INTEGER NOT NULL,
                     `createdAt` INTEGER NOT NULL
                 )
                 """.trimIndent()
@@ -80,20 +108,74 @@ object DatabaseMigrations {
     /** v4 -> v5: dialogue statistics, audio timeline and LLM summary. */
     val MIGRATION_4_5 = object : Migration(4, 5) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `durationMs` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `totalTurns` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `totalWords` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `totalCharacters` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `isRecorded` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `audioFilePath` TEXT")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `audioFormat` TEXT")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `summary` TEXT")
-            db.execSQL("ALTER TABLE `dialogue_sessions` ADD COLUMN `summaryTimestamp` INTEGER")
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `dialogue_sessions_new` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `languageA` TEXT NOT NULL,
+                    `languageB` TEXT NOT NULL,
+                    `title` TEXT NOT NULL,
+                    `createdAt` INTEGER NOT NULL,
+                    `updatedAt` INTEGER NOT NULL,
+                    `durationMs` INTEGER NOT NULL,
+                    `totalTurns` INTEGER NOT NULL,
+                    `totalWords` INTEGER NOT NULL,
+                    `totalCharacters` INTEGER NOT NULL,
+                    `isRecorded` INTEGER NOT NULL,
+                    `audioFilePath` TEXT,
+                    `audioFormat` TEXT,
+                    `summary` TEXT,
+                    `summaryTimestamp` INTEGER
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                INSERT INTO `dialogue_sessions_new`
+                    (`id`, `languageA`, `languageB`, `title`, `createdAt`, `updatedAt`,
+                     `durationMs`, `totalTurns`, `totalWords`, `totalCharacters`,
+                     `isRecorded`, `audioFilePath`, `audioFormat`, `summary`, `summaryTimestamp`)
+                SELECT `id`, `languageA`, `languageB`, `title`, `createdAt`, `updatedAt`,
+                       0, 0, 0, 0, 0, NULL, NULL, NULL, NULL
+                FROM `dialogue_sessions`
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE `dialogue_sessions`")
+            db.execSQL("ALTER TABLE `dialogue_sessions_new` RENAME TO `dialogue_sessions`")
 
-            db.execSQL("ALTER TABLE `dialogue_messages` ADD COLUMN `audioStartTimeMs` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_messages` ADD COLUMN `audioDurationMs` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_messages` ADD COLUMN `wordCount` INTEGER NOT NULL DEFAULT 0")
-            db.execSQL("ALTER TABLE `dialogue_messages` ADD COLUMN `characterCount` INTEGER NOT NULL DEFAULT 0")
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `dialogue_messages_new` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `sessionId` INTEGER NOT NULL,
+                    `speaker` TEXT NOT NULL,
+                    `originalText` TEXT NOT NULL,
+                    `translatedText` TEXT NOT NULL,
+                    `originalLanguage` TEXT NOT NULL,
+                    `translatedLanguage` TEXT NOT NULL,
+                    `timestamp` INTEGER NOT NULL,
+                    `isFavorite` INTEGER NOT NULL,
+                    `audioStartTimeMs` INTEGER NOT NULL,
+                    `audioDurationMs` INTEGER NOT NULL,
+                    `wordCount` INTEGER NOT NULL,
+                    `characterCount` INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                INSERT INTO `dialogue_messages_new`
+                    (`id`, `sessionId`, `speaker`, `originalText`, `translatedText`,
+                     `originalLanguage`, `translatedLanguage`, `timestamp`, `isFavorite`,
+                     `audioStartTimeMs`, `audioDurationMs`, `wordCount`, `characterCount`)
+                SELECT `id`, `sessionId`, `speaker`, `originalText`, `translatedText`,
+                       `originalLanguage`, `translatedLanguage`, `timestamp`, `isFavorite`,
+                       0, 0, 0, 0
+                FROM `dialogue_messages`
+                """.trimIndent()
+            )
+            db.execSQL("DROP TABLE `dialogue_messages`")
+            db.execSQL("ALTER TABLE `dialogue_messages_new` RENAME TO `dialogue_messages`")
         }
     }
 

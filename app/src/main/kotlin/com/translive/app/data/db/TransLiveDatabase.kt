@@ -133,7 +133,7 @@ interface DialogueDao {
         ExchangeRateEntity::class
     ],
     version = 5,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class TransLiveDatabase : RoomDatabase() {
     abstract fun translationDao(): TranslationDao

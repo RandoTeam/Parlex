@@ -301,6 +301,7 @@
     <string name="settings_screen_trigger_last">Last trigger: %1$s</string>
     <string name="settings_screen_trigger_last_never">not triggered yet</string>
     <string name="settings_screen_trigger_test_unavailable">Accessibility service is not connected</string>
+    <string name="settings_screen_trigger_test_success">Translation trigger sent</string>
     <string name="screen_ar_auto">Auto ▼</string>
     <string name="screen_ar_translate">Translate</string>
     <string name="screen_ar_original">Original</string>

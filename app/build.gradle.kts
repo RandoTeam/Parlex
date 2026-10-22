@@ -107,6 +107,10 @@ android {
     }
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")

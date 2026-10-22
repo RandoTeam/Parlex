@@ -7,7 +7,6 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import android.view.Display
-import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -89,50 +88,6 @@ class ScreenAccessibilityService : AccessibilityService() {
         }
 
     private var lastTriggerAtMs = 0L
-    private var volumeUpHeld = false
-    private var volumeDownHeld = false
-    private var volumeChordConsumed = false
-
-    /**
-     * Optional direct VolumeUp+VolumeDown chord. It only works when the system
-     * delivers filtered key events to this service (canRequestFilterKeyEvents +
-     * flagRequestFilterKeyEvents); the accessibility shortcut remains the
-     * recommended path on OEMs that do not.
-     */
-    override fun onKeyEvent(event: KeyEvent?): Boolean {
-        if (event == null || !safeSettings.screenVolumeChordEnabled) {
-            volumeUpHeld = false
-            volumeDownHeld = false
-            volumeChordConsumed = false
-            return false
-        }
-        if (event.keyCode != KeyEvent.KEYCODE_VOLUME_UP &&
-            event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN
-        ) {
-            return false
-        }
-        if (event.repeatCount > 0) {
-            return volumeChordConsumed
-        }
-
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) volumeUpHeld = true
-            else volumeDownHeld = true
-
-            if (volumeUpHeld && volumeDownHeld) {
-                volumeChordConsumed = true
-                triggerTranslation("volume_chord")
-                return true
-            }
-        } else if (event.action == KeyEvent.ACTION_UP) {
-            val consumed = volumeChordConsumed
-            if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP) volumeUpHeld = false
-            else volumeDownHeld = false
-            if (!volumeUpHeld && !volumeDownHeld) volumeChordConsumed = false
-            return consumed
-        }
-        return false
-    }
 
     fun triggerTranslation(source: String) {
         val now = SystemClock.elapsedRealtime()
