@@ -6,14 +6,14 @@
 
 **Next-Generation On-Device Neural Translation & AI Intelligence for Android**
 
-*100% Local Neural Inference • Zero Network Calls • Zero Telemetry • Complete Privacy*
+*100% On-Device Neural Translation • No Telemetry • No User-Text Uploads • Optional Model/Rate Downloads*
 
-[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.8-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.8)
+[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.9-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.9)
 [![Android](https://img.shields.io/badge/Android-8.0%20%E2%80%94%2016%20(API%2026--36)-34A853?logo=android&logoColor=white&style=flat-square)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Arch-arm64--v8a-blue?style=flat-square)](https://developer.android.com/ndk/guides/abis)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
 [![Privacy](https://img.shields.io/badge/Privacy-100%25%20Offline%20%E2%80%A2%20Zero%20Telemetry-success?style=flat-square)](https://github.com/RandoTeam/Parlex)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.1-7F52FF?logo=kotlin&logoColor=white&style=flat-square)](https://kotlinlang.org)
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.3.21-7F52FF?logo=kotlin&logoColor=white&style=flat-square)](https://kotlinlang.org)
 [![C++](https://img.shields.io/badge/C%2B%2B-17-00599C?logo=c%2B%2B&logoColor=white&style=flat-square)](https://isocpp.org)
 [![llama.cpp](https://img.shields.io/badge/Engine-llama.cpp%20GGUF-orange?style=flat-square)](https://github.com/ggml-org/llama.cpp)
 [![LiteRT](https://img.shields.io/badge/Google-LiteRT--LM-FF6F00?style=flat-square)](https://ai.google.dev/edge/litert)
@@ -52,7 +52,7 @@
                                          │
 ┌────────────────────────────────────────▼─────────────────────────────────────────┐
 │                           Perception & Utility Engines                           │
-│  • Sherpa-ONNX (Whisper Tiny + Silero VAD)     • PP-OCRv6 Tiny (Alibaba MNN)     │
+│  • Sherpa-ONNX (Whisper Tiny + Silero VAD)     • PP-OCRv6 Tiny (optional MNN)  │
 │  • ICU 74 Transliteration Engine              • SQLite Room DB v5 Lexicon        │
 └──────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -73,7 +73,7 @@ To avoid false expectations, Parlex maintains an honest, transparent breakdown o
 | :--- | :--- | :---: | :--- |
 | **Text Translation** | `TranslationScreen.kt` | 🟢 **Stable** | **Production-ready.** Automatic source language detection, persistent bidirectional language selection, one-tap clipboard copy, TTS voice playback, and SQLite Room DB v5 history with favorites. |
 | **Model Management** | `ModelManagerScreen.kt` | 🟢 **Stable** | **Production-ready.** 5-step numbered offline downloads hierarchy, EMA-smoothed download metrics (speed, ETA, bytes), and `.parlex-fast` single-file catalog import/export. |
-| **Transliteration** | `IcuTransliterator.kt` | 🟢 **Stable** | **Production-ready.** Fully offline romanization/transliteration for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul. |
+| **Transliteration** | `TransliterationEngine.kt` | 🟢 **Stable** | **Production-ready on Android 10+.** Fully offline romanization/transliteration for Cyrillic, CJK (Pinyin/Romaji), Arabic, Devanagari, Thai, and Hangul via ICU4J. |
 | **Offline Lexicon** | `TransLiveDatabase.kt` | 🟢 **Stable** | **Production-ready.** Fast grammatical dictionary lookups and offline TSV lexicon import. |
 | **Currency Converter** | `ExchangeRateRepository.kt` | 🟢 **Stable** | **Production-ready.** Real-time on-screen currency regex detection (`$`, `€`, `₫`, `₽`) with baseline offline conversion. |
 | **Voice Dialogue** | `DialogueScreen.kt` | 🟡 **Beta** | **Recovery pass applied.** TTS has a hard timeout and per-utterance callbacks; ASR decoding is decoupled from the microphone read loop; AEC/NS and audio focus are enabled when available; turn audio timing is measured instead of hardcoded. Still needs on-device acoustic tuning and streaming partials. |
@@ -82,7 +82,7 @@ To avoid false expectations, Parlex maintains an honest, transparent breakdown o
 | **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟠 **Beta (Recovery)** | **Major layout/session fixes.** Translations are fitted inside the original block instead of being pushed over neighbouring UI; erase masks no longer move with text; mixed-language blocks use per-language pairs; rotation/window changes dismiss stale overlays; accessibility-shortcut diagnostics + test trigger in Settings. Needs real-device visual acceptance. |
 | **LiteRT-LM Engine** | `LiteRtTranslationEngine.kt` | 🔴 **Experimental** | Google LiteRT-LM GPU runtime for Gemma 4 models (E2B / E4B). |
 | **Multimodal Vision LLMs** | `VisionLlmComponents.kt` | 🔵 **Planned** | Catalog only; not wired into the app. Do not treat as a shipped feature until a phase in the recovery plan is complete. |
-| **AngelSlim Dequant** | `ggml-angelslim.c` (R&D) | 🔴 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim proprietary 1.25-bit (~440 MB) and 2-bit (~573 MB) weights. |
+| **AngelSlim Dequant** | R&D (planned kernels) | 🔴 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim 1.25-bit/2-bit weights; not shipped in beta.8. |
 | **Snapdragon NPU Offload**| Qualcomm QNN / LiteRT NPU | 🔵 **Roadmap** | Direct neural offload to Qualcomm Hexagon Tensor Accelerator (LiteRT backend exists; device verification still pending). |
 
 ---
@@ -135,8 +135,8 @@ Specialized translation models derived from Google's Gemma architecture, optimiz
 
 | Engine / Model | Primary Task | Language Support | Runtime | Model Size | Est. RAM | License |
 | :--- | :--- | :---: | :--- | :---: | :---: | :--- |
-| **PP-OCRv6 Tiny** | On-Device Text OCR | Multilingual | Alibaba MNN Framework | ~12 MB | ~40 MB | Apache 2.0 |
-| **Tesseract OCR** | Document OCR Fallback | 100+ Scripts | Tesseract4Android Native | ~15–30 MB | ~50 MB | Apache 2.0 |
+| **PP-OCRv6 Tiny** | On-Device Text OCR | Multilingual | Alibaba MNN Framework (optional native build) | ~12 MB | ~40 MB | Apache 2.0 |
+| **Tesseract OCR** | Document OCR Fallback | 14 bundled scripts | Tesseract4Android Native | ~15–30 MB | ~50 MB | Apache 2.0 |
 | **MiniCPM-V 4.6** | Multimodal Layout Analysis | Multilingual | GGUF Vision (Experimental) | ~1.3 GB | ~2.2 GB | Apache 2.0 |
 
 ### 5. 1-Click Offline Travel Packs (Step 5)
@@ -222,7 +222,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 .\gradlew.bat assembleRelease --no-daemon
 ```
 
-### Verification & Signatures (v1.5.1-beta.8)
+### Verification & Signatures (v1.5.1-beta.9)
 ```powershell
 # Verify APK Signature Scheme v2
 & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
@@ -232,9 +232,9 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 - **Package**: `com.translive.app`
-- **Version**: `1.5.1-beta.8` (`versionCode: 15108`)
+- **Version**: `1.5.1-beta.9` (`versionCode: 15109`)
 - **Target SDK**: `36` • **Min SDK**: `26`
-- **Official APK SHA-256**: `11cfe0a39c856f463ce26a3c12c856cd831669bd8f45f7490b80acebeb49d3bf`
+- **Official APK SHA-256**: `640ad42f1b91160a6870a859f26ef830eded60d78c86f0d4344ee594963cfee6`
 
 ---
 

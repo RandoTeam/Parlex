@@ -24,9 +24,9 @@ processed locally whenever the selected feature is available offline.
 
 - Repository: `https://github.com/RandoTeam/Parlex.git`
 - Main branch: `main`
-- Latest public signed beta: `v1.5.1-beta.8`
+- Latest public signed beta: `v1.5.1-beta.9`
 - App package: `com.translive.app`
-- Current app version in Gradle: `1.5.1-beta.8`, `versionCode` 15108
+- Current app version in Gradle: `1.5.1-beta.9`, `versionCode` 15109
 - Supported ABI: `arm64-v8a`
 - Native translation runtime: `llama.cpp` through JNI
 - Stable model format: GGUF
@@ -38,12 +38,12 @@ Current release signing state:
   rebuild.
 - `v1.5.1-beta.5` was signed with the previous 2026 Parlex key; that key is no
   longer available on this build machine.
-- `v1.5.1-beta.8` is signed with a new 2026 Parlex release key:
+- The 2026 Parlex release key was introduced with beta.6 and is reused by
+  beta.7, beta.8 and beta.9:
   `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
   (certificate SHA-256 `FF:D6:14:86:FD:4C:D7:68:B3:0A:AD:02:76:CE:B4:1D:2C:6B:1C:B9:D9:2F:E6:AB:23:F5:50:B8:EF:37:20:0A`).
-- Users with `v1.5.1-beta.5` or older APKs must uninstall the old app before
-  installing beta.6. Android will reject the update because the signing key
-  changed.
+- Users with `v1.5.1-beta.5` or older APKs must uninstall before installing
+  beta.6 or newer. Beta.6 through beta.9 can update in place.
 - The new keystore and `keystore.properties` are stored outside the repository.
   Back them up before the next release.
 - Do not use debug APKs as releases.
@@ -99,10 +99,10 @@ Required local tools:
 
 - JDK 21 for CI parity.
 - Android SDK platform 36.
-- Android build tools 37.0.0.
+- Android build tools 36.0.0.
 - Android NDK `27.3.13750724`.
 - CMake `3.22.1`.
-- Gradle wrapper `8.11.1`.
+- Gradle wrapper `9.4.1`.
 
 ## Local Validation
 
@@ -173,7 +173,7 @@ Release checklist:
 10. Release notes must describe user-facing functionality and device checks; keep
     the internal command log in `docs/`.
 
-Recommended next beta version: `v1.5.1-beta.9` after beta.8.
+Recommended next beta version: `v1.5.1-beta.10` after beta.9.
 
 ## Key Files
 

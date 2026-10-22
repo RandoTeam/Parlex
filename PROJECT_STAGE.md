@@ -13,17 +13,17 @@ Snapshot date: 2026-10-22
 
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
-- Last public release commit: `bc7294a`
+- Last public release commit: `02cc97f`
 - Recovery work HEAD at audit time: `fe7d4b4`
-- Latest public signed prerelease: `v1.5.1-beta.8`
-- Latest public APK asset: `Parlex-v1.5.1-beta.8-release.apk`
+- Latest public signed prerelease: `v1.5.1-beta.9`
+- Latest public APK asset: `Parlex-v1.5.1-beta.9-release.apk`
 - Public APK SHA-256:
-  `11cfe0a39c856f463ce26a3c12c856cd831669bd8f45f7490b80acebeb49d3bf`
+  `640ad42f1b91160a6870a859f26ef830eded60d78c86f0d4344ee594963cfee6`
 
 ## App Version
 
-- `versionCode`: 15108
-- `versionName`: `1.5.1-beta.8`
+- `versionCode`: 15109
+- `versionName`: `1.5.1-beta.9`
 - `compileSdk`: 36
 - `targetSdk`: 36
 - `minSdk`: 26
@@ -82,16 +82,16 @@ Snapshot date: 2026-10-22
 The original Parlex release key was lost after the workstation rebuild. The key
 used for `v1.5.1-beta.5` is also unavailable on the current build machine.
 
-`v1.5.1-beta.8` is signed with a newly generated 2026 Parlex release key:
+The 2026 Parlex release key was introduced with `v1.5.1-beta.6` and is reused by `v1.5.1-beta.7`, `v1.5.1-beta.8` and `v1.5.1-beta.9`:
 
 - Subject: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
 - Certificate SHA-256:
   `FF:D6:14:86:FD:4C:D7:68:B3:0A:AD:02:76:CE:B4:1D:2C:6B:1C:B9:D9:2F:E6:AB:23:F5:50:B8:EF:37:20:0A`
 - Alias: `parlex`
 
-Android treats this as another signing-key rotation without lineage. Users
-with `v1.5.1-beta.5` or older builds must uninstall the old app before
-installing beta.6; local data is lost unless exported first.
+Users with `v1.5.1-beta.5` or older builds must uninstall the old app before
+installing beta.6 or newer; local data is lost unless exported first. Users on
+beta.6, beta.7 or beta.8 can update in place.
 
 The matching keystore and `keystore.properties` are stored outside the
 repository. Back them up before the next release; do not publish a build signed

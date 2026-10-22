@@ -86,7 +86,6 @@ is subject to its own license, listed below.
 | LiteRT-LM Android | Apache 2.0 / Google AI Edge terms |
 | Tesseract4Android | Apache 2.0 |
 | Tesseract OCR | Apache 2.0 |
-| Lottie Compose | Apache 2.0 |
 
 All Android libraries are fetched via Gradle and are NOT included
 in this repository source code.
