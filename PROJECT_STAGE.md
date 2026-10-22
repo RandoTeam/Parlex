@@ -13,17 +13,17 @@ Snapshot date: 2026-10-22
 
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Branch: `main`
-- Last public release commit: `8840d02`
+- Last public release commit: `f82df69`
 - Recovery work HEAD at audit time: `fe7d4b4`
-- Latest public signed prerelease: `v1.5.1-beta.6`
-- Latest public APK asset: `Parlex-v1.5.1-beta.6-release.apk`
+- Latest public signed prerelease: `v1.5.1-beta.7`
+- Latest public APK asset: `Parlex-v1.5.1-beta.7-release.apk`
 - Public APK SHA-256:
-  `baf615c3f468368ea236cfb02318ee39db05df76df5c43deeaa969b1c22ec95a`
+  `9b2365e669df2f2fe05aac95118b81b2e9eb5c05460eb9417c34e958c5eb9cf3`
 
 ## App Version
 
-- `versionCode`: 15106
-- `versionName`: `1.5.1-beta.6`
+- `versionCode`: 15107
+- `versionName`: `1.5.1-beta.7`
 - `compileSdk`: 36
 - `targetSdk`: 36
 - `minSdk`: 26
@@ -82,7 +82,7 @@ Snapshot date: 2026-10-22
 The original Parlex release key was lost after the workstation rebuild. The key
 used for `v1.5.1-beta.5` is also unavailable on the current build machine.
 
-`v1.5.1-beta.6` is signed with a newly generated 2026 Parlex release key:
+`v1.5.1-beta.7` is signed with a newly generated 2026 Parlex release key:
 
 - Subject: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
 - Certificate SHA-256:
