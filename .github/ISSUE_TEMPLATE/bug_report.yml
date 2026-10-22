@@ -1,0 +1,71 @@
+name: Bug report
+description: Report a reproducible Parlex issue
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing Parlex. Do not attach private screenshots, audio,
+        keystores, tokens or model files. Use the Security tab for vulnerabilities.
+  - type: input
+    id: version
+    attributes:
+      label: Version / build
+      placeholder: v1.5.1-beta.9 (15109)
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device / Android
+      placeholder: OnePlus PJZ110, Android 16, 1080x2376
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Text translation
+        - Camera / gallery
+        - Screen translation / floating bubble
+        - Voice / TTS / STT
+        - Model manager / downloads
+        - History / dictionary
+        - UI / accessibility
+        - Build / CI
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Tap ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result / logs
+      description: Remove user text, file paths and personal data from logs.
+      placeholder: Paste relevant logcat lines, for example ScreenOverlayService or CameraVM.
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed personal text, screenshots, audio, tokens and keystore data.
+          required: true

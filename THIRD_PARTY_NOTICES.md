@@ -89,3 +89,27 @@ is subject to its own license, listed below.
 
 All Android libraries are fetched via Gradle and are NOT included
 in this repository source code.
+
+## Vendored binary exception
+
+`app/libs/sherpa-onnx-1.13.4.aar` is intentionally vendored because it is not
+published in a checksum-locked Maven repository used by this project. It is
+Sherpa-ONNX (Apache 2.0). Record its version and SHA-256 before replacing it.
+
+`app/src/main/assets/tessdata/*.traineddata` contains Tesseract language data
+(Apache 2.0). The bundled set is limited; additional scripts require the user to
+provide matching traineddata.
+
+## Optional MNN OCR build
+
+The PP-OCR/MNN bridge is compiled only when an MNN checkout is restored by
+`scripts/setup-native.ps1 -WithMnn`. MNN is Apache 2.0. A normal release without
+that checkout contains only the capability stub; do not advertise PP-OCR as
+active in that build.
+
+## License scope
+
+The MIT license in `LICENSE` applies to the application source code only. Model
+weights, model outputs, upstream engines, fonts, trademarks and traineddata are
+covered by their own terms. See `docs/LEGAL.md`.
+

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/RandoTeam/Parlex/security/advisories
+    about: Report secrets or vulnerabilities privately.
+  - name: Releases and beta APK
+    url: https://github.com/RandoTeam/Parlex/releases
+    about: Download the latest signed beta.
+  - name: Privacy policy
+    url: https://github.com/RandoTeam/Parlex/blob/main/PRIVACY.md
+    about: How local processing and network access work.

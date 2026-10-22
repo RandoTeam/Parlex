@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest a focused improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Camera / gallery
+        - Screen translation
+        - Voice / dialogue
+        - Translation quality
+        - UI / motion / accessibility
+        - Models / storage
+        - Build / release
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Offline-only, API level, memory, model size, licensing, etc.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require uploading user text/audio to a server.
+          required: true

@@ -8,7 +8,8 @@
 
 *100% On-Device Neural Translation • No Telemetry • No User-Text Uploads • Optional Model/Rate Downloads*
 
-[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.9-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.9)
+[![CI](https://github.com/RandoTeam/Parlex/actions/workflows/android-check.yml/badge.svg?branch=main)](https://github.com/RandoTeam/Parlex/actions/workflows/android-check.yml)
+[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.10-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.10)
 [![Android](https://img.shields.io/badge/Android-8.0%20%E2%80%94%2016%20(API%2026--36)-34A853?logo=android&logoColor=white&style=flat-square)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Arch-arm64--v8a-blue?style=flat-square)](https://developer.android.com/ndk/guides/abis)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
@@ -18,7 +19,7 @@
 [![llama.cpp](https://img.shields.io/badge/Engine-llama.cpp%20GGUF-orange?style=flat-square)](https://github.com/ggml-org/llama.cpp)
 [![LiteRT](https://img.shields.io/badge/Google-LiteRT--LM-FF6F00?style=flat-square)](https://ai.google.dev/edge/litert)
 
-[Overview](#overview--philosophy) • [Feature Status Matrix](#feature-status-matrix) • [Translation Engines & Models](#translation-engines--model-catalog) • [Snapdragon NPU Roadmap](#hardware-acceleration--snapdragon-npu-roadmap) • [Languages](#supported-languages--lexicon) • [Build & Verification](#build-requirements--verification) • [Support the Author](#support-the-solo-developer)
+[Overview](#overview--philosophy) • [Feature Status Matrix](#feature-status-matrix) • [Translation Engines & Models](#translation-engines--model-catalog) • [Snapdragon NPU Roadmap](#hardware-acceleration--snapdragon-npu-roadmap) • [Languages](#supported-languages--lexicon) • [Build & Verification](#build-requirements--verification) • [Privacy](PRIVACY.md) • [Security](SECURITY.md) • [Legal](docs/LEGAL.md) • [Support the Author](#support-the-solo-developer)
 
 </div>
 
@@ -222,7 +223,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 .\gradlew.bat assembleRelease --no-daemon
 ```
 
-### Verification & Signatures (v1.5.1-beta.9)
+### Verification & Signatures (v1.5.1-beta.10)
 ```powershell
 # Verify APK Signature Scheme v2
 & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
@@ -232,9 +233,9 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 - **Package**: `com.translive.app`
-- **Version**: `1.5.1-beta.9` (`versionCode: 15109`)
+- **Version**: `1.5.1-beta.10` (`versionCode: 15110`)
 - **Target SDK**: `36` • **Min SDK**: `26`
-- **Official APK SHA-256**: `640ad42f1b91160a6870a859f26ef830eded60d78c86f0d4344ee594963cfee6`
+- **Official APK SHA-256**: `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
 
 ---
 
@@ -245,15 +246,6 @@ Parlex is created, developed, and maintained by a single engineer who believes i
 Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling for Snapdragon devices, is researched and written with care. If Parlex saves your time, assists your travels, or inspires your projects, your sponsorship directly funds physical test devices, high-end mobile hardware for NPU research, and continuous updates.
 
 ### 💖 Donation & Sponsorship Channels
-
-#### 🪙 Worldwide Support (Direct Cryptocurrency)
-*Decentralized, zero tracking, works globally.*
-
-| Asset | Network | Address |
-| :--- | :--- | :--- |
-| **USDT** | TRC-20 | `TY1j2N8x4K7b9vL3mP5qR8sW2tU4xZ6y8A` |
-| **TON** | TON Network | `EQB_parlex_support_developer_channel` |
-| **Bitcoin (BTC)** | Native SegWit | `bc1qparlexsolodeveloperhardwarefund` |
 
 #### 💳 Direct Banking & Regional Transfers
 - **T-Bank Money Collection** *(Russia & CIS / SBP & Cards)*: [www.tbank.ru/cf/9YuuZydrQlI](https://www.tbank.ru/cf/9YuuZydrQlI)  
@@ -266,4 +258,6 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 ## License & Attribution
 
 - **Application Code**: Licensed under the [MIT License](LICENSE).
-- **Third-Party Libraries & Models**: Each runtime and model family is governed by its respective license. Review [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for complete details.
+- **Third-Party Libraries & Models**: Each runtime and model family is governed by its respective license. Review [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [docs/LEGAL.md](docs/LEGAL.md) for complete details.
+- **Privacy**: [PRIVACY.md](PRIVACY.md).
+- **Security reports**: [SECURITY.md](SECURITY.md) — please use the private Security tab, not a public issue.
