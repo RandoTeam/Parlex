@@ -1,5 +1,11 @@
 # Parlex — независимая проверка recovery-прохода
 
+> **Post-release note (2026-10-22):** the repository was made public after this
+> snapshot. GitHub Actions run
+> `https://github.com/RandoTeam/Parlex/actions/runs/39817933416` is green
+> (unit tests, lint, debug APK, native build). The billing limitation mentioned
+> below was specific to the private repository and is now historical.
+
 | | |
 |---|---|
 | Дата | 2026-10-22 |
