@@ -18,6 +18,7 @@
 
 Recovery commits: `2101c79..fe7d4b4` (main). Validation: `:app:testDebugUnitTest`
 — **470/470**, `:app:lintDebug` — **BUILD SUCCESSFUL**, `:app:assembleDebug` — OK.
+Независимая проверка ролей: `docs/VERIFICATION_2026-10-22.md`.
 
 - [x] Официальный `gradlew.bat` с поддержкой `JAVA_HOME`.
 - [x] `scripts/setup-native.ps1/.sh`: OpenCL submodule, link-stub, pinned llama.cpp.
@@ -28,7 +29,7 @@ Recovery commits: `2101c79..fe7d4b4` (main). Validation: `:app:testDebugUnitTest
 - [x] Экранный layout: переводы вписываются в исходный блок, без сдвига поверх соседей; line-маски больше не двигаются; clip.
 - [x] Смешанные языки: группы по source language, отдельная пара на группу; `TranslatorPool` вместо одного глобального переводчика.
 - [x] Сканер/пузырь скрываются перед screenshot; rotation/window change закрывают stale overlay; `ACTION_SHOW_TRANSLATION` обрабатывается.
-- [x] Volume chord через `onKeyEvent` (opt-in) + диагностика/тест в Settings; системный accessibility shortcut сохранён.
+- [x] Диагностика accessibility shortcut + тест в Settings; системный shortcut сохранён; прямой `onKeyEvent`/key filtering удалён после security-review (Play-риск, фильтрация всех клавиш).
 - [x] OCR mode вынесен в настройки; default — FAST_ONLY.
 - [x] Pixel/M3 Expressive-подобное появление: fade/scale + stagger + haptic.
 - [x] Camera: crop-aware live OCR, 1280×720 analysis, один OCR-проход на кадр, без `runBlocking`, LiteRT-aware Quality, per-region document painting.

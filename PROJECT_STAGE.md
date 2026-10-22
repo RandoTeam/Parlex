@@ -6,8 +6,8 @@ Snapshot date: 2026-10-21
 > [`docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md`](docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md)
 > supersedes the "COMPLETED" labels below where code and verification disagree.
 > The first stabilization pass covers CI/native reproducibility, screen layout
-> fitting, volume chord diagnostics, camera crop/resolution, voice TTS timeout
-> and ASR decoupling. Device acceptance is still required.
+> fitting, accessibility-shortcut diagnostics, camera crop/resolution, voice TTS
+> timeout and ASR decoupling. Device acceptance is still required.
 
 ## Repository
 

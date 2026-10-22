@@ -78,8 +78,8 @@ To avoid false expectations, Parlex maintains an honest, transparent breakdown o
 | **Currency Converter** | `ExchangeRateRepository.kt` | 🟢 **Stable** | **Production-ready.** Real-time on-screen currency regex detection (`$`, `€`, `₫`, `₽`) with baseline offline conversion. |
 | **Voice Dialogue** | `DialogueScreen.kt` | 🟡 **Beta** | **Recovery pass applied.** TTS has a hard timeout and per-utterance callbacks; ASR decoding is decoupled from the microphone read loop; AEC/NS and audio focus are enabled when available; turn audio timing is measured instead of hardcoded. Still needs on-device acoustic tuning and streaming partials. |
 | **Floating HUD** | `MiniOverlayHudView.kt` | 🟡 **Beta** | **Functional.** Docked edge controls with Fast NMT vs Smart LLM toggle, quick language carousel, and one-tap screenshot export to `Pictures/Parlex/`. |
-| **Camera & Photo Translation** | `CameraScreen.kt` | 🟠 **Alpha (Partial)** | **Recovery pass applied.** Live OCR is crop-aware and uses a 1280×720 analysis stream; auto mode probes the script once per second instead of three passes per frame; capture painting no longer erases a whole document page. Still lacks on-device quality validation and paragraph reflow for every layout. |
-| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟠 **Beta (Recovery)** | **Major layout/session fixes.** Translations are fitted inside the original block instead of being pushed over neighbouring UI; erase masks no longer move with text; mixed-language blocks use per-language pairs; rotation/window changes dismiss stale overlays; volume chord + diagnostics added. Needs real-device visual acceptance. |
+| **Camera & Photo Translation** | `CameraScreen.kt` | 🟠 **Alpha (Partial)** | **Recovery pass applied.** Live OCR is crop-aware and requests a 1280×720 analysis stream (closest-higher fallback); auto mode probes the script once per 30 analysed frames instead of three passes per frame; capture painting no longer erases a whole document page. Still lacks on-device quality validation and paragraph reflow for every layout. |
+| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟠 **Beta (Recovery)** | **Major layout/session fixes.** Translations are fitted inside the original block instead of being pushed over neighbouring UI; erase masks no longer move with text; mixed-language blocks use per-language pairs; rotation/window changes dismiss stale overlays; accessibility-shortcut diagnostics + test trigger in Settings. Needs real-device visual acceptance. |
 | **LiteRT-LM Engine** | `LiteRtTranslationEngine.kt` | 🔴 **Experimental** | Google LiteRT-LM GPU runtime for Gemma 4 models (E2B / E4B). |
 | **Multimodal Vision LLMs** | `VisionLlmComponents.kt` | 🔵 **Planned** | Catalog only; not wired into the app. Do not treat as a shipped feature until a phase in the recovery plan is complete. |
 | **AngelSlim Dequant** | `ggml-angelslim.c` (R&D) | 🔴 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim proprietary 1.25-bit (~440 MB) and 2-bit (~573 MB) weights. |
@@ -225,10 +225,10 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ### Verification & Signatures (v1.5.1-beta.3)
 ```powershell
 # Verify APK Signature Scheme v2
-& "$env:ANDROID_HOME\build-tools\37.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
+& "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
 
 # Verify Package Metadata
-& "$env:ANDROID_HOME\build-tools\37.0.0\aapt2.exe" dump badging app/build/outputs/apk/release/app-release.apk | Select-String "package:"
+& "$env:ANDROID_HOME\build-tools\36.0.0\aapt2.exe" dump badging app/build/outputs/apk/release/app-release.apk | Select-String "package:"
 ```
 
 - **Package**: `com.translive.app`
