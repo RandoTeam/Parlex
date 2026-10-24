@@ -247,6 +247,16 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 
 ### 💖 Donation & Sponsorship Channels
 
+#### 🪙 Worldwide Support (Direct Cryptocurrency)
+*Decentralized, zero tracking, works globally.*
+
+| Asset | Network | Address |
+| :--- | :--- | :--- |
+| **USDT** | TRC-20 | `TY1j2N8x4K7b9vL3mP5qR8sW2tU4xZ6y8A` |
+| **USDT / USDC** | ERC-20 (Ethereum) | `0xfca2fc261d4f23768a04ec49c3448278cdf17c2b` |
+| **Bitcoin (BTC)** | Native SegWit | `bc1qd5s9dwvyvlv320ynluk66zpd0p24knzxrjzwvr` |
+| **Ethereum (ETH)** | ERC-20 | `0xfca2fc261d4f23768a04ec49c3448278cdf17c2b` |
+
 #### 💳 Direct Banking & Regional Transfers
 - **T-Bank Money Collection** *(Russia & CIS / SBP & Cards)*: [www.tbank.ru/cf/9YuuZydrQlI](https://www.tbank.ru/cf/9YuuZydrQlI)  
   *Direct 1-click transfer via Fast Payments System (SBP) or Russian bank cards.*
