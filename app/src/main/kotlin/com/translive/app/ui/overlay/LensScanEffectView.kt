@@ -49,8 +49,8 @@ class LensScanEffectView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
-    var scanDurationMs: Long = 1200L
-    var revealDurationMs: Long = 260L
+    var scanDurationMs: Long = 900L
+    var revealDurationMs: Long = 220L
     var isContinuousLoop: Boolean = false
     var onBoxClickListener: ((ArScanBox) -> Unit)? = null
     var onScanCompletedListener: (() -> Unit)? = null

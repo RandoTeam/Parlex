@@ -784,6 +784,9 @@ class ScreenTranslateOverlayService : Service() {
         )
 
         val scanView = LensScanEffectView(this)
+        // Keep the scan alive while OCR/translation is still running; the view is
+        // dismissed as soon as the overlay is ready or an error is shown.
+        scanView.isContinuousLoop = true
         scanView.startScan()
 
         try {
@@ -817,9 +820,12 @@ class ScreenTranslateOverlayService : Service() {
                         emptyList()
                     }
 
+                    // Full OCR is the expensive path. It is opt-in via the
+                    // screen OCR setting, or automatic only when accessibility
+                    // produced no text at all. One-shot shortcut captures should
+                    // stay responsive by default.
                     val ocrNodes = if (bitmap != null &&
-                        (isOneShotSession ||
-                            directNodes.isNullOrEmpty() ||
+                        (directNodes.isNullOrEmpty() ||
                             settings.ocrMode == com.translive.app.data.OcrMode.FULL_SCAN)) {
                         val ocrResult = ocrEngine.recognize(bitmap, "auto")
                         val clusters = ArBoundingBoxClusterer.cluster(ocrResult)
