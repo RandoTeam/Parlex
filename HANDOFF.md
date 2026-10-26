@@ -64,7 +64,9 @@ Release:
 ```
 
 `keystore.properties` and the `.jks` are not in Git. Restore them separately;
-never commit them. Current signing state is in `PROJECT_STAGE.md`.
+never commit them. Current signing state is in `PROJECT_STAGE.md`. beta.11 uses
+the new organizational key; beta.10 and older use the old key and require
+uninstall.
 
 ## CI
 
@@ -75,11 +77,11 @@ manual checklist in `docs/RELEASES.md`.
 ## Current known state
 
 - beta.10 is public and CI-green; no device acceptance yet.
-- `main` is 4 commits ahead of beta.10 with an unreleased screen-performance
-  pass; beta.11 is not published.
+- beta.11 is built locally with the new organizational release key; it is
+  pending CI/tag/publish. beta.10 users must uninstall before installing it.
 - Camera live translation is wired; placement/OEM behavior needs a device.
 - Screen S10 is the active phase: session lock, Save teardown, window-change
-  dismissal and first-paint latency. See
+  dismissal, timing logs and finite scan. See
   `docs/S10_SCREEN_RELIABILITY_2026-10-26.md`.
 - Migration instrumentation tests and full TalkBack coverage are missing.
 - Model SHA-256 coverage is partial.

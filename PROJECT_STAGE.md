@@ -13,10 +13,12 @@ Snapshot date: 2026-10-26
 - Visibility: **public**
 - Branch: `main`
 - Latest public beta: `v1.5.1-beta.10`
+- Release candidate: `v1.5.1-beta.11` built locally (versionCode 15111), pending
+  tag/publish
 - Last public release commit: `bca3bf9` (tag `v1.5.1-beta.10` includes the
   follow-up docs commit `53488b3`)
-- Current `main` HEAD: `63695a8` (4 commits ahead of the beta.10 tag)
-- APK asset: `Parlex-v1.5.1-beta.10-release.apk`
+- Current `main` HEAD: `6a4c352` plus the beta.11 release commit
+- APK asset: `Parlex-v1.5.1-beta.10-release.apk` (beta.11 asset pending)
 - APK SHA-256:
   `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
 
@@ -38,12 +40,14 @@ Snapshot date: 2026-10-26
 - Device QA: **not performed for beta.10**.
 - License: MIT application code; third-party/model terms in
   `THIRD_PARTY_NOTICES.md` and `docs/LEGAL.md`.
-- Signing: beta.6–beta.10 use the same key. Its certificate subject still
-  contains personal data; a rotation decision is pending. Do not publish the
-  subject or fingerprint.
+- Signing: beta.11 uses a new generic organizational `RandoTeam` key.
+  beta.6–beta.10 use the old key whose certificate subject contained personal
+  data. beta.10 and older require uninstall before installing beta.11. Do not
+  publish the old subject or fingerprint.
 - Unreleased on `main`: S10 reliability fixes (session lock, Save snapshot,
   package-aware dismissal, timing logs, finite scan + pulse), screen performance
-  changes and documentation/privacy cleanup. No beta.11 APK exists yet.
+  changes and documentation/privacy cleanup. beta.11 APK is built and awaiting
+  publication.
 
 ## Product surfaces
 
@@ -71,8 +75,9 @@ Snapshot date: 2026-10-26
 
 Follow `ROADMAP.md` Horizon A. **S10 screen reliability is the active phase**;
 C10 camera acceptance follows S10. The working checklist is
-`docs/S10_SCREEN_RELIABILITY_2026-10-26.md`. Do not start Horizon B until
-Horizon A exit criteria are met.
+`docs/S10_SCREEN_RELIABILITY_2026-10-26.md`. beta.11 is built; publish it after
+CI, then collect device QA. Do not start Horizon B until Horizon A exit criteria
+are met.
 
 ## Canonical links
 

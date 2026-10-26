@@ -151,7 +151,7 @@ class ScreenTranslateOverlayService : Service() {
         // and only then attaching the projection throws SecurityException.
         ensureForeground(includeProjection = hasProjectionGrant || captureController.isAttached)
 
-        if (hasProjectionGrant && resultData != null) {
+        if (hasProjectionGrant) {
             val manager = getSystemService(MediaProjectionManager::class.java)
             try {
                 val newProjection = manager?.getMediaProjection(resultCode, resultData)

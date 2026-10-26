@@ -127,10 +127,12 @@ Out of scope for this pass:
 
 ### Step 6 — Validation and beta.11
 
-- [ ] `compileDebugKotlin`, unit tests, lint, debug APK.
+- [x] `compileDebugKotlin`, unit tests, lint, debug APK.
 - [ ] Device QA for screen scenarios.
-- [ ] Decide signing key (rotate vs keep) before beta.11.
-- [ ] Bump version, build signed APK, verify, publish notes.
+- [x] Decide signing key (rotate vs keep) before beta.11: **rotate** to a
+  generic organizational `RandoTeam` key.
+- [x] Bump version, build signed APK, verify.
+- [ ] Publish notes/tag/release.
 - [ ] Update `PROJECT_STAGE.md`, `HANDOFF.md`, `README.md` and release notes.
 
 ## Validation log
@@ -143,6 +145,8 @@ Out of scope for this pass:
 | 2026-10-26 | S10 lock/save/window fixes | compile green |
 | 2026-10-26 | Unit tests after fixes | 466 / 0 failures, 69 suites |
 | 2026-10-26 | Lint after fixes | 0 errors, 391 warnings |
+| 2026-10-26 | beta.11 release build | signed, version 15111, SHA-256 `2094143447e16273b1841131ef3764abf5a2743a1d5492c577e386330d671082` |
+| 2026-10-26 | beta.11 signing | new organizational key; beta.10 requires uninstall |
 
 ## Device QA pending
 
@@ -152,6 +156,9 @@ runs the checklist in `docs/DEVICE_QA.md` and returns `logcat`.
 
 ## Decisions
 
+- **Signing rotation:** beta.11 uses a new generic organizational
+  `RandoTeam` key. beta.10 and older use the old key and require uninstall.
+  Certificate subject/fingerprint are not published.
 - Keep `FLAG_NOT_FOCUSABLE` until a device proves back is broken; do not
   reintroduce focus theft without evidence.
 - Prefer package-change dismissal over a timer. IME and our own package must
