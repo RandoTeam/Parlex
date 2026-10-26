@@ -44,6 +44,7 @@ No device is currently attached to the build workstation; beta.10 is
 - [ ] Overlay fits source blocks; no translated line overlaps another.
 - [ ] Rotate/window change dismisses stale overlay.
 - [ ] Save produces the rendered overlay, not the raw screen.
+- [ ] FAST_ONLY uses accessibility only; Full Scan picks up raster/grey text.
 - [ ] Android 14+ projection consent and foreground notification.
 
 ### Voice

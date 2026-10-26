@@ -69,7 +69,7 @@ No all-caps labels. No fake-bold everywhere. Letter spacing 0 by default.
 |---|---|---|
 | Press scale | 90 ms down / 160 ms up | spring/overshoot |
 | Control reveal | 180 ms | decelerate |
-| Screen scan | 1.2 s | decelerate; skip when animators disabled |
+| Screen scan | 900 ms per sweep; repeat while processing | decelerate; skip when animators disabled |
 | Overlay block reveal | 240–360 ms, stagger ≤ 350 ms | decelerate |
 | State color | 220–260 ms | standard |
 
