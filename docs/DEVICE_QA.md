@@ -43,9 +43,17 @@ No device is currently attached to the build workstation; beta.10 is
 - [ ] Floating bubble translates, closes overlay, remains movable and reusable.
 - [ ] Overlay fits source blocks; no translated line overlaps another.
 - [ ] Rotate/window change dismisses stale overlay.
+- [ ] Switching to another app dismisses the overlay; opening the keyboard or an
+  in-app dialog does not dismiss it unexpectedly.
+- [ ] Hardware back and edge-swipe: record which one closes the overlay on this
+  OEM; the X button must always work.
 - [ ] Save produces the rendered overlay, not the raw screen.
-- [ ] FAST_ONLY uses accessibility only; Full Scan picks up raster/grey text.
+- [ ] Save immediately after opening and immediately before closing: no crash,
+  no untranslated file.
+- [ ] FAST_ONLY uses accessibility first; Full Scan picks up raster/grey text.
 - [ ] Android 14+ projection consent and foreground notification.
+- [ ] `screen_perf` log lines show trigger/capture/OCR/translate/first-frame
+  timings with no user text.
 
 ### Voice
 
@@ -58,6 +66,7 @@ No device is currently attached to the build workstation; beta.10 is
 
 - [ ] TalkBack can reach the floating bubble and overlay close/actions.
 - [ ] Reduced motion disables scan/reveal animations.
+- [ ] Scan/bubble never appear in the saved overlay export.
 - [ ] No key filtering; no unexpected network requests during translation.
 - [ ] Backup disabled; exported files are only in expected folders.
 
@@ -72,4 +81,4 @@ adb shell dumpsys package com.translive.app | grep -E "version|firstInstall"
 
 Remove user text, file paths, account names and personal images before sharing.
 Use tags `CameraVM`, `ScreenOverlayService`, `ScreenA11yService`,
-`ArTranslateOverlayView`, `SpeechEngine`, `SystemTtsEngine`.
+`ArTranslateOverlayView`, `ScreenPerf`, `SpeechEngine`, `SystemTtsEngine`.

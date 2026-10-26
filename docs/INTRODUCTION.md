@@ -26,8 +26,11 @@ Network access is for model/package downloads and optional currency rates.
 - `versionCode` 15110, `minSdk` 26, `targetSdk` 36, `arm64-v8a`
 - Public repository, MIT application code, CI green for unit tests, lint, debug
   APK and native build.
+- `main` is ahead of beta.10 with an unreleased screen-reliability pass; beta.11
+  is not published yet.
 - Device acceptance is still pending for the latest beta; see
-  `docs/DEVICE_QA.md`.
+  `docs/DEVICE_QA.md`. The active phase is S10, tracked in
+  `docs/S10_SCREEN_RELIABILITY_2026-10-26.md`.
 
 ## Design direction
 

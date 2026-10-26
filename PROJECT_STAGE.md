@@ -1,6 +1,6 @@
 # Project Stage Snapshot
 
-Snapshot date: 2026-10-22
+Snapshot date: 2026-10-26
 
 > Current-state document. Historical audits and old feature claims are in
 > `docs/AUDIT_AND_RECOVERY_PLAN_2026-10-21.md`,
@@ -13,7 +13,9 @@ Snapshot date: 2026-10-22
 - Visibility: **public**
 - Branch: `main`
 - Latest public beta: `v1.5.1-beta.10`
-- Last public release commit: `bca3bf9`
+- Last public release commit: `bca3bf9` (tag `v1.5.1-beta.10` includes the
+  follow-up docs commit `53488b3`)
+- Current `main` HEAD: `63695a8` (4 commits ahead of the beta.10 tag)
 - APK asset: `Parlex-v1.5.1-beta.10-release.apk`
 - APK SHA-256:
   `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
@@ -36,8 +38,11 @@ Snapshot date: 2026-10-22
 - Device QA: **not performed for beta.10**.
 - License: MIT application code; third-party/model terms in
   `THIRD_PARTY_NOTICES.md` and `docs/LEGAL.md`.
-- Signing: 2026 Parlex key introduced in beta.6; beta.6–beta.10 update in place.
-  beta.5-and-older require uninstall.
+- Signing: beta.6–beta.10 use the same key. Its certificate subject still
+  contains personal data; a rotation decision is pending. Do not publish the
+  subject or fingerprint.
+- Unreleased on `main`: screen performance changes (FAST_ONLY default, 900 ms
+  scan loop) and documentation/privacy cleanup. No beta.11 APK exists yet.
 
 ## Product surfaces
 
@@ -63,9 +68,10 @@ Snapshot date: 2026-10-22
 
 ## Next action
 
-Follow `ROADMAP.md` Horizon A: **C10 camera acceptance**, **S10 screen
-reliability**, **D10 migration tests**, **L10 legacy cleanup**, **A10
-accessibility**. Do not start Horizon B until Horizon A exit criteria are met.
+Follow `ROADMAP.md` Horizon A. **S10 screen reliability is the active phase**;
+C10 camera acceptance follows S10. The working checklist is
+`docs/S10_SCREEN_RELIABILITY_2026-10-26.md`. Do not start Horizon B until
+Horizon A exit criteria are met.
 
 ## Canonical links
 

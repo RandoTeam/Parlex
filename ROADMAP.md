@@ -4,8 +4,9 @@ This is the priority and phase-order source of truth. Historical completed
 phases are preserved in `docs/HISTORICAL_ROADMAP_2026.md`; they are not a promise
 that the current build has every feature.
 
-**Current baseline:** `v1.5.1-beta.10`, public repository, CI green, 460 unit
-tests, no device acceptance for beta.10.
+**Current baseline:** `v1.5.1-beta.10` public release; `main` is 4 commits ahead
+with an unreleased screen-performance pass. CI green, 460 unit tests, no device
+acceptance for beta.10.
 
 ## Rules
 
@@ -18,7 +19,27 @@ tests, no device acceptance for beta.10.
 
 ## Horizon A — Stabilize the public beta (now, 0-2 weeks)
 
-### C10. Camera acceptance and live-overlay correctness
+**Active phase: S10.** Camera acceptance (C10) starts only after S10 exit
+criteria are met, because S10 still has open P1 items. Working checklist:
+`docs/S10_SCREEN_RELIABILITY_2026-10-26.md`.
+
+### S10. Screen translation reliability — ACTIVE
+
+**Outcome:** repeated shortcut and floating-bubble usage are stable, Save is
+safe, and first paint is measurably faster.
+
+- [ ] 10 consecutive shortcut translations without a stale lock/no-op.
+- [ ] Hardware back or explicit close always works; no focus trap.
+- [ ] Save never crashes during overlay teardown.
+- [ ] Verify foreground-service type does not downgrade with projection attached.
+- [ ] Confirm scan/bubble are not captured into saved screenshots.
+- [ ] Dismiss on a real foreground package change, not on every window event.
+- [ ] FAST_ONLY and FULL_SCAN match the settings copy.
+- [ ] Record trigger → first frame timings in `logcat`.
+
+**Exit:** screen scenarios in `docs/DEVICE_QA.md` pass on at least one device.
+
+### C10. Camera acceptance and live-overlay correctness — NEXT
 
 **Outcome:** camera is predictable for a normal user, not just in unit tests.
 
@@ -30,18 +51,6 @@ tests, no device acceptance for beta.10.
 
 **Exit:** device QA for camera scenarios passes or each failure has an issue and
 an explicit workaround.
-
-### S10. Screen translation reliability
-
-**Outcome:** repeated shortcut and floating-bubble usage are stable.
-
-- [ ] 10 consecutive shortcut translations without a stale lock/no-op.
-- [ ] Hardware back or explicit close always works; no focus trap.
-- [ ] Save never crashes during overlay teardown.
-- [ ] Verify foreground-service type does not downgrade with projection attached.
-- [ ] Confirm scan/bubble are not captured into saved screenshots.
-
-**Exit:** screen scenarios in `docs/DEVICE_QA.md` pass on at least one device.
 
 ### D10. Migration and data integrity
 

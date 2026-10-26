@@ -34,6 +34,9 @@ An agent may act as one or more roles. State the role in the report.
   release notes; publish the APK SHA-256 instead.
 - Do not publish keys, `keystore.properties`, `.jks`, passwords or private
   contact data.
+- Public project donation channels are allowed only when they contain no
+  personal name, phone number, email address or home address. Prefer a project
+  link or a public wallet address.
 - Existing signed artifacts cannot be retroactively anonymized. If a key subject
   contains personal data, plan a signing-key rotation explicitly and document
   the uninstall requirement.

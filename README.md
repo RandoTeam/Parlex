@@ -80,7 +80,7 @@ To avoid false expectations, Parlex maintains an honest, transparent breakdown o
 | **Voice Dialogue** | `DialogueScreen.kt` | 🟡 **Beta** | **Recovery pass applied.** TTS has a hard timeout and per-utterance callbacks; ASR decoding is decoupled from the microphone read loop; AEC/NS and audio focus are enabled when available; turn audio timing is measured instead of hardcoded. Still needs on-device acoustic tuning and streaming partials. |
 | **Floating HUD** | `MiniOverlayHudView.kt` | 🟡 **Beta** | **Functional.** Docked edge controls with Fast NMT vs Smart LLM toggle, quick language carousel, and one-tap screenshot export to `Pictures/Parlex/`. |
 | **Camera & Photo Translation** | `CameraScreen.kt` | 🟠 **Alpha (Partial)** | **Recovery + redesign.** Live translation overlay restored; gallery imports auto-detect source; rapid picks are generation-guarded; zero-copy crop path; 0.6/1/3x zoom, orange shutter and compact glass controls. Device acceptance is still pending. |
-| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟠 **Beta (Recovery)** | **Major layout/session fixes.** Translations fit inside source blocks; erase masks stay anchored; mixed-language pairs; repeated shortcut/bubble lifecycle, rotation/window dismissal and rendered-overlay save. Hardware back/TalkBack/device UX remain to verify. |
+| **Screen Translation** | `ScreenTranslateOverlayService.kt` | 🟠 **Beta (Recovery)** | **S10 stabilization active.** Translations fit inside source blocks; erase masks stay anchored; mixed-language pairs; repeated shortcut/bubble lifecycle and rendered-overlay save. The current pass targets session locks, Save teardown, window-change dismissal and first-paint latency. Hardware back/TalkBack/device UX remain to verify. |
 | **LiteRT-LM Engine** | `LiteRtTranslationEngine.kt` | 🔴 **Experimental** | Google LiteRT-LM GPU runtime for Gemma 4 models (E2B / E4B). |
 | **Multimodal Vision LLMs** | `VisionLlmComponents.kt` | 🔵 **Planned** | Catalog only; not wired into the app. Do not treat as a shipped feature until a phase in the recovery plan is complete. |
 | **AngelSlim Dequant** | R&D (planned kernels) | 🔴 **Experimental** | Custom ARM NEON kernels for Tencent AngelSlim 1.25-bit/2-bit weights; not shipped in beta.8. |
@@ -236,6 +236,8 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 - **Version**: `1.5.1-beta.10` (`versionCode: 15110`)
 - **Target SDK**: `36` • **Min SDK**: `26`
 - **Official APK SHA-256**: `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
+- **`main` state**: beta.11 is not published yet; screen reliability work is
+  landing on `main` after beta.10.
 
 ---
 
@@ -260,8 +262,9 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 #### 💳 Direct Banking & Regional Transfers
 - **T-Bank Money Collection** *(Russia & CIS / SBP & Cards)*: [www.tbank.ru/cf/9YuuZydrQlI](https://www.tbank.ru/cf/9YuuZydrQlI)  
   *Direct 1-click transfer via Fast Payments System (SBP) or Russian bank cards.*
-- **Kaspi Bank** *(Kazakhstan & Central Asia)*: `+7 707 390-30-49`  
-  *Direct transfer via Kaspi Gold by phone number.*
+- **Kaspi Bank** *(Kazakhstan & Central Asia)*: not published as a public
+  contact. Use the T-Bank or cryptocurrency channels above. A personal phone
+  number is intentionally never published.
 
 ---
 

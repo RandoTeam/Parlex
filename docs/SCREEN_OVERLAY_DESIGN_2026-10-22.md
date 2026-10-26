@@ -56,8 +56,9 @@ and text that replaces the source text instead of decorating it.
   - a thin white leading line,
   - a wide, low-opacity beam,
   - a Pixel-blue perimeter halo.
-- Duration ~1.2 s with a decelerating reveal. It should read as "the screen is
-  being read", not as a loading screen.
+- Duration 900 ms per sweep; a finite number of sweeps is followed by a quiet
+  processing pulse while OCR/translation is still running. It should read as
+  "the screen is being read", not as a loading screen.
 - The effect is non-touchable and disappears before the translation overlay.
 
 ### In-place typography
@@ -82,8 +83,9 @@ and text that replaces the source text instead of decorating it.
 - Screen text is translated in one delimited batch per language group instead of
   many isolated calls. This improves context for short labels and reduces
   latency.
-- OCR is merged for one-shot captures even when accessibility nodes exist, so
-  raster/low-contrast text is not silently omitted.
+- FAST_ONLY uses the accessibility tree first. OCR is a fallback only when the
+  accessibility tree is empty; FULL_SCAN explicitly adds raster/low-contrast
+  text. This keeps one-shot shortcut captures responsive by default.
 - This does not turn ML Kit into a context-aware LLM; long-page quality still
   depends on the selected translation policy and model.
 
@@ -94,8 +96,9 @@ and text that replaces the source text instead of decorating it.
   a blurred sample.
 - Hiding the bubble during the overlay removes a quick dismiss affordance; the X
   button and edge-swipe remain, and the bubble returns immediately after close.
-- OCR on every one-shot capture adds latency. It is a deliberate quality trade-off
-  for completeness; FAST_ONLY remains available for the persistent-bubble path.
+- OCR on every one-shot capture adds latency. FAST_ONLY keeps the shortcut
+  responsive; FULL_SCAN is the deliberate quality/latency trade-off for
+  raster/low-contrast text.
 
 ## Next design work
 

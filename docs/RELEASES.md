@@ -15,8 +15,10 @@ user's explicit instruction.
 1. Start from a clean `main` synchronized with `origin/main`.
 2. Bump `versionCode` and `versionName`.
 3. Update version strings, README badge, PROJECT_STAGE and HANDOFF.
-4. Build `:app:assembleRelease` with the release keystore restored.
-5. Verify:
+4. Confirm public notes/docs contain no personal name, phone, email, certificate
+   subject or fingerprint. Publish the APK SHA-256 instead.
+5. Build `:app:assembleRelease` with the release keystore restored.
+6. Verify:
 
    ```powershell
    & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs `
@@ -30,9 +32,11 @@ user's explicit instruction.
    OpenCL stub.
 7. Copy the asset as `Parlex-v<versionName>-release.apk`.
 8. Commit code, then docs, push `main`.
-9. Create an annotated tag and a GitHub prerelease with `--notes-file`.
+9. Create an annotated tag with a project identity (not a personal name/email)
+   and a GitHub prerelease with `--notes-file`.
 10. Record size and SHA-256 in the release notes and `PROJECT_STAGE.md`.
-11. Let public CI complete; attach the run URL to the report.
+11. Let public CI complete; attach the run URL for the release commit/tag to the
+    report.
 
 ## Release notes format
 
@@ -42,6 +46,8 @@ user's explicit instruction.
 - **What to verify on a device** list.
 - Known limitations and signing rotation notes.
 - Never claim a device-only feature passed without evidence.
+- Never include a maintainer's personal name, phone, email, certificate subject
+  or fingerprint. Use the project identity and APK SHA-256.
 
 ## Failure handling
 
@@ -50,3 +56,6 @@ user's explicit instruction.
 - Publish a higher `versionCode` with a fix.
 - If a signing key is lost, document the rotation and required uninstall, back
   up the new key, and update `PROJECT_STAGE.md`/`HANDOFF.md`.
+- A certificate subject must be organizational and generic. If an existing key
+  contains a personal name, plan an explicit rotation; do not publish the
+  subject or fingerprint in the meantime.

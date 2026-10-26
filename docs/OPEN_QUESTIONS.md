@@ -8,7 +8,7 @@ answer becomes an ADR or roadmap phase.
 | Do we keep continuous Auto-Live screen translation? | Currently unreachable; retained pending decision | L10 cleanup |
 | Do we support Android 26-28 screen export? | Release exporter has a legacy path; verify and fix or document limitation | E12 |
 | Which model families can be redistributed? | None assumed; users download separately | any catalog change |
-| Should screen OCR always run in shortcut mode? | Current one-shot behavior favors completeness; measure latency | S10/C11 |
+| Should screen OCR always run in shortcut mode? | No. FAST_ONLY is accessibility-first and falls back to OCR only when the accessibility tree is empty; FULL_SCAN adds raster OCR explicitly. Measure both. | S10/C11 |
 | Do we return to full-page document reflow? | Current renderer uses regions; benchmark before reintroducing | C11 |
 | Is TalkBack virtual-node support a stable-release blocker? | Yes for screen/camera overlays | A10 |
 | Do we add Rust for any component? | No until a profiled isolated hot path exists | R12 |

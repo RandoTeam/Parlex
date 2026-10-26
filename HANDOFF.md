@@ -75,8 +75,12 @@ manual checklist in `docs/RELEASES.md`.
 ## Current known state
 
 - beta.10 is public and CI-green; no device acceptance yet.
+- `main` is 4 commits ahead of beta.10 with an unreleased screen-performance
+  pass; beta.11 is not published.
 - Camera live translation is wired; placement/OEM behavior needs a device.
-- Screen shortcut/bubble lifecycle has recent fixes; verify repeatedly.
+- Screen S10 is the active phase: session lock, Save teardown, window-change
+  dismissal and first-paint latency. See
+  `docs/S10_SCREEN_RELIABILITY_2026-10-26.md`.
 - Migration instrumentation tests and full TalkBack coverage are missing.
 - Model SHA-256 coverage is partial.
 - Legacy `LiveScreenTranslateService`/`ScreenCaptureService` paths are retained
