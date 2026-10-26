@@ -12,8 +12,8 @@ key's certificate subject contained personal data and is no longer used.
   in-place update because the signing certificate changed.
 - Uninstalling removes app-local history, settings and downloaded app data.
   Export anything you need first.
-- The old key is retained offline only for reference; it will not sign future
-  builds.
+- The old key is retained locally outside the repository for reference only; it
+  will not sign future builds.
 - Certificate subject and fingerprint are intentionally not published. Verify
   the APK with the SHA-256 below.
 
