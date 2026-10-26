@@ -37,9 +37,10 @@ An agent may act as one or more roles. State the role in the report.
 - Public project donation channels are allowed only when they contain no
   personal name, phone number, email address or home address. Prefer a project
   link or a public wallet address.
-- Existing signed artifacts cannot be retroactively anonymized. If a key subject
-  contains personal data, plan a signing-key rotation explicitly and document
-  the uninstall requirement.
+- Existing signed artifacts, commits and tags cannot be retroactively
+  anonymized. If a key subject, commit author or tagger contains personal data,
+  plan a signing-key rotation and use the project identity for future work; do
+  not publish the old subject/fingerprint in new notes.
 - Do not upload user text, screenshots, audio, camera frames or model files to a
   server or issue tracker.
 

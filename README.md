@@ -9,7 +9,7 @@
 *100% On-Device Neural Translation • No Telemetry • No User-Text Uploads • Optional Model/Rate Downloads*
 
 [![CI](https://github.com/RandoTeam/Parlex/actions/workflows/android-check.yml/badge.svg?branch=main)](https://github.com/RandoTeam/Parlex/actions/workflows/android-check.yml)
-[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.10-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.10)
+[![Release](https://img.shields.io/badge/Release-v1.5.1--beta.11-2ea44f?style=flat-square)](https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.11)
 [![Android](https://img.shields.io/badge/Android-8.0%20%E2%80%94%2016%20(API%2026--36)-34A853?logo=android&logoColor=white&style=flat-square)](https://developer.android.com)
 [![Architecture](https://img.shields.io/badge/Arch-arm64--v8a-blue?style=flat-square)](https://developer.android.com/ndk/guides/abis)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
@@ -223,7 +223,7 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 .\gradlew.bat assembleRelease --no-daemon
 ```
 
-### Verification & Signatures (v1.5.1-beta.10)
+### Verification & Signatures (v1.5.1-beta.11)
 ```powershell
 # Verify APK Signature Scheme v2
 & "$env:ANDROID_HOME\build-tools\36.0.0\apksigner.bat" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk
@@ -233,11 +233,13 @@ powershell -ExecutionPolicy Bypass -File scripts/setup-native.ps1
 ```
 
 - **Package**: `com.translive.app`
-- **Version**: `1.5.1-beta.10` (`versionCode: 15110`)
+- **Version**: `1.5.1-beta.11` (`versionCode: 15111`)
 - **Target SDK**: `36` • **Min SDK**: `26`
-- **Official APK SHA-256**: `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
-- **`main` state**: beta.11 is not published yet; screen reliability work is
-  landing on `main` after beta.10.
+- **Official APK SHA-256**: `2094143447e16273b1841131ef3764abf5a2743a1d5492c577e386330d671082`
+- **Signing**: new organizational `RandoTeam` release key. beta.10 and older
+  use the previous key, so **uninstall beta.10 before installing beta.11**.
+  Certificate subject and fingerprint are intentionally not published.
+- **Release notes**: [beta.11](docs/RELEASE_NOTES_v1.5.1-beta.11.md).
 
 ---
 

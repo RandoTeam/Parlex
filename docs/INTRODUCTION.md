@@ -22,12 +22,12 @@ Network access is for model/package downloads and optional currency rates.
 ## Current state
 
 - Package: `com.translive.app`
-- Latest public beta: `v1.5.1-beta.10`
-- `versionCode` 15110, `minSdk` 26, `targetSdk` 36, `arm64-v8a`
+- Latest public beta: `v1.5.1-beta.11`
+- `versionCode` 15111, `minSdk` 26, `targetSdk` 36, `arm64-v8a`
 - Public repository, MIT application code, CI green for unit tests, lint, debug
   APK and native build.
-- `main` is ahead of beta.10 with an unreleased screen-reliability pass; beta.11
-  is not published yet.
+- beta.11 uses a new organizational release key; beta.10 users must uninstall
+  before installing it.
 - Device acceptance is still pending for the latest beta; see
   `docs/DEVICE_QA.md`. The active phase is S10, tracked in
   `docs/S10_SCREEN_RELIABILITY_2026-10-26.md`.

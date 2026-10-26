@@ -12,20 +12,18 @@ Snapshot date: 2026-10-26
 - Remote: `https://github.com/RandoTeam/Parlex.git`
 - Visibility: **public**
 - Branch: `main`
-- Latest public beta: `v1.5.1-beta.10`
-- Release candidate: `v1.5.1-beta.11` built locally (versionCode 15111), pending
-  tag/publish
-- Last public release commit: `bca3bf9` (tag `v1.5.1-beta.10` includes the
-  follow-up docs commit `53488b3`)
-- Current `main` HEAD: `6a4c352` plus the beta.11 release commit
-- APK asset: `Parlex-v1.5.1-beta.10-release.apk` (beta.11 asset pending)
+- Latest public beta: `v1.5.1-beta.11`
+- Tag: `v1.5.1-beta.11` (release code commit `b3726aa`; the tag includes the
+  final release-notes/docs commit)
+- Current `main` HEAD: the beta.11 release-notes commit
+- APK asset: `Parlex-v1.5.1-beta.11-release.apk`
 - APK SHA-256:
   `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
 
 ## App version
 
-- `versionCode`: 15110
-- `versionName`: `1.5.1-beta.10`
+- `versionCode`: 15111
+- `versionName`: `1.5.1-beta.11`
 - `compileSdk` / `targetSdk`: 36 / 36
 - `minSdk`: 26
 - ABI: `arm64-v8a`
@@ -37,17 +35,15 @@ Snapshot date: 2026-10-26
 - Public CI: unit tests, lint, debug APK and native llama.cpp/OpenCL build green.
 - Release APK: v2 signature verified; full `libtranslive.so`; OpenCL stub not
   packaged.
-- Device QA: **not performed for beta.10**.
+- Device QA: **not performed for beta.11**.
 - License: MIT application code; third-party/model terms in
   `THIRD_PARTY_NOTICES.md` and `docs/LEGAL.md`.
 - Signing: beta.11 uses a new generic organizational `RandoTeam` key.
   beta.6–beta.10 use the old key whose certificate subject contained personal
   data. beta.10 and older require uninstall before installing beta.11. Do not
   publish the old subject or fingerprint.
-- Unreleased on `main`: S10 reliability fixes (session lock, Save snapshot,
-  package-aware dismissal, timing logs, finite scan + pulse), screen performance
-  changes and documentation/privacy cleanup. beta.11 APK is built and awaiting
-  publication.
+- Unreleased on `main`: none after the beta.11 release commit. The beta.11 APK
+  is the current public prerelease.
 
 ## Product surfaces
 
@@ -55,7 +51,7 @@ Snapshot date: 2026-10-26
 |---|---|
 | Text translation | Stable; local NMT/LLM + history |
 | Camera | Beta; live overlay restored, gallery language detection fixed, device QA pending |
-| Screen translation | Beta; repeated shortcut/bubble fixes landed, device QA pending |
+| Screen translation | Beta; S10 lock/Save/window fixes landed, device QA pending |
 | Voice dialogue | Beta; TTS timeout/AEC/ASR decoupling landed, acoustic tuning pending |
 | Models | Stable UI; integrity coverage partial |
 | Legal/repo | Public, MIT, privacy/security/issue templates in place |

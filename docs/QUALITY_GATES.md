@@ -34,10 +34,9 @@ A task is done only when:
 - 69 suites / **466 tests / 0 failures**.
 - Lint: **0 errors**, 391 warnings.
 - Public CI: unit tests, lint, debug APK and native build green.
-- Release APK: v2 signature verified; full `libtranslive.so`.
-- Device QA: not yet performed for beta.10.
-- `main` is ahead of the beta.10 tag with the S10 reliability pass; no beta.11
-  APK yet.
+- Release APK: beta.11 v2 signature verified; full `libtranslive.so`.
+- Device QA: not yet performed for beta.11.
+- beta.11 uses the new organizational release key; beta.10 requires uninstall.
 
 ## Known quality gaps
 

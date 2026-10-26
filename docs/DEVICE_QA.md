@@ -17,6 +17,8 @@ No device is currently attached to the build workstation; beta.10 is
 
 ### Install and startup
 
+- [ ] beta.10 → beta.11 requires uninstall first (signing key rotated); confirm
+  the fresh install succeeds and data-loss warning is understood.
 - [ ] Install the signed beta over the previous beta; version code increases.
 - [ ] Cold start, onboarding, no crash.
 - [ ] About shows the actual version and Android API.

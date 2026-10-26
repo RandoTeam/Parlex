@@ -76,9 +76,9 @@ manual checklist in `docs/RELEASES.md`.
 
 ## Current known state
 
-- beta.10 is public and CI-green; no device acceptance yet.
-- beta.11 is built locally with the new organizational release key; it is
-  pending CI/tag/publish. beta.10 users must uninstall before installing it.
+- beta.11 is the current public prerelease, built with the new organizational
+  release key. beta.10 users must uninstall before installing it.
+- No device acceptance yet for beta.11.
 - Camera live translation is wired; placement/OEM behavior needs a device.
 - Screen S10 is the active phase: session lock, Save teardown, window-change
   dismissal, timing logs and finite scan. See
