@@ -132,8 +132,9 @@ Out of scope for this pass:
 - [x] Decide signing key (rotate vs keep) before beta.11: **rotate** to a
   generic organizational `RandoTeam` key.
 - [x] Bump version, build signed APK, verify.
-- [ ] Publish notes/tag/release.
-- [ ] Update `PROJECT_STAGE.md`, `HANDOFF.md`, `README.md` and release notes.
+- [x] Publish notes/tag/release:
+  `https://github.com/RandoTeam/Parlex/releases/tag/v1.5.1-beta.11`
+- [x] Update `PROJECT_STAGE.md`, `HANDOFF.md`, `README.md` and release notes.
 
 ## Validation log
 
@@ -148,6 +149,7 @@ Out of scope for this pass:
 | 2026-10-26 | beta.11 release build | signed, version 15111, SHA-256 `2094143447e16273b1841131ef3764abf5a2743a1d5492c577e386330d671082` |
 | 2026-10-26 | beta.11 signing | new organizational key; beta.10 requires uninstall |
 | 2026-10-26 | beta.11 public CI | run `40342674210` green (unit tests, lint, debug APK, native) |
+| 2026-10-26 | beta.11 publication | prerelease + APK asset + tag `v1.5.1-beta.11` |
 
 ## Device QA pending
 

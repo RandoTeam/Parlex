@@ -14,11 +14,11 @@ Snapshot date: 2026-10-26
 - Branch: `main`
 - Latest public beta: `v1.5.1-beta.11`
 - Tag: `v1.5.1-beta.11` (release code commit `b3726aa`; the tag includes the
-  final release-notes/docs commit)
-- Current `main` HEAD: the beta.11 release-notes commit
+  final release-notes/docs commit `ad26d0f`)
+- Current `main` HEAD: `ad26d0f` plus post-release plan updates
 - APK asset: `Parlex-v1.5.1-beta.11-release.apk`
 - APK SHA-256:
-  `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
+  `2094143447e16273b1841131ef3764abf5a2743a1d5492c577e386330d671082`
 
 ## App version
 
@@ -32,7 +32,8 @@ Snapshot date: 2026-10-26
 
 - Unit tests: **466 / 0 failures** (69 suites).
 - Lint: **0 errors**, 391 warnings.
-- Public CI: unit tests, lint, debug APK and native llama.cpp/OpenCL build green.
+- Public CI: run `40342674210` green for unit tests, lint, debug APK and native
+  llama.cpp/OpenCL build.
 - Release APK: v2 signature verified; full `libtranslive.so`; OpenCL stub not
   packaged.
 - Device QA: **not performed for beta.11**.
