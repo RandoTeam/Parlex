@@ -52,7 +52,8 @@ key's certificate subject contained personal data and is no longer used.
 - **466 tests / 0 failures**, 69 suites.
 - Lint: **0 errors**, 391 warnings.
 - Public GitHub Actions run `40342674210` is green for unit tests, lint, debug
-  APK and native llama.cpp/OpenCL build.
+  APK and native llama.cpp/OpenCL build (release code commit).
+- Tag commit CI run `40344494945` is green for the same checks.
 - `:app:assembleRelease` green.
 - APK contains `lib/arm64-v8a/libtranslive.so`; no OpenCL stub packaged.
 - Signed with APK Signature Scheme v2 using the new organizational key.

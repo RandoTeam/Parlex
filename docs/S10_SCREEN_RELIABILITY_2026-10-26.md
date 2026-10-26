@@ -1,6 +1,6 @@
 # S10 — Screen Reliability & Speed Plan
 
-Status: **active**  
+Status: **active — beta.11 published, device QA pending**  
 Started: 2026-10-26  
 Owner role: Android engineer / QA / technical writer
 

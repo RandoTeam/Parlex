@@ -4,9 +4,9 @@ This is the priority and phase-order source of truth. Historical completed
 phases are preserved in `docs/HISTORICAL_ROADMAP_2026.md`; they are not a promise
 that the current build has every feature.
 
-**Current baseline:** `v1.5.1-beta.10` public release; `main` is 4 commits ahead
-with an unreleased screen-performance pass. CI green, 460 unit tests, no device
-acceptance for beta.10.
+**Current baseline:** `v1.5.1-beta.11` public prerelease, `main` at `bbfed27`,
+CI green, 466 unit tests, no device acceptance for beta.11. beta.11 uses the new
+organizational release key; beta.10 requires uninstall.
 
 ## Rules
 
@@ -30,14 +30,15 @@ safe, and first paint is measurably faster.
 
 - [ ] 10 consecutive shortcut translations without a stale lock/no-op.
 - [ ] Hardware back or explicit close always works; no focus trap.
-- [ ] Save never crashes during overlay teardown.
+- [x] Save never crashes during overlay teardown (snapshot path landed).
 - [ ] Verify foreground-service type does not downgrade with projection attached.
 - [ ] Confirm scan/bubble are not captured into saved screenshots.
-- [ ] Dismiss on a real foreground package change, not on every window event.
-- [ ] FAST_ONLY and FULL_SCAN match the settings copy.
-- [ ] Record trigger → first frame timings in `logcat`.
+- [x] Dismiss on a real foreground package change, not on every window event.
+- [x] FAST_ONLY and FULL_SCAN match the settings copy.
+- [x] Record trigger → first frame timings in `logcat` (`ScreenPerf`).
 
 **Exit:** screen scenarios in `docs/DEVICE_QA.md` pass on at least one device.
+The living checklist is `docs/S10_SCREEN_RELIABILITY_2026-10-26.md`.
 
 ### C10. Camera acceptance and live-overlay correctness — NEXT
 
