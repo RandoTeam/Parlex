@@ -4,9 +4,9 @@ This is the priority and phase-order source of truth. Historical completed
 phases are preserved in `docs/HISTORICAL_ROADMAP_2026.md`; they are not a promise
 that the current build has every feature.
 
-**Current baseline:** `v1.5.1-beta.11` public prerelease, `main` at `bbfed27`,
-CI green, 466 unit tests, no device acceptance for beta.11. beta.11 uses the new
-organizational release key; beta.10 requires uninstall.
+**Current baseline:** `v1.5.1-beta.11` public prerelease, `main` after the
+beta.11 release, CI green, 466 unit tests, no device acceptance for beta.11.
+beta.11 uses the new organizational release key; beta.10 requires uninstall.
 
 ## Rules
 
