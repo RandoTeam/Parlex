@@ -15,7 +15,7 @@ Snapshot date: 2026-10-26
 - Latest public beta: `v1.5.1-beta.11`
 - Tag: `v1.5.1-beta.11` (release code commit `b3726aa`; the tag includes the
   final release-notes/docs commit `ad26d0f`)
-- Current `main` HEAD: `bbfed27` (post-release docs/plan updates)
+- Current `main` HEAD: post-release docs/plan updates (see `git log`)
 - APK asset: `Parlex-v1.5.1-beta.11-release.apk`
 - APK SHA-256:
   `2094143447e16273b1841131ef3764abf5a2743a1d5492c577e386330d671082`
