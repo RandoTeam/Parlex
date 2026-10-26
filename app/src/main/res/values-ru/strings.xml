@@ -293,8 +293,8 @@
     <string name="settings_screen_volume_chord_desc">Экспериментально: сервис доступности перехватывает одновременное нажатие обеих кнопок громкости. Нужны фильтруемые key-события; обычная регулировка громкости не меняется.</string>
     <string name="settings_screen_ocr_mode_title">Режим OCR экрана</string>
     <string name="settings_screen_ocr_mode_desc">Быстрый использует дерево доступности и почти мгновенен. Полный дополнительно распознаёт текст на изображениях, canvas и в играх, но медленнее.</string>
-    <string name="settings_screen_ocr_fast">Быстрый (только доступность)</string>
-    <string name="settings_screen_ocr_fast_desc">Лучше для обычных приложений, списков, чатов и настроек.</string>
+    <string name="settings_screen_ocr_fast">Быстрый (сначала доступность)</string>
+    <string name="settings_screen_ocr_fast_desc">Сначала использует дерево доступности и переходит к OCR только если текстовых узлов нет. Лучше для обычных приложений, списков, чатов и настроек.</string>
     <string name="settings_screen_ocr_full">Полный (доступность + OCR)</string>
     <string name="settings_screen_ocr_full_desc">Переводит также текст внутри изображений, WebView-canvas и игр.</string>
     <string name="settings_screen_trigger_test">Проверить запуск перевода</string>

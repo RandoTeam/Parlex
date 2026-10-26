@@ -54,10 +54,14 @@ class ScreenAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // A window change invalidates the frozen screenshot geometry. The
-        // overlay service decides whether an overlay is currently visible.
+        // A window change may invalidate the frozen screenshot geometry. The
+        // overlay service decides whether the foreground package actually
+        // changed; IME/own windows must not dismiss it.
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            ScreenTranslateOverlayService.onWindowStateChanged()
+            ScreenTranslateOverlayService.onWindowStateChanged(
+                packageName = event.packageName?.toString(),
+                className = event.className?.toString()
+            )
         }
     }
 

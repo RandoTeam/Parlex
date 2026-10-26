@@ -293,8 +293,8 @@
     <string name="settings_screen_volume_chord_desc">Experimental: the accessibility service consumes a simultaneous Volume Up + Volume Down press. Requires the service to receive filtered key events; normal volume control is unchanged.</string>
     <string name="settings_screen_ocr_mode_title">Screen OCR mode</string>
     <string name="settings_screen_ocr_mode_desc">Fast uses the accessibility tree first and is nearly instant. Full also scans raster text (images, canvas, games) with OCR and is slower.</string>
-    <string name="settings_screen_ocr_fast">Fast (accessibility only)</string>
-    <string name="settings_screen_ocr_fast_desc">Best for normal apps, lists, chats and settings screens.</string>
+    <string name="settings_screen_ocr_fast">Fast (accessibility first)</string>
+    <string name="settings_screen_ocr_fast_desc">Uses the accessibility tree first and falls back to OCR only when no text nodes are available. Best for normal apps, lists, chats and settings screens.</string>
     <string name="settings_screen_ocr_full">Full (accessibility + OCR)</string>
     <string name="settings_screen_ocr_full_desc">Also translates text drawn inside images, WebView canvases and games.</string>
     <string name="settings_screen_trigger_test">Test translation trigger</string>

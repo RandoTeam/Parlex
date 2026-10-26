@@ -44,19 +44,27 @@ Out of scope for this pass:
 - 460 unit tests / 0 failures, lint 0 errors, no device acceptance.
 - beta.10 APK is still signed with the old personal-subject certificate.
 
+## Current code status (2026-10-26)
+
+- Session-owned lock, watchdog alignment, Save snapshot, package-aware dismissal
+  and timing logs are implemented on `main`.
+- Finite scan + processing pulse is implemented.
+- Unit tests: **466 / 0 failures**, 69 suites. Lint: **0 errors**.
+- Device acceptance and a beta.11 APK are still pending.
+
 ## P1/P2 findings
 
 | ID | Severity | Finding | Status |
 |---|---|---|---|
-| S10-1 | P1 | Old job can unlock a new session's mutex in `finally` | planned |
-| S10-2 | P1 | 10 s watchdog cancels an LLM path that allows 15 s | planned |
-| S10-3 | P1 | Any `TYPE_WINDOW_STATE_CHANGED` dismisses the overlay | planned |
-| S10-4 | P1 | Save can race overlay teardown and export an untranslated frame | planned |
+| S10-1 | P1 | Old job can unlock a new session's mutex in `finally` | fixed |
+| S10-2 | P1 | 10 s watchdog cancels an LLM path that allows 15 s | fixed |
+| S10-3 | P1 | Any `TYPE_WINDOW_STATE_CHANGED` dismisses the overlay | fixed |
+| S10-4 | P1 | Save can race overlay teardown and export an untranslated frame | fixed |
 | S10-5 | P1 | Hardware back is unproven on a non-focusable overlay | device-pending |
-| S10-6 | P2 | FAST_ONLY copy says "accessibility only" but OCR fallback exists | planned |
-| S10-7 | P2 | No pipeline timing, so "faster" cannot be proven | planned |
-| S10-8 | P2 | No progressive first paint for FULL_SCAN/large screens | planned |
-| S10-9 | P2 | Infinite scan sweep conflicts with the design-system motion rule | planned |
+| S10-6 | P2 | FAST_ONLY copy says "accessibility only" but OCR fallback exists | fixed |
+| S10-7 | P2 | No pipeline timing, so "faster" cannot be proven | fixed |
+| S10-8 | P2 | No progressive first paint for FULL_SCAN/large screens | deferred to device timing |
+| S10-9 | P2 | Infinite scan sweep conflicts with the design-system motion rule | fixed |
 
 ## Steps
 
@@ -75,45 +83,47 @@ Out of scope for this pass:
 
 ### Step 1 — Session lock and watchdog
 
-- [ ] Make the mutex owned by a session token; `finally` releases only its own
+- [x] Make the mutex owned by a session token; `finally` releases only its own
   token.
-- [ ] Add a forced recovery path that cannot be undone by an older job.
-- [ ] Align watchdog with the longest pipeline timeout.
-- [ ] Add pure unit tests for lock ownership/recovery.
-- [ ] Document the lock model in `ARCHITECTURE.md` if behavior changes.
+- [x] Add a forced recovery path that cannot be undone by an older job.
+- [x] Align watchdog with the longest pipeline timeout.
+- [ ] Add a direct lock regression test; current coverage is policy-level plus
+  code review because the service is Android-only.
+- [x] Document the lock model in `ARCHITECTURE.md` if behavior changes.
 
 ### Step 2 — Save and teardown
 
-- [ ] Render the composite on the main thread while the overlay is alive.
-- [ ] Export only from an immutable bitmap/boxes snapshot.
-- [ ] Recycle only owned copies; never recycle the frozen source twice.
-- [ ] Add a teardown/save regression test where practical.
+- [x] Render the composite on the main thread while the overlay is alive.
+- [x] Export only from an immutable bitmap/boxes snapshot.
+- [x] Recycle only owned copies; never recycle the frozen source twice.
+- [ ] Add a bitmap-diff/teardown regression test; still missing.
 
 ### Step 3 — Window dismissal and back
 
-- [ ] Pass source package/class from the accessibility event.
-- [ ] Dismiss only when the foreground package actually changes; ignore our own
+- [x] Pass source package/class from the accessibility event.
+- [x] Dismiss only when the foreground package actually changes; ignore our own
   package and IME windows.
-- [ ] Keep a short guard after showing the overlay.
-- [ ] Add pure policy tests.
+- [x] Keep a short guard after showing the overlay.
+- [x] Add pure policy tests.
 - [ ] Verify back/edge-swipe on a device; document the guaranteed close paths.
 
 ### Step 4 — Speed and progressive paint
 
-- [ ] Add `screen_perf` logs for trigger, capture, nodes, OCR, translation and
+- [x] Add `screen_perf` logs for trigger, capture, nodes, OCR, translation and
   first frame.
 - [ ] Add a fast first paint from accessibility candidates when FULL_SCAN will
-  also run.
+  also run. Deferred until device timings show OCR/translation is the dominant
+  cost; doing it before the P1 fixes are device-verified adds risk.
 - [ ] Update the overlay after OCR refinement without a second full-screen flash.
 - [ ] Measure on a device; record numbers in this file.
 
 ### Step 5 — Animation
 
-- [ ] Replace the infinite sweep with a finite sweep followed by a quiet
+- [x] Replace the infinite sweep with a finite sweep followed by a quiet
   processing pulse.
-- [ ] Stop all animators on reset/error/timeout.
-- [ ] Respect reduced motion.
-- [ ] Confirm scan/bubble are never captured into Save output.
+- [x] Stop all animators on reset/error/timeout.
+- [x] Respect reduced motion.
+- [ ] Confirm scan/bubble are never captured into Save output on a device.
 
 ### Step 6 — Validation and beta.11
 
@@ -130,6 +140,9 @@ Out of scope for this pass:
 | 2026-10-26 | Documentation audit | complete; 5 stale docs and one privacy issue found |
 | 2026-10-26 | Baseline unit tests | 460 / 0 failures |
 | 2026-10-26 | Baseline lint | 0 errors |
+| 2026-10-26 | S10 lock/save/window fixes | compile green |
+| 2026-10-26 | Unit tests after fixes | 466 / 0 failures, 69 suites |
+| 2026-10-26 | Lint after fixes | 0 errors, 391 warnings |
 
 ## Device QA pending
 

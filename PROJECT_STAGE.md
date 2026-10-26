@@ -30,7 +30,7 @@ Snapshot date: 2026-10-26
 
 ## Verified state
 
-- Unit tests: **460 / 0 failures** (68 suites).
+- Unit tests: **466 / 0 failures** (69 suites).
 - Lint: **0 errors**, 391 warnings.
 - Public CI: unit tests, lint, debug APK and native llama.cpp/OpenCL build green.
 - Release APK: v2 signature verified; full `libtranslive.so`; OpenCL stub not
@@ -41,8 +41,9 @@ Snapshot date: 2026-10-26
 - Signing: beta.6–beta.10 use the same key. Its certificate subject still
   contains personal data; a rotation decision is pending. Do not publish the
   subject or fingerprint.
-- Unreleased on `main`: screen performance changes (FAST_ONLY default, 900 ms
-  scan loop) and documentation/privacy cleanup. No beta.11 APK exists yet.
+- Unreleased on `main`: S10 reliability fixes (session lock, Save snapshot,
+  package-aware dismissal, timing logs, finite scan + pulse), screen performance
+  changes and documentation/privacy cleanup. No beta.11 APK exists yet.
 
 ## Product surfaces
 

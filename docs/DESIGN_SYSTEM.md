@@ -69,12 +69,14 @@ No all-caps labels. No fake-bold everywhere. Letter spacing 0 by default.
 |---|---|---|
 | Press scale | 90 ms down / 160 ms up | spring/overshoot |
 | Control reveal | 180 ms | decelerate |
-| Screen scan | 900 ms per sweep; repeat while processing | decelerate; skip when animators disabled |
+| Screen scan | 900 ms per sweep, two finite sweeps, then a quiet processing pulse | decelerate; skip when animators disabled |
 | Overlay block reveal | 240–360 ms, stagger ≤ 350 ms | decelerate |
 | State color | 220–260 ms | standard |
 
 Respect `ValueAnimator.areAnimatorsEnabled()` / system reduced motion. Do not
-animate opacity of large text blocks indefinitely.
+animate opacity of large text blocks indefinitely. The screen scan is two finite
+sweeps; the following perimeter pulse is a status indicator, not a decorative
+loop.
 
 ## Surfaces
 

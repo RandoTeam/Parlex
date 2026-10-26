@@ -56,7 +56,7 @@ and text that replaces the source text instead of decorating it.
   - a thin white leading line,
   - a wide, low-opacity beam,
   - a Pixel-blue perimeter halo.
-- Duration 900 ms per sweep; a finite number of sweeps is followed by a quiet
+- Duration 900 ms per sweep; two finite sweeps are followed by a quiet
   processing pulse while OCR/translation is still running. It should read as
   "the screen is being read", not as a loading screen.
 - The effect is non-touchable and disappears before the translation overlay.

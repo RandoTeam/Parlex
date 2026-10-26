@@ -31,12 +31,13 @@ A task is done only when:
 
 ## Current verified baseline (2026-10-26)
 
-- 68 suites / **460 tests / 0 failures**.
+- 69 suites / **466 tests / 0 failures**.
 - Lint: **0 errors**, 391 warnings.
 - Public CI: unit tests, lint, debug APK and native build green.
 - Release APK: v2 signature verified; full `libtranslive.so`.
 - Device QA: not yet performed for beta.10.
-- `main` is 4 commits ahead of the beta.10 tag; no beta.11 APK yet.
+- `main` is ahead of the beta.10 tag with the S10 reliability pass; no beta.11
+  APK yet.
 
 ## Known quality gaps
 

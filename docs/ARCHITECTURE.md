@@ -67,8 +67,15 @@ audio focus and turn timing are coordinated by the ViewModel.
 - OCR, decoding, model work and file IO on `Dispatchers.IO`/`Default`.
 - One active capture job per surface; cancellation must be rethrown, not turned
   into an error state.
-- The screen translation mutex is owned by the job that acquired it; watchdog
-  recovery releases a stale lock only when no job is active.
+- The screen translation mutex is owned by a session token. A cancelled job's
+  `finally` may release only its own token, so it cannot unlock a newer session.
+  The watchdog forces recovery only when no job is active, or when the pipeline
+  exceeds the longest timeout.
+- Overlay Save renders the composite on the main thread and exports from an
+  immutable bitmap snapshot; it never reads the live overlay from a background
+  thread.
+- Overlay dismissal is driven by a foreground package change, not by every
+  window event. IME windows and Parlex's own overlay are ignored.
 - MediaProjection requires a foreground service of type `mediaProjection` to be
   running before `getMediaProjection()` on Android 14+.
 - The floating bubble must not be re-added above the full-screen overlay; hide it

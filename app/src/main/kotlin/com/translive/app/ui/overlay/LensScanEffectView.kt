@@ -36,7 +36,8 @@ enum class ScanEffectState {
     IDLE,
     SCANNING,
     REVEALING,
-    SETTLED
+    SETTLED,
+    PROCESSING
 }
 
 /**
@@ -60,6 +61,8 @@ class LensScanEffectView @JvmOverloads constructor(
     private var transitionProgress: Float = 0f
     private var scanAnimator: ValueAnimator? = null
     private var revealAnimator: ValueAnimator? = null
+    private var processingPulseAnimator: ValueAnimator? = null
+    private var processingPulse: Float = 1f
 
     private val density: Float = context.resources.displayMetrics.density
     private val beamHeight: Float = 120f * density
@@ -194,6 +197,7 @@ class LensScanEffectView @JvmOverloads constructor(
             ScanEffectState.SCANNING -> 1f
             ScanEffectState.REVEALING -> 1f
             ScanEffectState.SETTLED -> 0.85f
+            ScanEffectState.PROCESSING -> 0.9f
             ScanEffectState.IDLE -> 0f
         }
         vignettePaint.alpha = (globalAlpha * 255).toInt()
@@ -203,8 +207,9 @@ class LensScanEffectView @JvmOverloads constructor(
         val edgeInset = 2f * density
         val edgeCornerRadius = 24f * density
         tempRectF.set(edgeInset, edgeInset, viewWidth - edgeInset, viewHeight - edgeInset)
-        perimeterEdgeHaloPaint.alpha = (globalAlpha * 180).toInt()
-        perimeterEdgeGlowPaint.alpha = (globalAlpha * 240).toInt()
+        val pulse = if (currentState == ScanEffectState.PROCESSING) processingPulse else 1f
+        perimeterEdgeHaloPaint.alpha = (globalAlpha * 180 * pulse).toInt()
+        perimeterEdgeGlowPaint.alpha = (globalAlpha * 240 * pulse).toInt()
         canvas.drawRoundRect(tempRectF, edgeCornerRadius, edgeCornerRadius, perimeterEdgeHaloPaint)
         canvas.drawRoundRect(tempRectF, edgeCornerRadius, edgeCornerRadius, perimeterEdgeGlowPaint)
 
@@ -359,7 +364,9 @@ class LensScanEffectView @JvmOverloads constructor(
         scanAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = scanDurationMs
             interpolator = AccelerateDecelerateInterpolator()
-            repeatCount = if (isContinuousLoop) ValueAnimator.INFINITE else 0
+            // Two finite sweeps, then a quiet processing pulse. This keeps the
+            // motion meaningful without an infinite decorative sweep.
+            repeatCount = if (isContinuousLoop) ValueAnimator.INFINITE else 1
             repeatMode = ValueAnimator.RESTART
             addUpdateListener { animator ->
                 scanProgress = animator.animatedValue as Float
@@ -367,11 +374,28 @@ class LensScanEffectView @JvmOverloads constructor(
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    if (!isContinuousLoop && currentState == ScanEffectState.SCANNING) {
+                    if (isContinuousLoop) return
+                    if (currentState == ScanEffectState.SCANNING) {
+                        currentState = ScanEffectState.PROCESSING
+                        startProcessingPulse()
                         onScanCompletedListener?.invoke()
                     }
                 }
             })
+            start()
+        }
+    }
+
+    private fun startProcessingPulse() {
+        processingPulseAnimator?.cancel()
+        processingPulseAnimator = ValueAnimator.ofFloat(0.55f, 1f).apply {
+            duration = 1_200L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener { animator ->
+                processingPulse = animator.animatedValue as Float
+                invalidate()
+            }
             start()
         }
     }
@@ -381,6 +405,9 @@ class LensScanEffectView @JvmOverloads constructor(
             visibility = VISIBLE
         }
 
+        processingPulseAnimator?.cancel()
+        processingPulseAnimator = null
+        processingPulse = 1f
         activeBoxes.clear()
         activeBoxes.addAll(boxes)
         currentState = ScanEffectState.REVEALING
@@ -411,6 +438,7 @@ class LensScanEffectView @JvmOverloads constructor(
         activeBoxes.clear()
         scanProgress = 0f
         transitionProgress = 0f
+        processingPulse = 1f
         visibility = GONE
         invalidate()
     }
@@ -420,6 +448,8 @@ class LensScanEffectView @JvmOverloads constructor(
         scanAnimator = null
         revealAnimator?.cancel()
         revealAnimator = null
+        processingPulseAnimator?.cancel()
+        processingPulseAnimator = null
     }
 
     @SuppressLint("ClickableViewAccessibility")
