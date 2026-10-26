@@ -106,8 +106,8 @@ release.
 - Size: 122,563,212 bytes (116.9 MB)
 - SHA-256: `baf615c3f468368ea236cfb02318ee39db05df76df5c43deeaa969b1c22ec95a`
 - Signature: APK Signature Scheme v2, new 2026 Parlex release key
-- Certificate: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
-- Certificate SHA-256: `ffd61486fd4cd768b30aad0276ceb41d2c6b1cb9d92fe6ab23f550b8ef37200a`
+- Signature: APK Signature Scheme v2 (Parlex release key; certificate details are intentionally not published)
+
 - Package: `com.translive.app`
 - `versionCode`: 15106
 - `versionName`: `1.5.1-beta.6`

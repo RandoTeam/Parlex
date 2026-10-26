@@ -268,6 +268,8 @@ Every line of Kotlin, JNI C++, and shader code, as well as hardware profiling fo
 ## Documentation
 
 - [Documentation index](docs/INDEX.md)
+- [Project introduction](docs/INTRODUCTION.md)
+- [Project rules](docs/PROJECT_RULES.md)
 - [Product vision](docs/PRODUCT_VISION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Design system](docs/DESIGN_SYSTEM.md)

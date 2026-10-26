@@ -64,9 +64,8 @@ Code commit: `bca3bf9` - live-overlay glass cards and beta.10 version.
 - APK: `Parlex-v1.5.1-beta.10-release.apk`
 - Size: 122,562,872 bytes (116.9 MB)
 - SHA-256: `abe26eb4907079940d6680ec7686026f26a983e87062e247fb8528a76ea6e340`
-- Signature: APK Signature Scheme v2
-- Certificate: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
-- Certificate SHA-256: `ffd61486fd4cd768b30aad0276ceb41d2c6b1cb9d92fe6ab23f550b8ef37200a`
+- Signature: APK Signature Scheme v2 (Parlex release key; certificate details are intentionally not published)
+
 - Package: `com.translive.app`
 - `versionCode`: 15110
 - `versionName`: `1.5.1-beta.10`

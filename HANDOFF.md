@@ -31,7 +31,7 @@ for model/package acquisition and optional currency rates.
 4. `ROADMAP.md` - current/next phases.
 5. `docs/PIPELINE.md` - development/release process.
 6. `docs/QUALITY_GATES.md` - Definition of Done.
-7. `AGENTS.md` - agent operating contract.
+7. `docs/PROJECT_RULES.md` - operating rules for maintainers and agents.
 
 ## Clean clone
 

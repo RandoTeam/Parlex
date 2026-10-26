@@ -86,9 +86,8 @@ Code commit: `02cc97f` - camera live overlay, gallery language detection and dea
 - APK: `Parlex-v1.5.1-beta.9-release.apk`
 - Size: 122,562,876 bytes (116.9 MB)
 - SHA-256: `640ad42f1b91160a6870a859f26ef830eded60d78c86f0d4344ee594963cfee6`
-- Signature: APK Signature Scheme v2
-- Certificate: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
-- Certificate SHA-256: `ffd61486fd4cd768b30aad0276ceb41d2c6b1cb9d92fe6ab23f550b8ef37200a`
+- Signature: APK Signature Scheme v2 (Parlex release key; certificate details are intentionally not published)
+
 - Package: `com.translive.app`
 - `versionCode`: 15109
 - `versionName`: `1.5.1-beta.9`

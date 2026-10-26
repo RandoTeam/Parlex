@@ -86,9 +86,8 @@ over beta.6 without uninstalling or losing app data.
 - APK: `Parlex-v1.5.1-beta.7-release.apk`
 - Size: 122,563,216 bytes (116.9 MB)
 - SHA-256: `9b2365e669df2f2fe05aac95118b81b2e9eb5c05460eb9417c34e958c5eb9cf3`
-- Signature: APK Signature Scheme v2
-- Certificate: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
-- Certificate SHA-256: `ffd61486fd4cd768b30aad0276ceb41d2c6b1cb9d92fe6ab23f550b8ef37200a`
+- Signature: APK Signature Scheme v2 (Parlex release key; certificate details are intentionally not published)
+
 - Package: `com.translive.app`
 - `versionCode`: 15107
 - `versionName`: `1.5.1-beta.7`

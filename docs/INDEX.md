@@ -8,6 +8,7 @@ links to them.
 
 | Document | Purpose |
 |---|---|
+| [INTRODUCTION.md](INTRODUCTION.md) | Short project introduction and current state |
 | [PRODUCT_VISION.md](PRODUCT_VISION.md) | Why Parlex exists, target users, product principles and non-goals |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Code map, data flows, native boundaries and threading model |
 | [../ROADMAP.md](../ROADMAP.md) | Near/mid/long-term phases with exit criteria |
@@ -19,7 +20,7 @@ links to them.
 | [LEGAL.md](LEGAL.md) | Code/model/license boundaries |
 | [../PRIVACY.md](../PRIVACY.md) | Data handling and network endpoints |
 | [../SECURITY.md](../SECURITY.md) | Private vulnerability reporting |
-| [../AGENTS.md](../AGENTS.md) | Rules for AI agents and maintainers |
+| [PROJECT_RULES.md](PROJECT_RULES.md) | Operating rules for maintainers and AI agents |
 
 ## Current snapshot
 
@@ -61,6 +62,6 @@ These are kept for traceability, not as current truth:
 2. `docs/PIPELINE.md` decides how work moves and when it may ship.
 3. `docs/QUALITY_GATES.md` decides whether a phase is done.
 4. `PROJECT_STAGE.md` is the latest verified snapshot, not a wish list.
-5. `AGENTS.md` defines agent autonomy and mandatory behavior.
+5. `docs/PROJECT_RULES.md` defines agent autonomy and mandatory behavior.
 6. If two documents disagree, fix the older one or mark it historical; do not
    silently follow stale claims.

@@ -76,9 +76,8 @@ adding Rust. Details: `docs/CAMERA_REDESIGN_2026-10-22.md`.
 - APK: `Parlex-v1.5.1-beta.8-release.apk`
 - Size: 122,563,384 bytes (116.9 MB)
 - SHA-256: `11cfe0a39c856f463ce26a3c12c856cd831669bd8f45f7490b80acebeb49d3bf`
-- Signature: APK Signature Scheme v2
-- Certificate: `CN=Ilia Vlasov, OU=Parlex, O=RandoTeam, L=Moscow, C=RU`
-- Certificate SHA-256: `ffd61486fd4cd768b30aad0276ceb41d2c6b1cb9d92fe6ab23f550b8ef37200a`
+- Signature: APK Signature Scheme v2 (Parlex release key; certificate details are intentionally not published)
+
 - Package: `com.translive.app`
 - `versionCode`: 15108
 - `versionName`: `1.5.1-beta.8`
